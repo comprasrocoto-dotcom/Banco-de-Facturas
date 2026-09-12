@@ -160,7 +160,7 @@ async function entrar(){
 }
 async function salir(){await SB.auth.signOut();location.reload();}
 
-let arts=[], provs=[], cat=[], npLineas=0;
+let arts=[], provs=[], cat=[], minmax=[], npLineas=0;
 async function nuevoPedido(){
   $("np_err").textContent=""; $("np_lineas").innerHTML=""; npLineas=0;
   const hoy=new Date().toISOString().slice(0,10);
@@ -172,6 +172,8 @@ async function nuevoPedido(){
     arts=b.data||[];
     const c=await SB.from("catalogo_compras").select("codigo_barras,id_proveedor,precio_negociado");
     cat=c.data||[];
+    const m=await SB.from("maximos_minimos").select("articulo,almacen,minimo,maximo");
+    minmax=m.data||[];
   }
   $("np_prov").innerHTML='<option value="">— elegí proveedor —</option>'+provs.map(x=>`<option value="${x.id}">${x.razon_social||x.nombre_comercial}</option>`).join("");
   if(perfil.rol==="sede"){
@@ -214,7 +216,16 @@ function calcularTotal(){
     const a=r.querySelector("select"), c=r.querySelector("input[type=number]");
     if(!a) return;
     const pr=precioDe(a.value), cant=Number(c.value||0);
-    const sp=r.querySelector("span"); if(sp) sp.textContent= pr? money(pr): "s/precio";
+    const sp=r.querySelector("span");
+    const nom=(a.options[a.selectedIndex]?.text||"").replace(/\s*\(.*\)$/,"").trim().toUpperCase();
+    const mm=minmax.find(x=>(x.articulo||"").toUpperCase().trim()===nom);
+    let aviso="";
+    if(mm){
+      const mi=Number(mm.minimo||0), ma=Number(mm.maximo||0);
+      if(mi>0 && cant>0 && cant<mi) aviso=" ⚠️ mín "+mi.toFixed(2);
+      else aviso=" (mín "+mi.toFixed(1)+" / máx "+ma.toFixed(1)+")";
+    }
+    if(sp) sp.textContent=(pr? money(pr): "s/precio")+aviso;
     tot += pr*cant;
   });
   $("np_total").textContent="Total: "+money(tot);
@@ -233,7 +244,7 @@ async function guardarPedido(){
   const total = filas.reduce((t,f)=>t+precioDe(f.codigo)*f.cant,0);
   const pv = provs.find(x=>x.id===prov)||{};
   const {data,error}=await SB.from("pedidos").insert({
-    numero:"WEB-"+Date.now().toString().slice(-8), marca_id:marcaId, sede_id:sedeId,
+    numero:(await SB.rpc("siguiente_pedido")).data || ("WEB-"+Date.now().toString().slice(-8)), marca_id:marcaId, sede_id:sedeId,
     sede_texto:sedeNom, proveedor: pv.razon_social||pv.nombre_comercial, proveedor_texto: pv.razon_social||pv.nombre_comercial,
     nit_proveedor: pv.nit, fecha:$("np_fecha").value||null, total:total||null,
     tipo:$("np_tipo").value, fecha_entrega:$("np_entrega").value||null,
@@ -286,10 +297,21 @@ function pintarPedidos(){
         ${est} ${erp} ${am}
         <button onclick="verLineas(${p.id},this)">Ver líneas</button>
         ${!p.factura_cufe?`<button class="s" onclick="amarrarPedido(${p.id})">🔗 Amarrar a factura</button>`:""}
+        ${(perfil.rol==="admin"||perfil.rol==="pagos"||perfil.rol==="sede")?`<button onclick="ponerErp(${p.id})">✎ ${p.pedido_erp?"Nº ERP":"Poner Nº ERP"}</button>`:""}
       </div>
       <div id="lin_${p.id}"></div>
     </div>`;
   }).join("") + (l.length>300?'<div class="vacio">Mostrando 300 de '+l.length+' — usá el buscador para afinar.</div>':"");
+}
+async function ponerErp(id){
+  const p=pedidos.find(x=>x.id===id)||{};
+  const v=prompt("Nº del pedido en el ERP (ej: FCRC3193)\nPedido "+(p.numero||"")+" · "+(p.proveedor_texto||""), p.pedido_erp||"");
+  if(v===null) return;
+  const {error}=await SB.from("pedidos").update({pedido_erp:v.trim()||null}).eq("id",id);
+  if(error){alert("No se pudo guardar: "+error.message);return;}
+  await SB.from("historial").insert({accion:"Nº pedido ERP",detalle:v.trim(),usuario:usuario.id}).then(()=>{},()=>{});
+  const i=pedidos.findIndex(x=>x.id===id); if(i>=0) pedidos[i].pedido_erp=v.trim()||null;
+  pintarPedidos();
 }
 async function verLineas(id,btn){
   const c=$("lin_"+id);
