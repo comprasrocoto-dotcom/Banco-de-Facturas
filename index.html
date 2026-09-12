@@ -9,37 +9,45 @@
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <style>
-:root{--bg:#0d1117;--card:#161b22;--line:#30363d;--txt:#e6edf3;--mut:#8b949e;--ok:#3fb950;--warn:#d29922;--bad:#f85149;--blue:#58a6ff}
+:root{--bg:#f4f6f9;--card:#ffffff;--line:#e2e8f0;--txt:#1e293b;--mut:#64748b;
+--ok:#15803d;--warn:#b45309;--bad:#b91c1c;--blue:#0369a1;--accent:#0f766e;--accentr:#115e59}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-header{padding:16px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;flex-wrap:wrap;position:sticky;top:0;background:var(--bg);z-index:5}
-h1{font-size:17px;margin:0;letter-spacing:.5px}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.55 "Segoe UI",-apple-system,BlinkMacSystemFont,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+header{padding:14px 22px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;flex-wrap:wrap;position:sticky;top:0;z-index:5;box-shadow:0 1px 3px rgba(15,23,42,.06)}
+h1{font-size:16px;margin:0;letter-spacing:.3px;font-weight:700}
 .sp{flex:1}
-.chip{padding:6px 12px;border:1px solid var(--line);border-radius:999px;cursor:pointer;font-size:13px;color:var(--mut);background:none}
-.chip.on{border-color:var(--blue);color:var(--blue)}
-.wrap{max-width:1080px;margin:0 auto;padding:20px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
+.chip{padding:6px 13px;border:1px solid var(--line);border-radius:999px;cursor:pointer;font-size:13px;font-weight:600;color:var(--mut);background:#fff;transition:.15s}
+.chip:hover{border-color:#cbd5e1;color:var(--txt)}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.wrap{max-width:1120px;margin:0 auto;padding:22px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px;box-shadow:0 1px 2px rgba(15,23,42,.05)}
 .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-.emisor{font-weight:600;font-size:16px}
+.emisor{font-weight:650;font-size:15px;color:#0f172a}
 .mut{color:var(--mut);font-size:13px}
-.total{font-size:20px;font-weight:700;margin-left:auto}
-button{cursor:pointer;border-radius:8px;border:1px solid var(--line);background:#21262d;color:var(--txt);padding:8px 14px;font-size:13px}
-button.p{background:#238636;border-color:#2ea043}
-button.s{background:#1f6feb;border-color:#388bfd}
-button.d{background:transparent;color:var(--bad);border-color:#5a1d1d}
-.badge{font-size:11px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--mut)}
-.st-pool{color:var(--warn);border-color:var(--warn)}
-.st-asignada{color:var(--blue);border-color:var(--blue)}
-.st-sellada{color:var(--ok);border-color:var(--ok)}
-#login{max-width:380px;margin:12vh auto;padding:28px}
-input,textarea,select{width:100%;padding:10px;margin:8px 0;background:#0d1117;border:1px solid var(--line);border-radius:8px;color:var(--txt);font:inherit}
+.total{font-size:19px;font-weight:750;margin-left:auto;color:#0f172a;letter-spacing:-.3px}
+button{cursor:pointer;border-radius:9px;border:1px solid var(--line);background:#f8fafc;color:#334155;padding:8px 14px;font-size:13px;font-weight:600;transition:.15s}
+button:hover{background:#f1f5f9;border-color:#cbd5e1}
+button.p{background:var(--accent);border-color:var(--accent);color:#fff}
+button.p:hover{background:var(--accentr);border-color:var(--accentr)}
+button.s{background:var(--blue);border-color:var(--blue);color:#fff}
+button.s:hover{filter:brightness(.92)}
+button.d{background:#fff;color:var(--bad);border-color:#fecaca}
+button.d:hover{background:#fef2f2}
+.badge{font-size:11.5px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--mut);background:#f8fafc;font-weight:600}
+.st-pool{color:#92400e;border-color:#fcd34d;background:#fffbeb}
+.st-asignada{color:#075985;border-color:#7dd3fc;background:#f0f9ff}
+.st-sellada{color:#166534;border-color:#86efac;background:#f0fdf4}
+#login{max-width:390px;margin:10vh auto;padding:30px;box-shadow:0 8px 28px rgba(15,23,42,.10)}
+input,textarea,select{width:100%;padding:10px 12px;margin:8px 0;background:#fff;border:1px solid var(--line);border-radius:9px;color:var(--txt);font:inherit;transition:.15s}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(15,118,110,.12)}
 textarea{min-height:80px;resize:vertical}
-h2{font-size:14px;color:var(--mut);text-transform:uppercase;letter-spacing:1px;margin:22px 0 10px}
-.modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;padding:20px;z-index:20}
+h2{font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:1px;margin:22px 0 10px;font-weight:700}
+.modal{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;padding:20px;z-index:20}
 .modal.on{display:flex}
-.modal .card{max-width:460px;width:100%}
+.modal .card{max-width:470px;width:100%;max-height:92vh;overflow:auto;box-shadow:0 20px 50px rgba(15,23,42,.25);border:none}
 .err{color:var(--bad);font-size:13px;min-height:18px}
-.vacio{text-align:center;color:var(--mut);padding:40px}
+.vacio{text-align:center;color:var(--mut);padding:44px;background:#fff;border:1px dashed var(--line);border-radius:14px}
+.login-tag{display:inline-block;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
 </style>
 </head>
 <body>
@@ -194,8 +202,12 @@ async function filtrarArticulos(){
     const nom=pv.razon_social||pv.nombre_comercial||"";
     $("np_arts_info").textContent="Buscando lo que se le compra a "+nom+"...";
     const {data}=await SB.from("proveedor_articulos")
-        .select("codigo,insumo,veces").eq("proveedor",nom).order("veces",{ascending:false}).limit(500);
+        .select("codigo,insumo,veces").eq("proveedor_id",id).order("veces",{ascending:false}).limit(500);
     provArts=data||[];
+    if(!provArts.length){
+      const alt=await SB.from("proveedor_articulos").select("codigo,insumo,veces").ilike("proveedor",nom.split(" ")[0]+"%").order("veces",{ascending:false}).limit(500);
+      provArts=alt.data||[];
+    }
     $("np_arts_info").textContent = provArts.length
       ? "✅ "+provArts.length+" artículos que le comprás a este proveedor (los más frecuentes primero)"
       : "⚠️ Este proveedor no tiene compras en el histórico — te muestro todos los artículos";
@@ -208,6 +220,9 @@ function opcionesArticulos(){
   if(provArts.length){
     return provArts.map(a=>`<option value="${a.codigo||a.insumo}">${a.insumo||a.codigo}</option>`).join("");
   }
+  if($("np_prov").value){
+    return '<option value="__TODOS__">— este proveedor no tiene historial: elegí acá para ver TODOS los artículos —</option>';
+  }
   const id=Number($("np_prov").value||0);
   const delProv=new Set(cat.filter(c=>c.id_proveedor===id).map(c=>c.codigo_barras));
   const lista = delProv.size ? arts.filter(a=>delProv.has(a.codigo_barras)) : arts;
@@ -218,8 +233,9 @@ function precioDe(codigo){
   const c=cat.find(x=>x.codigo_barras===codigo && x.id_proveedor===prov) || cat.find(x=>x.codigo_barras===codigo);
   return c? Number(c.precio_negociado||0) : 0;
 }
-function agregarLinea(){
+function agregarLinea(verTodos){
   npLineas++;
+  if(verTodos) provArts=[];
   const id="nl"+npLineas;
   const div=document.createElement("div");
   div.className="row"; div.id=id; div.style.marginTop="6px";
