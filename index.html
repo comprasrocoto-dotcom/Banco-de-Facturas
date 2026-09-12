@@ -242,11 +242,18 @@ async function filtrarArticulos(){
   $("np_lineas").innerHTML=""; agregarLinea(); calcularTotal();
 }
 function listaArticulos(){
-  if(provArts.length) return provArts.map(a=>({codigo:a.codigo||a.insumo, nombre:a.insumo||a.codigo}));
+  const uDe=cd=>((arts.find(a=>a.codigo_barras===cd)||{}).unimedida_compra)||"";
+  if(provArts.length) return provArts.map(a=>({codigo:a.codigo||a.insumo, nombre:a.insumo||a.codigo, unidad:uDe(a.codigo)}));
   const id=Number($("np_prov").value||0);
   const delProv=new Set(cat.filter(c=>c.id_proveedor===id).map(c=>c.codigo_barras));
   const l = delProv.size ? arts.filter(a=>delProv.has(a.codigo_barras)) : arts;
-  return l.map(a=>({codigo:a.codigo_barras, nombre:(a.articulo_hiopos||a.articulo_comercial||"")+(a.unimedida_compra?" ("+a.unimedida_compra+")":"")}));
+  return l.map(a=>({codigo:a.codigo_barras, unidad:a.unimedida_compra||"",
+                    nombre:(a.articulo_hiopos||a.articulo_comercial||"")+(a.unimedida_compra?" ("+a.unimedida_compra+")":"")}));
+}
+function unidadDe(nombre){
+  const l=listaArticulos();
+  const x=l.find(a=>a.nombre===nombre) || l.find(a=>a.codigo===nombre || a.codigo===codigoDe(nombre));
+  return x? (x.unidad||"") : "";
 }
 function codigoDe(nombre){
   const l=listaArticulos();
@@ -288,7 +295,8 @@ function calcularTotal(){
       if(mi>0 && cant>0 && cant<mi) aviso=" ⚠️ mín "+mi.toFixed(2);
       else aviso=" (mín "+mi.toFixed(1)+" / máx "+ma.toFixed(1)+")";
     }
-    if(sp) sp.textContent=(pr? money(pr): "s/precio")+aviso;
+    const un=unidadDe(a.value);
+    if(sp) sp.textContent=(un? un+" · ":"")+(pr? money(pr): "s/precio")+aviso;
     tot += pr*cant;
   });
   $("np_total").textContent="Total: "+money(tot);
@@ -298,7 +306,7 @@ async function guardarPedido(){
   if(!prov){$("np_err").textContent="Elegí el proveedor.";return;}
   const filas=[...$("np_lineas").querySelectorAll("div.row")].map(r=>{
     const a=r.querySelector("input[list]"), c=r.querySelector("input[type=number]");
-    return a? {codigo:codigoDe(a.value), cant:Number(c.value||0), nombre:a.value}:null;
+    return a? {codigo:codigoDe(a.value), cant:Number(c.value||0), nombre:a.value, unidad:unidadDe(a.value)}:null;
   }).filter(x=>x && x.codigo && x.cant>0);
   if(!filas.length){$("np_err").textContent="Agregá al menos un artículo con cantidad.";return;}
   const sedeId = perfil.rol==="sede" ? perfil.sede_id : Number($("np_sede").value);
@@ -315,7 +323,7 @@ async function guardarPedido(){
     estado:"pendiente", subido_por:usuario.id
   }).select("id").single();
   if(error){$("np_err").textContent="No se pudo guardar: "+error.message;return;}
-  const rows=filas.map(f=>({pedido_id:data.id, codigo:f.codigo, insumo:f.nombre, cantidad:f.cant}));
+  const rows=filas.map(f=>({pedido_id:data.id, codigo:f.codigo, insumo:f.nombre, cantidad:f.cant, unidad:f.unidad||null}));
   const l=await SB.from("pedido_lineas").insert(rows);
   if(l.error){$("np_err").textContent="El pedido quedó, pero fallaron las líneas: "+l.error.message;return;}
   await SB.from("historial").insert({accion:"pedido creado desde la web",detalle:"WEB "+sedeNom,usuario:usuario.id}).then(()=>{},()=>{});
@@ -758,6 +766,7 @@ function lineaEdit(id, insumo, cant, codigo){
     <input list="dll_${uid}" value="${(insumo||"").replace(/"/g,"&quot;")}" placeholder="🔎 artículo" style="flex:3;margin:0">
     <datalist id="dll_${uid}">${L.map(a=>`<option value="${a.nombre.replace(/"/g,"&quot;")}">`).join("")}</datalist>
     <input type="number" step="0.001" value="${cant!=null?cant:1}" style="flex:1;margin:0" placeholder="cant.">
+    <span class="mut" style="min-width:80px">${unidadDe(insumo)||""}</span>
     <button class="d" onclick="this.parentNode.remove()">✕</button></div>`;
 }
 async function editarPedido(id){
@@ -800,10 +809,10 @@ async function guardarEdicion(){
     const cant=Number(c.value||0); if(cant<=0) continue;
     const cod=r.dataset.cod || codigoDe(a.value);
     if(r.dataset.id){
-      await SB.from("pedido_lineas").update({cantidad:cant, insumo:a.value, codigo:cod}).eq("id",Number(r.dataset.id));
+      await SB.from("pedido_lineas").update({cantidad:cant, insumo:a.value, codigo:cod, unidad:unidadDe(a.value)||null}).eq("id",Number(r.dataset.id));
       vivos.push(Number(r.dataset.id));
     }else if(a.value.trim()){
-      const ins=await SB.from("pedido_lineas").insert({pedido_id:editActual, codigo:cod, insumo:a.value.trim(), cantidad:cant}).select("id").single();
+      const ins=await SB.from("pedido_lineas").insert({pedido_id:editActual, codigo:cod, insumo:a.value.trim(), cantidad:cant, unidad:unidadDe(a.value)||null}).select("id").single();
       if(ins.data) vivos.push(ins.data.id);
     }
   }

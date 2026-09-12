@@ -1,0 +1,1 @@
+alter table pedido_lineas add column if not exists unidad text;
