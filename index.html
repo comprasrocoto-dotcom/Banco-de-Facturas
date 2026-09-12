@@ -182,6 +182,7 @@ function pintar(){
         ${nv?`<span class="badge st-pool">CON NOVEDAD: ${nv.motivo}</span>`:""}
         <span class="sp"></span>
         ${(perfil.rol==="sede"&&f.estado=="pool")?`<button class="s" onclick="tomar('${f.cufe}')">Es mía</button>`:""}
+        ${(f.estado==="asignada"&&(perfil.rol==="sede"||perfil.rol==="admin"||perfil.rol==="pagos"))?`<button class="d" onclick="soltar('${f.cufe}')">↩ ${perfil.rol==="sede"?"No es mía":"Devolver al pool"}</button>`:""}
         ${((perfil.rol==="admin"||perfil.rol==="pagos")&&f.estado!=="sellada"&&f.estado!=="pagada")?`<select id="sel_${f.cufe}" style="width:auto;margin:0">${sedes.filter(s=>s.marca_id===f.marca_id).map(s=>`<option value="${s.id}"${f.sede_id===s.id?" selected":""}>${s.nombre}</option>`).join("")}</select><button class="s" onclick="asignar('${f.cufe}')">Asignar</button>`:""}
         ${f.estado=="asignada"?`<button class="p" onclick="sellar('${f.cufe}')">✔ Sellar y aprobar</button>`:""}
         ${f.archivo_pdf?`<button onclick="verPdf('${f.cufe}')">📄 Ver PDF</button>`:""}
@@ -269,6 +270,15 @@ async function descargarSelladas(){
   a.download="facturas_selladas_"+(d1||"inicio")+"_a_"+(d2||"hoy")+".zip";
   document.body.appendChild(a); a.click(); a.remove();
   res.textContent="✅ "+ok+" PDF(s) en el ZIP.";
+}
+async function soltar(cufe){
+  if(!confirm("¿Devolver esta factura a \"Sin asignar\" para que la tome la sede correcta?"))return;
+  const {error}=await SB.from("facturas").update({
+    estado:"pool", sede_id:null, asignada_por:null, asignada_en:null
+  }).eq("cufe",cufe);
+  if(error){alert("No se pudo devolver: "+error.message);return;}
+  await SB.from("historial").insert({cufe,accion:"devuelta al pool",a:perfil.sedes?.nombre||perfil.rol,usuario:usuario.id});
+  await cargar();
 }
 async function asignar(cufe){
   const sel=$("sel_"+cufe); if(!sel)return;
