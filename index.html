@@ -206,7 +206,7 @@ async function verPdfArchivo(ruta){
   if(error||!data){alert("No pude abrir: "+(error?error.message:"sin enlace"));return;}
   window.open(data.signedUrl,"_blank");
 }
-async function generarSellado(cufe){
+async function generarSellado(cufe,recibido){
   const f=facturas.find(x=>x.cufe===cufe);
   if(!f||!f.archivo_pdf){return;}
   try{
@@ -219,14 +219,16 @@ async function generarSellado(cufe){
     const reg =await doc.embedFont(StandardFonts.Helvetica);
     const fecha=new Date().toLocaleString("es-CO",{dateStyle:"short",timeStyle:"short"});
     const sede=(perfil.sedes&&perfil.sedes.nombre)||"punto de venta";
+    recibido=(recibido||"").trim().toUpperCase();
     const num=((f.prefijo||"")+(f.folio||""))||f.cufe.slice(0,10);
     doc.getPages().forEach(pg=>{
-      const {width,height}=pg.getSize();
-      const alto=Math.min(54,height*0.09);
-      pg.drawRectangle({x:0,y:height-alto,width,height:alto,color:rgb(0.13,0.53,0.21),opacity:0.92});
-      pg.drawText("APROBADA  ·  "+sede,{x:16,y:height-alto+alto*0.52,size:Math.min(15,alto*0.30),font:bold,color:rgb(1,1,1)});
-      pg.drawText("Sello digital  ·  "+fecha+"  ·  Factura "+num+"  ·  Banco de Facturas",
-        {x:16,y:height-alto+alto*0.20,size:Math.min(8,alto*0.17),font:reg,color:rgb(1,1,1)});
+      const {width}=pg.getSize();
+      const bw=Math.min(370,width*0.63), bh=46, x=24, y=22;
+      pg.drawRectangle({x, y, width:bw, height:bh, color:rgb(0.94,0.99,0.95), opacity:0.96,
+                        borderColor:rgb(0.13,0.53,0.21), borderWidth:1.4});
+      pg.drawText("APROBADA  ·  "+sede,{x:x+10,y:y+bh-15,size:11,font:bold,color:rgb(0.08,0.40,0.16)});
+      pg.drawText("Factura "+num+"  ·  "+fecha,{x:x+10,y:y+bh-27,size:7.5,font:reg,color:rgb(0.25,0.25,0.25)});
+      pg.drawText("Recibido por: "+(recibido||"—"),{x:x+10,y:y+8,size:10,font:bold,color:rgb(0.10,0.10,0.10)});
     });
     const out=await doc.save();
     const path=f.archivo_pdf.split("/")[0]+"/"+f.cufe+"_SELLADA.pdf";
@@ -278,15 +280,29 @@ async function asignar(cufe){
   await SB.from("historial").insert({cufe,accion:"asignada por admin",usuario:usuario.id});
   await cargar();
 }
-async function sellar(cufe){
-  if(!confirm("¿Sellar y aprobar esta factura? Con esto queda lista para pagos."))return;
+let selloActual=null;
+function sellar(cufe){
+  selloActual=cufe;
+  const f=facturas.find(x=>x.cufe===cufe)||{};
+  $("msello").textContent=(f.emisor||"")+"  ·  "+(((f.prefijo||"")+(f.folio||""))||"")+"  ·  "+money(f.total);
+  $("recibe").value=""; $("serr").textContent="";
+  $("modalSello").classList.add("on");
+}
+function cerrarSello(){$("modalSello").classList.remove("on");}
+async function confirmarSello(){
+  const nombre=$("recibe").value.trim();
+  if(nombre.length<3){$("serr").textContent="Escribí el nombre de quien recibe la factura.";return;}
+  const cufe=selloActual;
   const {error}=await SB.from("facturas").update({
-    estado:"sellada", sellada_por:usuario.id, sellada_en:new Date().toISOString()
+    estado:"sellada", sellada_por:usuario.id, sellada_en:new Date().toISOString(), recibido_por:nombre
   }).eq("cufe",cufe);
-  if(error){alert("No se pudo: "+error.message);return;}
-  await SB.from("historial").insert({cufe,accion:"sellada",a:perfil.sedes?.nombre,usuario:usuario.id});
-  await generarSellado(cufe);
+  if(error){$("serr").textContent="No se pudo sellar: "+error.message;return;}
+  await SB.from("historial").insert({cufe,accion:"sellada",a:perfil.sedes?.nombre,detalle:"Recibido por "+nombre,usuario:usuario.id});
+  cerrarSello();
+  $("resdesc").textContent="Generando el PDF sellado...";
+  await generarSellado(cufe,nombre);
   await cargar();
+  $("resdesc").textContent="";
 }
 function abrirNov(cufe){
   novActual=cufe;
@@ -305,6 +321,18 @@ async function guardarNov(){
   cerrar(); await cargar();
 }
 </script>
+<div id="modalSello" class="modal"><div class="card">
+  <h1>✔ Sellar y aprobar</h1>
+  <p class="mut" id="msello"></p>
+  <label class="mut">Nombre de quien recibe la factura</label>
+  <input id="recibe" placeholder="Ej: JUAN PÉREZ" autocomplete="off">
+  <div class="err" id="serr"></div>
+  <div class="row"><span class="sp"></span>
+    <button onclick="cerrarSello()">Cancelar</button>
+    <button class="p" onclick="confirmarSello()">Sellar y aprobar</button>
+  </div>
+</div></div>
+
 <div id="modal2" class="modal"><div class="card">
   <h1>⬆ Subir facturas (solo PDF)</h1>
   <p class="mut">Del <b>nombre del archivo</b> saco la clave (CUFE); del contenido, los datos. Si algo sale mal, lo corregís después.</p>

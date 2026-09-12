@@ -1,0 +1,1 @@
+alter table facturas add column if not exists recibido_por text;
