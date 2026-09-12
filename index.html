@@ -164,7 +164,7 @@ function pintar(){
   if(vista=="selladas") l=l.filter(f=>f.estado=="sellada"||f.estado=="pagada");
   if(vista=="nov")      l=l.filter(f=>novDe(f.cufe));
   const q=($("q").value||"").trim().toLowerCase();
-  if(q) l=l.filter(f=>((f.numero||"")+" "+(f.prefijo||"")+(f.folio||"")+" "+(f.documento||"")+" "+(f.emisor||"")+" "+(f.cufe||"")).toLowerCase().includes(q));
+  if(q) l=l.filter(f=>((f.numero||"")+" "+(f.prefijo||"")+(f.folio||"")+" "+(f.documento||"")+" "+(f.emisor||"")+" "+(f.cufe||"")+" "+(f.num_ingreso||"")).toLowerCase().includes(q));
   const cont=$("lista");
   if(!l.length){cont.innerHTML='<div class="vacio">No hay documentos acá.</div>';return;}
   cont.innerHTML=l.map(f=>{
@@ -180,6 +180,7 @@ function pintar(){
         <span class="badge ${st[1]}">${st[0]}</span>
         <span class="badge">${(f.categoria||"otro").replace("_"," ")}</span>
         ${nv?`<span class="badge st-pool">CON NOVEDAD: ${nv.motivo}</span>`:""}
+        ${f.num_ingreso?`<span class="badge st-sellada">Ingreso ERP: ${f.num_ingreso}</span>`:""}
         <span class="sp"></span>
         ${(perfil.rol==="sede"&&f.estado=="pool")?`<button class="s" onclick="tomar('${f.cufe}')">Es mía</button>`:""}
         ${(f.estado==="asignada"&&(perfil.rol==="sede"||perfil.rol==="admin"||perfil.rol==="pagos"))?`<button class="d" onclick="soltar('${f.cufe}')">↩ ${perfil.rol==="sede"?"No es mía":"Devolver al pool"}</button>`:""}
@@ -188,6 +189,7 @@ function pintar(){
         ${f.archivo_pdf?`<button onclick="verPdf('${f.cufe}')">📄 Ver PDF</button>`:""}
         ${f.archivo_pdf_sellado?`<button class="p" onclick="window.open('', '_blank'); verPdfArchivo('${f.archivo_pdf_sellado}')">✅ Ver sellada</button>`:""}
         ${f.archivo_recibo?`<button onclick="verPdfArchivo('${f.archivo_recibo}')">📸 Ver recibo</button>`:""}
+        ${((perfil.rol==="admin"||perfil.rol==="pagos")&&f.estado!=="pool")?`<button onclick="pedirIngreso('${f.cufe}')">✎ ${f.num_ingreso?"Nº ingreso":"Poner Nº de ingreso"}</button>`:""}
         ${(f.estado!="pagada")?`<button onclick="abrirNov('${f.cufe}')">Novedad</button>`:""}
       </div>
       ${nv?`<div class="mut" style="margin-top:10px">📝 ${nv.texto||nv.motivo}</div>`:""}
@@ -225,12 +227,13 @@ async function generarSellado(cufe,recibido,rutaFoto){
     const num=((f.prefijo||"")+(f.folio||""))||f.cufe.slice(0,10);
     doc.getPages().forEach(pg=>{
       const {width}=pg.getSize();
-      const bw=Math.min(370,width*0.63), bh=46, x=24, y=22;
+      const bw=Math.min(390,width*0.66), bh=f.num_ingreso?58:46, x=24, y=22;
       pg.drawRectangle({x, y, width:bw, height:bh, color:rgb(0.94,0.99,0.95), opacity:0.96,
                         borderColor:rgb(0.13,0.53,0.21), borderWidth:1.4});
       pg.drawText("APROBADA  ·  "+sede,{x:x+10,y:y+bh-15,size:11,font:bold,color:rgb(0.08,0.40,0.16)});
       pg.drawText("Factura "+num+"  ·  "+fecha,{x:x+10,y:y+bh-27,size:7.5,font:reg,color:rgb(0.25,0.25,0.25)});
-      pg.drawText("Recibido por: "+(recibido||"—"),{x:x+10,y:y+8,size:10,font:bold,color:rgb(0.10,0.10,0.10)});
+      pg.drawText("Recibido por: "+(recibido||"—"),{x:x+10,y:y+(f.num_ingreso?24:8),size:10,font:bold,color:rgb(0.10,0.10,0.10)});
+      if(f.num_ingreso) pg.drawText("Nº de ingreso ERP: "+f.num_ingreso,{x:x+10,y:y+9,size:10,font:bold,color:rgb(0.10,0.10,0.10)});
     });
     if(rutaFoto){
       try{
@@ -258,6 +261,17 @@ async function verPdf(cufe){
   const {data,error}=await SB.storage.from("facturas").createSignedUrl(f.archivo_pdf,300);
   if(error||!data){alert("No pude abrir el PDF: "+(error?error.message:"sin enlace"));return;}
   window.open(data.signedUrl,"_blank");
+}
+async function pedirIngreso(cufe){
+  const f=facturas.find(x=>x.cufe===cufe)||{};
+  const v=prompt("Número de ingreso del ERP (ej: FC.COCINA5103)\nFacura "+(((f.prefijo||"")+(f.folio||""))||"")+" · "+(f.emisor||""), f.num_ingreso||"");
+  if(v===null) return;
+  const num=v.trim();
+  const {error}=await SB.from("facturas").update({num_ingreso:num||null}).eq("cufe",cufe);
+  if(error){alert("No se pudo guardar: "+error.message);return;}
+  await SB.from("historial").insert({cufe,accion:"numero de ingreso ERP",detalle:num,usuario:usuario.id});
+  if(f.estado==="sellada"||f.estado==="pagada"){ await generarSellado(cufe, f.recibido_por, f.archivo_recibo); }
+  await cargar();
 }
 async function descargarSelladas(){
   const d1=$("d1").value, d2=$("d2").value;
