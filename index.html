@@ -656,6 +656,7 @@ function pintar(){
         <span class="badge">${(f.categoria||"otro").replace("_"," ")}</span>
         ${nv?`<span class="badge st-pool">CON NOVEDAD: ${nv.motivo}</span>`:""}
         ${f.num_ingreso?`<span class="badge st-sellada">Ingreso ERP: ${f.num_ingreso}</span>`:""}
+        ${(f.pedido_erp||f.pedido_num)?`<span class="badge st-asignada">🔗 Pedido ${f.pedido_erp||f.pedido_num}</span>`:""}
         <span class="sp"></span>
         ${(perfil.rol==="sede"&&f.estado=="pool")?`<button class="s" onclick="tomar('${f.cufe}')">Es mía</button>`:""}
         ${((f.estado==="asignada"||f.estado==="sellada")&&(perfil.rol==="sede"||perfil.rol==="admin"||perfil.rol==="pagos"))?`<button class="d" onclick="soltar('${f.cufe}')">↩ ${f.estado==="sellada"?"Quitar el sello":"No es mía"}</button>`:""}
@@ -703,13 +704,13 @@ async function generarSellado(cufe,recibido,rutaFoto){
     const num=((f.prefijo||"")+(f.folio||""))||f.cufe.slice(0,10);
     doc.getPages().forEach(pg=>{
       const {width}=pg.getSize();
-      const bw=Math.min(390,width*0.66), bh=f.num_ingreso?58:46, x=24, y=22;
+      const bw=Math.min(410,width*0.70), bh=(f.num_ingreso?78:62), x=24, y=22;
       pg.drawRectangle({x, y, width:bw, height:bh, color:rgb(0.94,0.99,0.95), opacity:0.96,
                         borderColor:rgb(0.13,0.53,0.21), borderWidth:1.4});
-      pg.drawText("APROBADA  ·  "+sede,{x:x+10,y:y+bh-15,size:11,font:bold,color:rgb(0.08,0.40,0.16)});
-      pg.drawText("Factura "+num+"  ·  "+fecha,{x:x+10,y:y+bh-27,size:7.5,font:reg,color:rgb(0.25,0.25,0.25)});
-      pg.drawText("Recibido por: "+(recibido||"—"),{x:x+10,y:y+(f.num_ingreso?24:8),size:10,font:bold,color:rgb(0.10,0.10,0.10)});
-      if(f.num_ingreso) pg.drawText("Nº de ingreso ERP: "+f.num_ingreso,{x:x+10,y:y+9,size:10,font:bold,color:rgb(0.10,0.10,0.10)});
+      pg.drawText("APROBADA  ·  "+sede,{x:x+12,y:y+bh-17,size:11.5,font:bold,color:rgb(0.08,0.40,0.16)});
+      pg.drawText("Factura "+num+"  ·  "+fecha,{x:x+12,y:y+bh-30,size:8,font:reg,color:rgb(0.35,0.35,0.35)});
+      pg.drawText("Recibido por: "+(recibido||"—"),{x:x+12,y:y+bh-47,size:10.5,font:bold,color:rgb(0.10,0.10,0.10)});
+      if(f.num_ingreso) pg.drawText("N° de ingreso ERP: "+f.num_ingreso,{x:x+12,y:y+bh-63,size:10.5,font:bold,color:rgb(0.10,0.10,0.10)});
     });
     if(rutaFoto){
       try{
