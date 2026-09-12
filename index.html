@@ -7,6 +7,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <style>
 :root{--bg:#0d1117;--card:#161b22;--line:#30363d;--txt:#e6edf3;--mut:#8b949e;--ok:#3fb950;--warn:#d29922;--bad:#f85149;--blue:#58a6ff}
 *{box-sizing:border-box}
@@ -184,6 +185,7 @@ function pintar(){
         ${((perfil.rol==="admin"||perfil.rol==="pagos")&&f.estado!=="sellada"&&f.estado!=="pagada")?`<select id="sel_${f.cufe}" style="width:auto;margin:0">${sedes.filter(s=>s.marca_id===f.marca_id).map(s=>`<option value="${s.id}"${f.sede_id===s.id?" selected":""}>${s.nombre}</option>`).join("")}</select><button class="s" onclick="asignar('${f.cufe}')">Asignar</button>`:""}
         ${f.estado=="asignada"?`<button class="p" onclick="sellar('${f.cufe}')">✔ Sellar y aprobar</button>`:""}
         ${f.archivo_pdf?`<button onclick="verPdf('${f.cufe}')">📄 Ver PDF</button>`:""}
+        ${f.archivo_pdf_sellado?`<button class="p" onclick="window.open('', '_blank'); verPdfArchivo('${f.archivo_pdf_sellado}')">✅ Ver sellada</button>`:""}
         ${(f.estado!="pagada")?`<button onclick="abrirNov('${f.cufe}')">Novedad</button>`:""}
       </div>
       ${nv?`<div class="mut" style="margin-top:10px">📝 ${nv.texto||nv.motivo}</div>`:""}
@@ -198,6 +200,39 @@ async function tomar(cufe){
   if(error){alert("No se pudo: "+error.message);return;}
   await SB.from("historial").insert({cufe,accion:"asignada",a:perfil.sedes?.nombre,usuario:usuario.id});
   await cargar();
+}
+async function verPdfArchivo(ruta){
+  const {data,error}=await SB.storage.from("facturas").createSignedUrl(ruta,300);
+  if(error||!data){alert("No pude abrir: "+(error?error.message:"sin enlace"));return;}
+  window.open(data.signedUrl,"_blank");
+}
+async function generarSellado(cufe){
+  const f=facturas.find(x=>x.cufe===cufe);
+  if(!f||!f.archivo_pdf){return;}
+  try{
+    const {data:sig}=await SB.storage.from("facturas").createSignedUrl(f.archivo_pdf,300);
+    if(!sig){return;}
+    const bytes=await (await fetch(sig.signedUrl)).arrayBuffer();
+    const {PDFDocument, rgb, StandardFonts}=PDFLib;
+    const doc=await PDFDocument.load(bytes,{ignoreEncryption:true});
+    const bold=await doc.embedFont(StandardFonts.HelveticaBold);
+    const reg =await doc.embedFont(StandardFonts.Helvetica);
+    const fecha=new Date().toLocaleString("es-CO",{dateStyle:"short",timeStyle:"short"});
+    const sede=(perfil.sedes&&perfil.sedes.nombre)||"punto de venta";
+    const num=((f.prefijo||"")+(f.folio||""))||f.cufe.slice(0,10);
+    doc.getPages().forEach(pg=>{
+      const {width,height}=pg.getSize();
+      const alto=Math.min(54,height*0.09);
+      pg.drawRectangle({x:0,y:height-alto,width,height:alto,color:rgb(0.13,0.53,0.21),opacity:0.92});
+      pg.drawText("APROBADA  ·  "+sede,{x:16,y:height-alto+alto*0.52,size:Math.min(15,alto*0.30),font:bold,color:rgb(1,1,1)});
+      pg.drawText("Sello digital  ·  "+fecha+"  ·  Factura "+num+"  ·  Banco de Facturas",
+        {x:16,y:height-alto+alto*0.20,size:Math.min(8,alto*0.17),font:reg,color:rgb(1,1,1)});
+    });
+    const out=await doc.save();
+    const path=f.archivo_pdf.split("/")[0]+"/"+f.cufe+"_SELLADA.pdf";
+    const up=await SB.storage.from("facturas").upload(path,new Blob([out],{type:"application/pdf"}),{upsert:true});
+    if(!up.error){ await SB.from("facturas").update({archivo_pdf_sellado:path}).eq("cufe",cufe); }
+  }catch(e){ console.warn("sellado:",e); }
 }
 async function verPdf(cufe){
   const f=facturas.find(x=>x.cufe===cufe);
@@ -217,7 +252,7 @@ async function descargarSelladas(){
   res.textContent="Preparando "+l.length+" PDF(s)...";
   const zip=new JSZip(); let ok=0;
   for(const f of l){
-    const {data:sig}=await SB.storage.from("facturas").createSignedUrl(f.archivo_pdf,120);
+    const {data:sig}=await SB.storage.from("facturas").createSignedUrl(f.archivo_pdf_sellado||f.archivo_pdf,120);
     if(!sig){continue;}
     const r=await fetch(sig.signedUrl); if(!r.ok) continue;
     const blob=await r.blob();
@@ -250,6 +285,7 @@ async function sellar(cufe){
   }).eq("cufe",cufe);
   if(error){alert("No se pudo: "+error.message);return;}
   await SB.from("historial").insert({cufe,accion:"sellada",a:perfil.sedes?.nombre,usuario:usuario.id});
+  await generarSellado(cufe);
   await cargar();
 }
 function abrirNov(cufe){
