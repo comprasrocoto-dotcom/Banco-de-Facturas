@@ -160,7 +160,7 @@ async function entrar(){
 }
 async function salir(){await SB.auth.signOut();location.reload();}
 
-let arts=[], provs=[], cat=[], minmax=[], npLineas=0;
+let arts=[], provs=[], cat=[], minmax=[], provArts=[], npLineas=0;
 async function nuevoPedido(){
   $("np_err").textContent=""; $("np_lineas").innerHTML=""; npLineas=0;
   const hoy=new Date().toISOString().slice(0,10);
@@ -186,17 +186,37 @@ async function nuevoPedido(){
   agregarLinea();
   $("modalPedido").classList.add("on");
 }
-function filtrarArticulos(){ pintarLineas(); }
+async function filtrarArticulos(){
+  const id=Number($("np_prov").value||0);
+  provArts=[];
+  if(id){
+    const pv=provs.find(x=>x.id===id)||{};
+    const nom=pv.razon_social||pv.nombre_comercial||"";
+    $("np_arts_info").textContent="Buscando lo que se le compra a "+nom+"...";
+    const {data}=await SB.from("proveedor_articulos")
+        .select("codigo,insumo,veces").eq("proveedor",nom).order("veces",{ascending:false}).limit(500);
+    provArts=data||[];
+    $("np_arts_info").textContent = provArts.length
+      ? "✅ "+provArts.length+" artículos que le comprás a este proveedor (los más frecuentes primero)"
+      : "⚠️ Este proveedor no tiene compras en el histórico — te muestro todos los artículos";
+  } else {
+    $("np_arts_info").textContent="";
+  }
+  $("np_lineas").innerHTML=""; agregarLinea(); calcularTotal();
+}
 function opcionesArticulos(){
-  const prov=Number($("np_prov").value||0);
-  const delProv=new Set(cat.filter(c=>c.id_proveedor===prov).map(c=>c.codigo_barras));
+  if(provArts.length){
+    return provArts.map(a=>`<option value="${a.codigo||a.insumo}">${a.insumo||a.codigo}</option>`).join("");
+  }
+  const id=Number($("np_prov").value||0);
+  const delProv=new Set(cat.filter(c=>c.id_proveedor===id).map(c=>c.codigo_barras));
   const lista = delProv.size ? arts.filter(a=>delProv.has(a.codigo_barras)) : arts;
   return lista.map(a=>`<option value="${a.codigo_barras}">${a.articulo_hiopos||a.articulo_comercial} (${a.unimedida_compra||""})</option>`).join("");
 }
 function precioDe(codigo){
   const prov=Number($("np_prov").value||0);
   const c=cat.find(x=>x.codigo_barras===codigo && x.id_proveedor===prov) || cat.find(x=>x.codigo_barras===codigo);
-  return c? Number(c.precio_negociado||0):0;
+  return c? Number(c.precio_negociado||0) : 0;
 }
 function agregarLinea(){
   npLineas++;
@@ -575,6 +595,7 @@ async function guardarNov(){
     <div style="flex:1"><label class="mut">Responsable</label><input id="np_resp" placeholder="quién pide"></div>
   </div>
   <label class="mut">Artículos</label>
+  <div class="mut" id="np_arts_info" style="margin-bottom:6px"></div>
   <div id="np_lineas"></div>
   <button onclick="agregarLinea()">＋ Agregar artículo</button>
   <label class="mut">Observación</label><input id="np_obs" placeholder="opcional">
