@@ -73,6 +73,7 @@ tr:hover td{background:#f1f5f9}
     <h1>🏦 BANCO DE FACTURAS</h1>
     <button class="chip on" id="m-banco" onclick="setModulo('banco')">Facturas</button>
     <button class="chip"    id="m-pedidos" onclick="setModulo('pedidos')">📋 Pedidos</button>
+    <button class="chip"  id="m-admin" style="display:none" onclick="setModulo('admin')">⚙️ Admin</button>
     <span id="sede" class="badge"></span>
     <span class="sp"></span>
     <button onclick="salir()">Salir</button>
@@ -107,6 +108,22 @@ tr:hover td{background:#f1f5f9}
       <button class="chip"    id="v-nov"      onclick="setVista('nov')">Con novedad</button>
     </div>
     <div id="lista"></div>
+
+    <div id="vistaAdmin" style="display:none">
+      <div class="row" style="margin-bottom:14px">
+        <button class="chip on" id="ad-prov" onclick="setAdmin('prov')">Proveedores</button>
+        <button class="chip"    id="ad-art"  onclick="setAdmin('art')">Artículos</button>
+        <button class="chip"    id="ad-cat"  onclick="setAdmin('cat')">Qué le compro a cada proveedor</button>
+        <span class="sp"></span>
+        <input id="qa" placeholder="🔎 buscar..." style="width:240px;margin:0" oninput="pintarAdmin()">
+        <button class="p" onclick="adminNuevo()">➕ Nuevo</button>
+      </div>
+      <div id="filtroCat" class="row" style="display:none;margin-bottom:12px">
+        <span class="mut">Proveedor:</span>
+        <select id="catProv" style="width:auto;margin:0;min-width:320px" onchange="pintarAdmin()"></select>
+      </div>
+      <div id="listaAdmin"></div>
+    </div>
 
     <div id="vistaPedidos" style="display:none">
       <div class="row" style="margin-bottom:14px">
@@ -160,6 +177,7 @@ async function sesion(u){
   $("login").style.display="none"; $("app").style.display="block";
   const s=perfil.sedes;
   if(perfil.rol==="admin"||perfil.rol==="pagos"){$("btnsubir").style.display="inline-block";$("barraDescarga").style.display="flex";}
+  if(perfil.rol==="admin"){ $("m-admin").style.display="inline-block"; }
   const {data:ss}=await SB.from("sedes").select("id,nombre,marca_id").order("nombre");
   sedes=ss||[];
   const {data:ms}=await SB.from("marcas").select("id,nombre").order("nombre");
@@ -304,6 +322,88 @@ async function guardarPedido(){
   $("modalPedido").classList.remove("on");
   pedidosCargados=false; await cargarPedidos();
 }
+let adminCargado=false, adminVista="prov", adminProv=[], adminArt=[], adminCat=[];
+function setAdmin(v){ adminVista=v;
+  ["prov","art","cat"].forEach(x=>$("ad-"+x).classList.toggle("on", x==v));
+  $("filtroCat").style.display = (v=="cat")?"flex":"none";
+  pintarAdmin();
+}
+async function cargarAdmin(){
+  const a=await SB.from("proveedores").select("*").order("razon_social").limit(2000);
+  adminProv=a.data||[];
+  const b=await SB.from("articulos").select("*").order("articulo_hiopos").limit(5000);
+  adminArt=b.data||[];
+  const c=await SB.from("catalogo_compras").select("*").limit(5000);
+  adminCat=c.data||[];
+  $("catProv").innerHTML='<option value="">— elegí proveedor —</option>'+adminProv.map(x=>`<option value="${x.id}">${x.razon_social||x.nombre_comercial||""}</option>`).join("");
+  adminCargado=true; pintarAdmin();
+}
+function pintarAdmin(){
+  const q=($("qa").value||"").trim().toLowerCase();
+  const c=$("listaAdmin");
+  if(adminVista==="prov"){
+    let l=adminProv.filter(x=>!q||((x.razon_social||"")+" "+(x.nit||"")+" "+(x.nombre_comercial||"")).toLowerCase().includes(q));
+    c.innerHTML = l.slice(0,400).map(x=>`<div class="card" style="margin:6px 0"><div class="row">
+        <div><div class="emisor">${x.razon_social||x.nombre_comercial||"—"}</div>
+        <div class="mut">NIT ${x.nit||"—"} · Tel ${x.telefono1||"—"} · ${x.correo||"—"}${x.asesor?" · "+x.asesor:""}</div></div>
+        <span class="sp"></span>
+        <span class="badge">${adminCat.filter(k=>k.id_proveedor===x.id).length} artículos en el catálogo</span></div></div>`).join("") || '<div class="vacio">Sin resultados.</div>';
+  } else if(adminVista==="art"){
+    let l=adminArt.filter(x=>!q||((x.codigo_barras||"")+" "+(x.articulo_hiopos||"")+" "+(x.subfamilia||"")).toLowerCase().includes(q));
+    c.innerHTML = l.slice(0,400).map(x=>`<div class="card" style="margin:6px 0"><div class="row">
+        <div><div class="emisor">${x.articulo_hiopos||x.articulo_comercial||"—"}</div>
+        <div class="mut">Código ${x.codigo_barras||"—"} · ${x.unimedida_compra||x.unimedida_hiopos||"—"} ${x.subfamilia?"· "+x.subfamilia:""}</div></div></div></div>`).join("") || '<div class="vacio">Sin resultados.</div>';
+  } else {
+    const pid=Number($("catProv").value||0);
+    if(!pid){ c.innerHTML='<div class="vacio">Elegí un proveedor para ver qué se le compra.</div>'; return; }
+    let l=adminCat.filter(k=>k.id_proveedor===pid);
+    const nomDe=cd=>(adminArt.find(a=>a.codigo_barras===cd)||{}).articulo_hiopos||cd;
+    c.innerHTML = '<div class="card">'+( l.length? l.map(k=>`<div class="row" style="border-bottom:1px solid var(--line);padding:6px 0">
+        <div style="flex:3">${nomDe(k.codigo_barras)} <span class="mut">(${k.codigo_barras})</span></div>
+        <div style="flex:1" class="mut">prioridad ${k.prioridad||"—"}</div>
+        <div style="flex:1;text-align:right;font-weight:700">${k.precio_negociado?money(k.precio_negociado):"s/precio"}</div>
+        <button class="d" onclick="quitarDelCatalogo(${k.id})">✕</button></div>`).join("")
+      : '<div class="mut">Este proveedor no tiene artículos en el catálogo todavía.</div>') + '</div>';
+  }
+}
+function adminNuevo(){
+  if(adminVista==="prov"){
+    const rz=prompt("Razón social del nuevo proveedor:"); if(!rz) return;
+    const nit=prompt("NIT (sin dígito de verificación):")||null;
+    const nc=prompt("Nombre comercial (opcional):")||null;
+    const t1=prompt("Teléfono (opcional):")||null;
+    const co=prompt("Correo (opcional):")||null;
+    SB.from("proveedores").insert({razon_social:rz.trim(), nit:nit?nit.replace(/[^0-9]/g,""):null,
+      nombre_comercial:nc?nc.trim():null, telefono1:t1?t1.trim():null, correo:co?co.trim():null})
+      .then(async r=>{ if(r.error){alert("No se pudo: "+r.error.message);return;} adminCargado=false; await cargarAdmin(); });
+  } else if(adminVista==="art"){
+    const cb=prompt("Código (ej: ORD900 / código de barras):"); if(!cb) return;
+    const no=prompt("Nombre del insumo (como en Hiopos):")||cb;
+    const um=prompt("Unidad de medida (KILO, UNDX400G, ...):")||null;
+    const sf=prompt("Subfamilia / categoría (opcional):")||null;
+    SB.from("articulos").insert({codigo_barras:cb.trim(), articulo_hiopos:no.trim(),
+      articulo_comercial:no.trim(), unimedida_compra:um?um.trim():null, subfamilia:sf?sf.trim():null})
+      .then(async r=>{ if(r.error){alert("No se pudo: "+r.error.message);return;}
+        const prov=confirm("¿Le amarrás este insumo a un proveedor ahora?");
+        if(prov){ const pid=prompt("ID del proveedor (mirá el número en la lista) o el NIT:"); if(pid){ adminVista="cat"; await cargarAdmin(); } }
+        adminCargado=false; await cargarAdmin(); });
+  } else {
+    const pid=Number($("catProv").value||0);
+    if(!pid){alert("Elegí primero el proveedor.");return;}
+    const cb=prompt("Código del artículo (ej: ORD010):"); if(!cb) return;
+    const pr=prompt("Precio negociado (opcional):")||null;
+    const pi=prompt("Prioridad (1 = primera opción):")||"1";
+    SB.from("catalogo_compras").insert({codigo_barras:cb.trim(), id_proveedor:pid,
+      prioridad:Number(pi)||1, precio_negociado:pr?Number(String(pr).replace(/[^0-9.]/g,"")):null, estado:"Aprobado"})
+      .then(async r=>{ if(r.error){alert("No se pudo: "+r.error.message);return;} adminCargado=false; await cargarAdmin(); });
+  }
+}
+async function quitarDelCatalogo(id){
+  if(!confirm("¿Sacar este artículo del catálogo de ese proveedor?")) return;
+  const r=await SB.from("catalogo_compras").delete().eq("id",id);
+  if(r.error){alert("No se pudo: "+r.error.message);return;}
+  adminCargado=false; await cargarAdmin();
+}
 function setModulo(m){
   modulo=m;
   $("m-banco").classList.toggle("on",m=="banco");
@@ -314,6 +414,8 @@ function setModulo(m){
   $("lista").style.display = (m=="banco")?"block":"none";
   $("vistaPedidos").style.display = (m=="pedidos")?"block":"none";
   if(m=="pedidos" && !pedidosCargados) cargarPedidos();
+  $("vistaAdmin").style.display = (m=="admin")?"block":"none";
+  if(m=="admin" && !adminCargado) cargarAdmin();
 }
 function setPedVista(v){ pedVista=v;
   ["pend","fact","todos"].forEach(x=>$("pe-"+x).classList.toggle("on", x==(v=="pendiente"?"pend":v=="facturado"?"fact":"todos")));
