@@ -1,0 +1,8 @@
+# NUNCA subir esto a GitHub (tiene llaves y claves)
+.env.local
+.dburl.txt
+.dbpass.txt
+.ghtoken.txt
+_*.py
+*.log
+capturas/

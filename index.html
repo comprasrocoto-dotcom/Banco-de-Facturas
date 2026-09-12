@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Banco de Facturas</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--line:#30363d;--txt:#e6edf3;--mut:#8b949e;--ok:#3fb950;--warn:#d29922;--bad:#f85149;--blue:#58a6ff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+header{padding:16px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;flex-wrap:wrap;position:sticky;top:0;background:var(--bg);z-index:5}
+h1{font-size:17px;margin:0;letter-spacing:.5px}
+.sp{flex:1}
+.chip{padding:6px 12px;border:1px solid var(--line);border-radius:999px;cursor:pointer;font-size:13px;color:var(--mut);background:none}
+.chip.on{border-color:var(--blue);color:var(--blue)}
+.wrap{max-width:1080px;margin:0 auto;padding:20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.emisor{font-weight:600;font-size:16px}
+.mut{color:var(--mut);font-size:13px}
+.total{font-size:20px;font-weight:700;margin-left:auto}
+button{cursor:pointer;border-radius:8px;border:1px solid var(--line);background:#21262d;color:var(--txt);padding:8px 14px;font-size:13px}
+button.p{background:#238636;border-color:#2ea043}
+button.s{background:#1f6feb;border-color:#388bfd}
+button.d{background:transparent;color:var(--bad);border-color:#5a1d1d}
+.badge{font-size:11px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--mut)}
+.st-pool{color:var(--warn);border-color:var(--warn)}
+.st-asignada{color:var(--blue);border-color:var(--blue)}
+.st-sellada{color:var(--ok);border-color:var(--ok)}
+#login{max-width:380px;margin:12vh auto;padding:28px}
+input,textarea,select{width:100%;padding:10px;margin:8px 0;background:#0d1117;border:1px solid var(--line);border-radius:8px;color:var(--txt);font:inherit}
+textarea{min-height:80px;resize:vertical}
+h2{font-size:14px;color:var(--mut);text-transform:uppercase;letter-spacing:1px;margin:22px 0 10px}
+.modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;padding:20px;z-index:20}
+.modal.on{display:flex}
+.modal .card{max-width:460px;width:100%}
+.err{color:var(--bad);font-size:13px;min-height:18px}
+.vacio{text-align:center;color:var(--mut);padding:40px}
+</style>
+</head>
+<body>
+
+<div id="login" class="card">
+  <h1>🏦 Banco de Facturas</h1>
+  <p class="mut">Entrá con el usuario de tu punto de venta.</p>
+  <input id="em" type="email" placeholder="correo">
+  <input id="pw" type="password" placeholder="contraseña">
+  <button class="p" style="width:100%" onclick="entrar()">Entrar</button>
+  <div id="lerr" class="err"></div>
+</div>
+
+<div id="app" style="display:none">
+  <header>
+    <h1>🏦 BANCO DE FACTURAS</h1>
+    <span id="sede" class="badge"></span>
+    <span class="sp"></span>
+    <button onclick="salir()">Salir</button>
+  </header>
+  <div class="wrap">
+    <div class="row" style="margin-bottom:14px">
+      <button class="chip on" id="t-fac"  onclick="setTipo('factura')">Facturas</button>
+      <button class="chip"    id="t-nc"   onclick="setTipo('nota_credito')">Notas crédito</button>
+      <span class="sp"></span>
+      <select id="fcat" style="width:auto" onchange="pintar()">
+        <option value="">Todas las categorías</option>
+        <option value="insumos">Insumos</option>
+        <option value="empaque">Material de empaque</option>
+        <option value="aseo">Aseo</option>
+        <option value="loza_utensilios">Loza y utensilios</option>
+      </select>
+    </div>
+    <div class="row" style="margin-bottom:16px">
+      <button class="chip on" id="v-pool"     onclick="setVista('pool')">Sin asignar</button>
+      <button class="chip"    id="v-mias"     onclick="setVista('mias')">Mías</button>
+      <button class="chip"    id="v-selladas" onclick="setVista('selladas')">Selladas</button>
+      <button class="chip"    id="v-nov"      onclick="setVista('nov')">Con novedad</button>
+    </div>
+    <div id="lista"></div>
+  </div>
+</div>
+
+<div id="modal" class="modal"><div class="card">
+  <h1>Registrar novedad</h1>
+  <p id="mnov" class="mut"></p>
+  <select id="motivo">
+    <option>No llegó el pedido completo</option>
+    <option>Se devolvió algo</option>
+    <option>Producto en mal estado</option>
+    <option>El precio no coincide</option>
+    <option>Factura equivocada</option>
+    <option>Otra</option>
+  </select>
+  <textarea id="txt" placeholder="Contá qué pasó..."></textarea>
+  <div class="err" id="merr"></div>
+  <div class="row"><span class="sp"></span>
+    <button onclick="cerrar()">Cancelar</button>
+    <button class="s" onclick="guardarNov()">Guardar novedad</button>
+  </div>
+</div></div>
+
+<script>
+const SB = supabase.createClient("https://egzggxwfyqeihzgpjgmp.supabase.co", "sb_publishable_3rzP6pCef1S5nRzFkG-eHw_-BF73n91");
+let usuario=null, perfil=null, facturas=[], novedades=[], tipo="factura", vista="pool", novActual=null;
+const $=id=>document.getElementById(id);
+const money=n=>"$ "+(n||0).toLocaleString("es-CO",{maximumFractionDigits:0});
+const fch=s=>s?new Date(s+"T12:00:00").toLocaleDateString("es-CO",{day:"2-digit",month:"short",year:"numeric"}):"";
+
+async function init(){
+  const {data:{session}}=await SB.auth.getSession();
+  if(session) await sesion(session.user);
+}
+async function sesion(u){
+  usuario=u;
+  const {data:p}=await SB.from("perfiles").select("nombre,rol,sede_id,sedes(nombre,marca_id,marcas(nombre))").eq("user_id",u.id).single();
+  perfil=p||{nombre:u.email,rol:"sede"};
+  $("login").style.display="none"; $("app").style.display="block";
+  const s=perfil.sedes;
+  $("sede").textContent=(s?s.nombre:"—")+(s&&s.marcas?" · "+s.marcas.nombre:"");
+  await cargar();
+}
+async function entrar(){
+  $("lerr").textContent="";
+  const {data,error}=await SB.auth.signInWithPassword({email:$("em").value.trim(),password:$("pw").value});
+  if(error){$("lerr").textContent="No pudimos entrar: "+error.message;return;}
+  await sesion(data.user);
+}
+async function salir(){await SB.auth.signOut();location.reload();}
+
+async function cargar(){
+  const {data:f}=await SB.from("facturas_visibles").select("*").order("fecha_emision",{ascending:false});
+  facturas=f||[];
+  const {data:n}=await SB.from("novedades").select("cufe,motivo,texto,created_at");
+  novedades=n||[];
+  pintar();
+}
+function setTipo(t){tipo=t;$("t-fac").classList.toggle("on",t=="factura");$("t-nc").classList.toggle("on",t=="nota_credito");pintar();}
+function setVista(v){vista=v;["pool","mias","selladas","nov"].forEach(x=>$("v-"+x).classList.toggle("on",x==v));pintar();}
+function novDe(c){return novedades.find(n=>n.cufe===c);}
+
+function pintar(){
+  const cat=$("fcat").value;
+  let l=facturas.filter(f=>f.tipo===tipo&&(!cat||f.categoria===cat));
+  if(vista=="pool")     l=l.filter(f=>f.estado=="pool"||f.estado=="asignada");
+  if(vista=="mias")     l=l.filter(f=>f.estado=="asignada");
+  if(vista=="selladas") l=l.filter(f=>f.estado=="sellada"||f.estado=="pagada");
+  if(vista=="nov")      l=l.filter(f=>novDe(f.cufe));
+  const cont=$("lista");
+  if(!l.length){cont.innerHTML='<div class="vacio">No hay documentos acá.</div>';return;}
+  cont.innerHTML=l.map(f=>{
+    const nv=novDe(f.cufe);
+    const st={pool:["Sin asignar","st-pool"],asignada:["Mía · sin sellar","st-asignada"],sellada:["Sellada y aprobada","st-sellada"],pagada:["En pagos","st-sellada"],rechazada:["Rechazada","st-pool"]}[f.estado]||[f.estado,""];
+    return `<div class="card">
+      <div class="row">
+        <div><div class="emisor">${f.emisor||"—"}</div>
+          <div class="mut">${f.prefijo||""}${f.folio||""} · ${fch(f.fecha_emision)} · NIT ${f.nit_emisor||"—"}</div></div>
+        <div class="total">${money(f.total)}</div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <span class="badge ${st[1]}">${st[0]}</span>
+        <span class="badge">${(f.categoria||"otro").replace("_"," ")}</span>
+        ${nv?`<span class="badge st-pool">CON NOVEDAD: ${nv.motivo}</span>`:""}
+        <span class="sp"></span>
+        ${f.estado=="pool"?`<button class="s" onclick="tomar('${f.cufe}')">Es mía</button>`:""}
+        ${f.estado=="asignada"?`<button class="p" onclick="sellar('${f.cufe}')">✔ Sellar y aprobar</button>`:""}
+        ${(f.estado!="pagada")?`<button onclick="abrirNov('${f.cufe}')">Novedad</button>`:""}
+      </div>
+      ${nv?`<div class="mut" style="margin-top:10px">📝 ${nv.texto||nv.motivo}</div>`:""}
+    </div>`;
+  }).join("");
+}
+
+async function tomar(cufe){
+  const {error}=await SB.from("facturas").update({
+    estado:"asignada", sede_id:perfil.sede_id, asignada_por:usuario.id, asignada_en:new Date().toISOString()
+  }).eq("cufe",cufe);
+  if(error){alert("No se pudo: "+error.message);return;}
+  await SB.from("historial").insert({cufe,accion:"asignada",a:perfil.sedes?.nombre,usuario:usuario.id});
+  await cargar();
+}
+async function sellar(cufe){
+  if(!confirm("¿Sellar y aprobar esta factura? Con esto queda lista para pagos."))return;
+  const {error}=await SB.from("facturas").update({
+    estado:"sellada", sellada_por:usuario.id, sellada_en:new Date().toISOString()
+  }).eq("cufe",cufe);
+  if(error){alert("No se pudo: "+error.message);return;}
+  await SB.from("historial").insert({cufe,accion:"sellada",a:perfil.sedes?.nombre,usuario:usuario.id});
+  await cargar();
+}
+function abrirNov(cufe){
+  novActual=cufe;
+  const f=facturas.find(x=>x.cufe===cufe);
+  $("mnov").textContent=(f.emisor||"")+" · "+money(f.total);
+  $("txt").value="";$("merr").textContent="";
+  $("modal").classList.add("on");
+}
+function cerrar(){$("modal").classList.remove("on");}
+async function guardarNov(){
+  const t=$("txt").value.trim();
+  if(!t){$("merr").textContent="Escribí qué pasó.";return;}
+  const {error}=await SB.from("novedades").insert({
+    cufe:novActual,motivo:$("motivo").value,texto:t,sede_id:perfil.sede_id,usuario:usuario.id});
+  if(error){$("merr").textContent="No se pudo: "+error.message;return;}
+  cerrar(); await cargar();
+}
+SB.auth.onAuthStateChange((_e,s)=>{if(!s){$("login").style.display="block";$("app").style.display="none";}});
+init();
+</script>
+</body></html>
