@@ -346,56 +346,81 @@ async function ordenCompra(id){
   let prov={};
   if(p.proveedor_id){ const r=await SB.from("proveedores").select("*").eq("id",p.proveedor_id).single(); prov=r.data||{}; }
   const l=await SB.from("pedido_lineas").select("codigo,insumo,cantidad").eq("pedido_id",id);
-  const filas=(l.data||[]).map(x=>`<tr><td>${x.codigo||""}</td><td>${x.insumo||""}</td><td></td><td>${x.cantidad!=null?x.cantidad:""}</td><td>${x.cantidad!=null?x.cantidad:""}</td></tr>`).join("");
-  const total=(l.data||[]).reduce((t,x)=>t+Number(x.cantidad||0),0);
+  const lineas=l.data||[];
+  const cds=[...new Set(lineas.map(x=>x.codigo).filter(Boolean))];
+  let uni={};
+  if(cds.length){
+    const a=await SB.from("articulos").select("codigo_barras,unimedida_compra").in("codigo_barras",cds.slice(0,300));
+    (a.data||[]).forEach(x=>{ uni[x.codigo_barras]=x.unimedida_compra; });
+  }
+  const hayUni = lineas.some(x=>uni[x.codigo]);
+  const filas=lineas.map(x=>`<tr>
+      <td>${x.codigo||""}</td>
+      <td>${x.insumo||""}</td>
+      ${hayUni?`<td>${uni[x.codigo]||"—"}</td>`:""}
+      <td class="num">${x.cantidad!=null?x.cantidad:""}</td>
+      <td class="num">${x.cantidad!=null?x.cantidad:""}</td></tr>`).join("");
+  const total=lineas.reduce((t,x)=>t+Number(x.cantidad||0),0);
+  const hoy=new Date().toLocaleDateString("es-CO");
   const w=window.open("","_blank");
-  w.document.write(`<!DOCTYPE html><html><head><title>Orden ${p.numero||""}</title><style>
-   @page{margin:16mm}
-   body{font:13px Arial,Helvetica,sans-serif;color:#1e293b}
-   h1{color:#1e3a8a;font-size:26px;margin:0;letter-spacing:.5px}
-   .prov{color:#0f766e;font-size:15px;font-weight:700;margin:3px 0 0}
-   .cab{display:flex;justify-content:space-between;border-bottom:2px solid #cbd5e1;padding-bottom:12px}
-   .der{text-align:right;color:#475569;font-size:12.5px;line-height:1.6}
-   .dos{display:flex;gap:40px;margin-top:16px}
-   .dos>div{flex:1}
-   .k{color:#0f766e;font-weight:700;display:inline-block;width:118px}
-   .lin{margin:3px 0}
-   table{width:100%;border-collapse:collapse;margin-top:18px}
-   th{background:#1e3a8a;color:#fff;text-align:left;padding:9px 8px;font-size:12px}
-   td{padding:9px 8px;border-bottom:1px solid #e2e8f0;font-size:12.5px}
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Orden ${p.numero||""}</title><style>
+   @page{margin:14mm}
+   *{box-sizing:border-box}
+   body{font:12.5px Arial,Helvetica,sans-serif;color:#1e293b;margin:0}
+   .top{background:#12306b;color:#fff;padding:16px 20px;border-radius:10px 10px 0 0;display:flex;justify-content:space-between;align-items:center}
+   .top h1{margin:0;font-size:23px;letter-spacing:1.2px}
+   .top .num{font-size:11.5px;text-align:right;line-height:1.7;opacity:.95}
+   .sub{padding:11px 20px;background:#f1f5f9;border:1px solid #cbd5e1;border-top:none;display:flex;justify-content:space-between;align-items:center}
+   .sub b{color:#0f766e;font-size:15px}
+   .sub span{color:#475569;font-size:12px}
+   .box{padding:16px 20px;border:1px solid #cbd5e1;border-top:none;border-radius:0 0 10px 10px}
+   .cols{display:flex;gap:34px}
+   .cols>div{flex:1}
+   .k{color:#0f766e;font-weight:700;display:inline-block;width:122px}
+   .lin{margin:4px 0}
+   table{width:100%;border-collapse:collapse;margin-top:14px}
+   th{background:#12306b;color:#fff;text-align:left;padding:9px 8px;font-size:11.5px;letter-spacing:.4px}
+   td{padding:8px;border-bottom:1px solid #e2e8f0}
    tbody tr:nth-child(even){background:#f8fafc}
-   .tot{color:#0f766e;font-weight:700;font-size:16px;margin-top:12px}
-   h3{color:#1e3a8a;font-size:14px;margin:20px 0 6px}
-   .f{color:#475569;font-size:12.5px;line-height:1.7}
+   .num{text-align:right}
+   .res{display:flex;justify-content:flex-end;margin-top:12px}
+   .res div{background:#f0fdf4;border:1px solid #86efac;color:#166534;font-weight:700;padding:9px 18px;border-radius:8px;font-size:15px}
+   h3{color:#12306b;font-size:12.5px;margin:20px 0 6px;text-transform:uppercase;letter-spacing:.6px}
+   .f{color:#475569;line-height:1.9}
+   .pie{margin-top:24px;border-top:1px solid #e2e8f0;padding-top:8px;color:#94a3b8;font-size:10.5px;display:flex;justify-content:space-between}
   </style></head><body>
-   <div class="cab">
-     <div><h1>ORDEN DE COMPRA</h1><div class="prov">${p.proveedor_texto||prov.razon_social||""}</div></div>
-     <div class="der">Pedido #${p.numero||""}<br>${fch(p.fecha)}<br>Medio de Pago: ${p.tipo||""}<br>N. Pedido Sistema: ${p.pedido_erp||"---"}</div>
+   <div class="top">
+     <h1>ORDEN DE COMPRA</h1>
+     <div class="num">Pedido #${p.numero||""}<br>${fch(p.fecha)}<br>N. Pedido Sistema: ${p.pedido_erp||"—"}</div>
    </div>
-   <div class="dos">
-     <div>
-       <div class="lin"><span class="k">Sede:</span>${p.sede_texto||sede.nombre||""}</div>
-       <div class="lin"><span class="k">Direccion:</span>${sede.direccion||"---"}</div>
-       <div class="lin"><span class="k">Telefono:</span>${sede.telefono||"---"}</div>
-       <div class="lin"><span class="k">Horario:</span>${sede.hora_entrega||"---"}</div>
-       <div class="lin"><span class="k">Encargado:</span>${p.responsable||"---"}</div>
+   <div class="sub"><b>${p.proveedor_texto||prov.razon_social||""}</b><span>Medio de Pago: ${p.tipo||p.forma_pago||"—"}</span></div>
+   <div class="box">
+     <div class="cols">
+       <div>
+         <div class="lin"><span class="k">Sede:</span>${p.sede_texto||sede.nombre||""}</div>
+         <div class="lin"><span class="k">Dirección:</span>${sede.direccion||"—"}</div>
+         <div class="lin"><span class="k">Teléfono:</span>${sede.telefono||"—"}</div>
+         <div class="lin"><span class="k">Horario:</span>${sede.hora_entrega||"—"}</div>
+         <div class="lin"><span class="k">Encargado:</span>${p.responsable||"—"}</div>
+       </div>
+       <div>
+         <div class="lin"><span class="k">Proveedor:</span>${p.proveedor_texto||prov.razon_social||""}</div>
+         <div class="lin"><span class="k">NIT:</span>${prov.nit||p.nit_proveedor||"—"}</div>
+         <div class="lin"><span class="k">Tel. Proveedor:</span>${prov.telefono1||"—"}</div>
+         <div class="lin"><span class="k">Contacto:</span>${prov.asesor||"—"}</div>
+         <div class="lin"><span class="k">Correo:</span>${prov.correo||"—"}</div>
+       </div>
      </div>
-     <div>
-       <div class="lin"><span class="k">Proveedor:</span>${p.proveedor_texto||prov.razon_social||""}</div>
-       <div class="lin"><span class="k">NIT:</span>${prov.nit||p.nit_proveedor||"---"}</div>
-       <div class="lin"><span class="k">Tel. Proveedor:</span>${prov.telefono1||"---"}</div>
-       <div class="lin"><span class="k">Contacto:</span>${prov.asesor||"---"}</div>
-       <div class="lin"><span class="k">Correo:</span>${prov.correo||"---"}</div>
-     </div>
+     <table><thead><tr><th>CÓDIGO</th><th>ARTÍCULO</th>${hayUni?"<th>UNIDAD</th>":""}<th class="num">CANT.</th><th class="num">TOTAL</th></tr></thead>
+       <tbody>${filas}</tbody></table>
+     <div class="res"><div>Total artículos: ${total}</div></div>
+     <h3>Información de Factura / Documento</h3>
+     <div class="f">N° Factura: ${p.numero_factura||"—"}<br>Tipo: ${p.forma_pago||p.tipo||"—"}<br>N° Pedido Sistema: ${p.pedido_erp||"—"}</div>
+     <div class="pie"><span>Banco de Facturas · ${p.sede_texto||sede.nombre||""}</span><span>Generado el ${hoy}</span></div>
    </div>
-   <table><thead><tr><th>CÓDIGO</th><th>Artículo</th><th>Unidad</th><th>Cant.</th><th>TOTAL</th></tr></thead>
-     <tbody>${filas}</tbody></table>
-   <div class="tot">Total art.: ${total}</div>
-   <h3>Información de Factura / Documento</h3>
-   <div class="f">N Factura: ${p.numero_factura||"---"}<br>Tipo: ${p.forma_pago||"---"}<br>N Pedido Sistema: ${p.pedido_erp||"---"}</div>
   </body></html>`);
   w.document.close();
-  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 400);
+  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 500);
 }
 async function ponerErp(id){
   const p=pedidos.find(x=>x.id===id)||{};
