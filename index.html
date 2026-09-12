@@ -332,12 +332,70 @@ function pintarPedidos(){
         <span class="sp"></span>
         ${est} ${erp} ${am}
         <button onclick="verLineas(${p.id},this)">Ver líneas</button>
+        <button class="p" onclick="ordenCompra(${p.id})">⬇ Orden de compra</button>
         ${!p.factura_cufe?`<button class="s" onclick="amarrarPedido(${p.id})">🔗 Amarrar a factura</button>`:""}
         ${(perfil.rol==="admin"||perfil.rol==="pagos"||perfil.rol==="sede")?`<button onclick="ponerErp(${p.id})">✎ ${p.pedido_erp?"Nº ERP":"Poner Nº ERP"}</button>`:""}
       </div>
       <div id="lin_${p.id}"></div>
     </div>`;
   }).join("") + (l.length>300?'<div class="vacio">Mostrando 300 de '+l.length+' — usá el buscador para afinar.</div>':"");
+}
+async function ordenCompra(id){
+  const p=pedidos.find(x=>x.id===id); if(!p){return;}
+  const sede=sedes.find(s=>s.id===p.sede_id)||{};
+  let prov={};
+  if(p.proveedor_id){ const r=await SB.from("proveedores").select("*").eq("id",p.proveedor_id).single(); prov=r.data||{}; }
+  const l=await SB.from("pedido_lineas").select("codigo,insumo,cantidad").eq("pedido_id",id);
+  const filas=(l.data||[]).map(x=>`<tr><td>${x.codigo||""}</td><td>${x.insumo||""}</td><td></td><td>${x.cantidad!=null?x.cantidad:""}</td><td>${x.cantidad!=null?x.cantidad:""}</td></tr>`).join("");
+  const total=(l.data||[]).reduce((t,x)=>t+Number(x.cantidad||0),0);
+  const w=window.open("","_blank");
+  w.document.write(`<!DOCTYPE html><html><head><title>Orden ${p.numero||""}</title><style>
+   @page{margin:16mm}
+   body{font:13px Arial,Helvetica,sans-serif;color:#1e293b}
+   h1{color:#1e3a8a;font-size:26px;margin:0;letter-spacing:.5px}
+   .prov{color:#0f766e;font-size:15px;font-weight:700;margin:3px 0 0}
+   .cab{display:flex;justify-content:space-between;border-bottom:2px solid #cbd5e1;padding-bottom:12px}
+   .der{text-align:right;color:#475569;font-size:12.5px;line-height:1.6}
+   .dos{display:flex;gap:40px;margin-top:16px}
+   .dos>div{flex:1}
+   .k{color:#0f766e;font-weight:700;display:inline-block;width:118px}
+   .lin{margin:3px 0}
+   table{width:100%;border-collapse:collapse;margin-top:18px}
+   th{background:#1e3a8a;color:#fff;text-align:left;padding:9px 8px;font-size:12px}
+   td{padding:9px 8px;border-bottom:1px solid #e2e8f0;font-size:12.5px}
+   tbody tr:nth-child(even){background:#f8fafc}
+   .tot{color:#0f766e;font-weight:700;font-size:16px;margin-top:12px}
+   h3{color:#1e3a8a;font-size:14px;margin:20px 0 6px}
+   .f{color:#475569;font-size:12.5px;line-height:1.7}
+  </style></head><body>
+   <div class="cab">
+     <div><h1>ORDEN DE COMPRA</h1><div class="prov">${p.proveedor_texto||prov.razon_social||""}</div></div>
+     <div class="der">Pedido #${p.numero||""}<br>${fch(p.fecha)}<br>Medio de Pago: ${p.tipo||""}<br>N. Pedido Sistema: ${p.pedido_erp||"---"}</div>
+   </div>
+   <div class="dos">
+     <div>
+       <div class="lin"><span class="k">Sede:</span>${p.sede_texto||sede.nombre||""}</div>
+       <div class="lin"><span class="k">Direccion:</span>${sede.direccion||"---"}</div>
+       <div class="lin"><span class="k">Telefono:</span>${sede.telefono||"---"}</div>
+       <div class="lin"><span class="k">Horario:</span>${sede.hora_entrega||"---"}</div>
+       <div class="lin"><span class="k">Encargado:</span>${p.responsable||"---"}</div>
+     </div>
+     <div>
+       <div class="lin"><span class="k">Proveedor:</span>${p.proveedor_texto||prov.razon_social||""}</div>
+       <div class="lin"><span class="k">NIT:</span>${prov.nit||p.nit_proveedor||"---"}</div>
+       <div class="lin"><span class="k">Tel. Proveedor:</span>${prov.telefono1||"---"}</div>
+       <div class="lin"><span class="k">Contacto:</span>${prov.asesor||"---"}</div>
+       <div class="lin"><span class="k">Correo:</span>${prov.correo||"---"}</div>
+     </div>
+   </div>
+   <table><thead><tr><th>CÓDIGO</th><th>Artículo</th><th>Unidad</th><th>Cant.</th><th>TOTAL</th></tr></thead>
+     <tbody>${filas}</tbody></table>
+   <div class="tot">Total art.: ${total}</div>
+   <h3>Información de Factura / Documento</h3>
+   <div class="f">N Factura: ${p.numero_factura||"---"}<br>Tipo: ${p.forma_pago||"---"}<br>N Pedido Sistema: ${p.pedido_erp||"---"}</div>
+  </body></html>`);
+  w.document.close();
+  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 400);
 }
 async function ponerErp(id){
   const p=pedidos.find(x=>x.id===id)||{};
@@ -674,26 +732,34 @@ async function textoPdf(f){
   const buf=await f.arrayBuffer();
   const doc=await pdfjsLib.getDocument({data:buf}).promise;
   let t="";
-  for(let i=1;i<=Math.min(doc.numPages,4);i++){
+  for(let i=1;i<=Math.min(doc.numPages,5);i++){
     const pg=await doc.getPage(i); const c=await pg.getTextContent();
-    t+=c.items.map(x=>x.str).join(" ")+"\n";
+    let yPrev=null, linea="";
+    for(const it of c.items){
+      const y=Math.round(it.transform[5]);
+      if(yPrev!==null && Math.abs(y-yPrev)>2){ t+=linea.trim()+"\n"; linea=""; }
+      linea += it.str + " "; yPrev=y;
+    }
+    t += linea.trim()+"\n";
   }
   return t;
 }
 async function datosDePdf(f){
   const t=await textoPdf(f);
-  const num=t.match(/([A-Z]{2,4})\s*-?\s*(\d{4,})/)||[];
-  const nits=t.match(/NIT[^\d]{0,12}([\d\.]{9,15})/)||[];
-  const fecIso=(t.match(/(\d{4}-\d{2}-\d{2})/)||[])[1];
-  const fecCo=(t.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/)||[]);
-  const tot=(t.match(/(?:TOTAL|Total a pagar)[^\d]{0,25}([\d\.,]{5,})/)||[])[1];
-  const em=(t.match(/(?:Raz[oó]n\s*Social|Nombre o raz[oó]n social)[^\n]{0,8}([^\n]{5,60})/i)||[])[1];
+  const g=(re)=>{const m=t.match(re); return m&&m[1]?m[1].trim():null;};
+  const plata=(s)=> s? Number(s.replace(/\./g,"").replace(",",".")) : null;
+  const pf=t.match(/N[uú]mero de Factura:?\s*([A-Za-z]{2,4})\s*-\s*(\d+)/i);
+  const fe=g(/Fecha de Emisi[oó]n:?\s*(\d{2}\/\d{2}\/\d{4})/i);
+  let iso=null; if(fe){const [d1,m1,a1]=fe.split("/"); iso=a1+"-"+m1+"-"+d1;}
   return {
-    prefijo:num[1]||null, folio:num[2]||null, documento:((num[1]||"")+(num[2]||""))||null,
-    nit:nits[1]?nits[1].replace(/\./g,""):null,
-    fecha:fecIso||(fecCo.length?[fecCo[3],fecCo[2].padStart(2,"0"),fecCo[1].padStart(2,"0")].join("-"):null),
-    total:tot?Number(tot.replace(/\./g,"").replace(",","."))||null:null,
-    emisor:em?em.trim():null
+    prefijo: pf? pf[1].toUpperCase(): null,
+    folio:   pf? pf[2]: null,
+    documento: pf? pf[1].toUpperCase()+pf[2]: null,
+    emisor:  g(/Raz[oó]n Social:?\s*([^\n]{4,80})/i),
+    nit:     (g(/Nit del Emisor:?\s*([\d\.\-]+)/i)||"").replace(/[\.\-]/g,"") || null,
+    fecha:   iso,
+    total:   plata(g(/Total factura \(=\)[^\d]{0,30}([\d\.]+,\d{2})/i)
+                 || g(/Total neto factura \(=\)[^\d]{0,30}([\d\.]+,\d{2})/i))
   };
 }
 async function subirPdfs(){
