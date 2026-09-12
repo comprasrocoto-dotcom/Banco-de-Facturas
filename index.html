@@ -8,6 +8,8 @@
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <style>
 :root{--bg:#f4f6f9;--card:#ffffff;--line:#e2e8f0;--txt:#1e293b;--mut:#64748b;
 --ok:#15803d;--warn:#b45309;--bad:#b91c1c;--blue:#0369a1;--accent:#0f766e;--accentr:#115e59}
@@ -332,7 +334,7 @@ function pintarPedidos(){
         <span class="sp"></span>
         ${est} ${erp} ${am}
         <button onclick="verLineas(${p.id},this)">Ver líneas</button>
-        <button class="p" onclick="ordenCompra(${p.id})">⬇ Orden de compra</button>
+        <button class="p" onclick="ordenCompra(${p.id})">⬇ Descargar orden (PDF)</button>
         ${!p.factura_cufe?`<button class="s" onclick="amarrarPedido(${p.id})">🔗 Amarrar a factura</button>`:""}
         ${(perfil.rol==="admin"||perfil.rol==="pagos"||perfil.rol==="sede")?`<button onclick="ponerErp(${p.id})">✎ ${p.pedido_erp?"Nº ERP":"Poner Nº ERP"}</button>`:""}
       </div>
@@ -362,18 +364,17 @@ async function ordenCompra(id){
       <td class="num">${x.cantidad!=null?x.cantidad:""}</td></tr>`).join("");
   const total=lineas.reduce((t,x)=>t+Number(x.cantidad||0),0);
   const hoy=new Date().toLocaleDateString("es-CO");
-  const w=window.open("","_blank");
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Orden ${p.numero||""}</title><style>
-   @page{margin:14mm}
+  const cont=document.createElement("div");
+  cont.style.cssText="position:absolute;left:-9999px;top:0;width:794px;background:#fff";
+  cont.innerHTML=`<style>
    *{box-sizing:border-box}
-   body{font:12.5px Arial,Helvetica,sans-serif;color:#1e293b;margin:0}
-   .top{background:#12306b;color:#fff;padding:16px 20px;border-radius:10px 10px 0 0;display:flex;justify-content:space-between;align-items:center}
-   .top h1{margin:0;font-size:23px;letter-spacing:1.2px}
-   .top .num{font-size:11.5px;text-align:right;line-height:1.7;opacity:.95}
-   .sub{padding:11px 20px;background:#f1f5f9;border:1px solid #cbd5e1;border-top:none;display:flex;justify-content:space-between;align-items:center}
+   .top{background:#12306b;color:#fff;padding:16px 20px;border-radius:10px 10px 0 0;display:flex;justify-content:space-between;align-items:center;font-family:Arial,Helvetica,sans-serif}
+   .top h1{margin:0;font-size:23px;letter-spacing:1.2px;font-family:Arial,Helvetica,sans-serif}
+   .top .num{font-size:11.5px;text-align:right;line-height:1.7;opacity:.95;font-family:Arial,Helvetica,sans-serif}
+   .sub{padding:11px 20px;background:#f1f5f9;border:1px solid #cbd5e1;border-top:none;display:flex;justify-content:space-between;align-items:center;font-family:Arial,Helvetica,sans-serif}
    .sub b{color:#0f766e;font-size:15px}
    .sub span{color:#475569;font-size:12px}
-   .box{padding:16px 20px;border:1px solid #cbd5e1;border-top:none;border-radius:0 0 10px 10px}
+   .box{padding:16px 20px;border:1px solid #cbd5e1;border-top:none;border-radius:0 0 10px 10px;font-family:Arial,Helvetica,sans-serif;color:#1e293b;font-size:12.5px}
    .cols{display:flex;gap:34px}
    .cols>div{flex:1}
    .k{color:#0f766e;font-weight:700;display:inline-block;width:122px}
@@ -388,7 +389,7 @@ async function ordenCompra(id){
    h3{color:#12306b;font-size:12.5px;margin:20px 0 6px;text-transform:uppercase;letter-spacing:.6px}
    .f{color:#475569;line-height:1.9}
    .pie{margin-top:24px;border-top:1px solid #e2e8f0;padding-top:8px;color:#94a3b8;font-size:10.5px;display:flex;justify-content:space-between}
-  </style></head><body>
+  </style>
    <div class="top">
      <h1>ORDEN DE COMPRA</h1>
      <div class="num">Pedido #${p.numero||""}<br>${fch(p.fecha)}<br>N. Pedido Sistema: ${p.pedido_erp||"—"}</div>
@@ -417,10 +418,22 @@ async function ordenCompra(id){
      <h3>Información de Factura / Documento</h3>
      <div class="f">N° Factura: ${p.numero_factura||"—"}<br>Tipo: ${p.forma_pago||p.tipo||"—"}<br>N° Pedido Sistema: ${p.pedido_erp||"—"}</div>
      <div class="pie"><span>Banco de Facturas · ${p.sede_texto||sede.nombre||""}</span><span>Generado el ${hoy}</span></div>
-   </div>
-  </body></html>`);
-  w.document.close();
-  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 500);
+   </div>`;
+  document.body.appendChild(cont);
+  try{
+    const canvas=await html2canvas(cont,{scale:2,backgroundColor:"#ffffff",useCORS:true});
+    const img=canvas.toDataURL("image/jpeg",0.95);
+    const {jsPDF}=window.jspdf;
+    const pdf=new jsPDF("p","mm","a4");
+    const pw=210, ph=297, iw=pw, ih=canvas.height*pw/canvas.width;
+    let y=0, rest=ih;
+    pdf.addImage(img,"JPEG",0,0,iw,ih);
+    rest-=ph;
+    while(rest>2){ y-=ph; pdf.addPage(); pdf.addImage(img,"JPEG",0,y,iw,ih); rest-=ph; }
+    const nombre="Orden_"+(p.numero||"")+"_"+((p.proveedor_texto||"proveedor").split(" ").slice(0,2).join("_"))+".pdf";
+    pdf.save(nombre);
+  }catch(e){ alert("No pude generar el PDF: "+(e.message||e)); }
+  cont.remove();
 }
 async function ponerErp(id){
   const p=pedidos.find(x=>x.id===id)||{};
