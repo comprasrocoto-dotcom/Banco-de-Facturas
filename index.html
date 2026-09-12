@@ -187,6 +187,7 @@ function pintar(){
         ${f.estado=="asignada"?`<button class="p" onclick="sellar('${f.cufe}')">✔ Sellar y aprobar</button>`:""}
         ${f.archivo_pdf?`<button onclick="verPdf('${f.cufe}')">📄 Ver PDF</button>`:""}
         ${f.archivo_pdf_sellado?`<button class="p" onclick="window.open('', '_blank'); verPdfArchivo('${f.archivo_pdf_sellado}')">✅ Ver sellada</button>`:""}
+        ${f.archivo_recibo?`<button onclick="verPdfArchivo('${f.archivo_recibo}')">📸 Ver recibo</button>`:""}
         ${(f.estado!="pagada")?`<button onclick="abrirNov('${f.cufe}')">Novedad</button>`:""}
       </div>
       ${nv?`<div class="mut" style="margin-top:10px">📝 ${nv.texto||nv.motivo}</div>`:""}
@@ -207,7 +208,7 @@ async function verPdfArchivo(ruta){
   if(error||!data){alert("No pude abrir: "+(error?error.message:"sin enlace"));return;}
   window.open(data.signedUrl,"_blank");
 }
-async function generarSellado(cufe,recibido){
+async function generarSellado(cufe,recibido,rutaFoto){
   const f=facturas.find(x=>x.cufe===cufe);
   if(!f||!f.archivo_pdf){return;}
   try{
@@ -231,6 +232,20 @@ async function generarSellado(cufe,recibido){
       pg.drawText("Factura "+num+"  ·  "+fecha,{x:x+10,y:y+bh-27,size:7.5,font:reg,color:rgb(0.25,0.25,0.25)});
       pg.drawText("Recibido por: "+(recibido||"—"),{x:x+10,y:y+8,size:10,font:bold,color:rgb(0.10,0.10,0.10)});
     });
+    if(rutaFoto){
+      try{
+        const {data:sig2}=await SB.storage.from("facturas").createSignedUrl(rutaFoto,300);
+        const bytes2=new Uint8Array(await (await fetch(sig2.signedUrl)).arrayBuffer());
+        const esPng = bytes2[0]===0x89 && bytes2[1]===0x50;
+        const img = esPng ? await doc.embedPng(bytes2) : await doc.embedJpg(bytes2);
+        const pg = doc.addPage([img.width, img.height]);
+        pg.drawImage(img,{x:0,y:0,width:img.width,height:img.height});
+        const alto=Math.min(40,img.height*0.07);
+        pg.drawRectangle({x:0,y:0,width:img.width,height:alto,color:rgb(0.94,0.99,0.95),opacity:0.95});
+        pg.drawText("Recibo firmado  ·  "+(recibido||"")+"  ·  Factura "+num+"  ·  "+fecha,
+          {x:12,y:alto*0.35,size:Math.min(11,alto*0.30),font:bold,color:rgb(0.08,0.40,0.16)});
+      }catch(e){ console.warn("no pude pegar la foto al PDF:",e); }
+    }
     const out=await doc.save();
     const path=f.archivo_pdf.split("/")[0]+"/"+f.cufe+"_SELLADA.pdf";
     const up=await SB.storage.from("facturas").upload(path,new Blob([out],{type:"application/pdf"}),{upsert:true});
@@ -303,14 +318,23 @@ async function confirmarSello(){
   const nombre=$("recibe").value.trim();
   if(nombre.length<3){$("serr").textContent="Escribí el nombre de quien recibe la factura.";return;}
   const cufe=selloActual;
+  let rutaFoto=null;
+  const arch=$("fotoRecibo").files[0];
+  if(arch){
+    const ext=(arch.name.split(".").pop()||"jpg").toLowerCase();
+    rutaFoto=(perfil.sedes?perfil.sedes.nombre:"varios")+"/"+cufe+"_RECIBO."+ext;
+    const up=await SB.storage.from("facturas").upload(rutaFoto,arch,{upsert:true});
+    if(up.error){$("serr").textContent="No pude subir la foto: "+up.error.message;return;}
+  }
   const {error}=await SB.from("facturas").update({
-    estado:"sellada", sellada_por:usuario.id, sellada_en:new Date().toISOString(), recibido_por:nombre
+    estado:"sellada", sellada_por:usuario.id, sellada_en:new Date().toISOString(), recibido_por:nombre,
+    archivo_recibo:rutaFoto
   }).eq("cufe",cufe);
   if(error){$("serr").textContent="No se pudo sellar: "+error.message;return;}
   await SB.from("historial").insert({cufe,accion:"sellada",a:perfil.sedes?.nombre,detalle:"Recibido por "+nombre,usuario:usuario.id});
   cerrarSello();
   $("resdesc").textContent="Generando el PDF sellado...";
-  await generarSellado(cufe,nombre);
+  await generarSellado(cufe,nombre,rutaFoto);
   await cargar();
   $("resdesc").textContent="";
 }
@@ -336,6 +360,8 @@ async function guardarNov(){
   <p class="mut" id="msello"></p>
   <label class="mut">Nombre de quien recibe la factura</label>
   <input id="recibe" placeholder="Ej: JUAN PÉREZ" autocomplete="off">
+  <label class="mut">📸 Foto del papelito firmado <span style="opacity:.7">(opcional — en el celular abre la cámara)</span></label>
+  <input type="file" id="fotoRecibo" accept="image/*" capture="environment">
   <div class="err" id="serr"></div>
   <div class="row"><span class="sp"></span>
     <button onclick="cerrarSello()">Cancelar</button>
