@@ -371,11 +371,34 @@ function pintarAdmin(){
   }
 }
 function verCatalogo(pid){ $("catProv").value=pid; setAdmin("cat"); }
+let mpProvId=null;
 function asignarA(pid){
-  $("catProv").value=pid; setAdmin("cat");
-  adminVista="cat"; $("ad-cat").classList.add("on");
-  $("catProv").value=pid; pintarAdmin();
-  agregarAlCatalogo(pid);
+  mpProvId=pid;
+  const prov=adminProv.find(x=>x.id===pid)||{};
+  $("mpProv").textContent="Proveedor: "+(prov.razon_social||prov.nombre_comercial||"")+(prov.nit?"  ·  NIT "+prov.nit:"");
+  $("mpArt").value=""; $("mpPrecio").value=""; $("mpPrio").value="1"; $("mpErr").textContent="";
+  $("dlProd").innerHTML=adminArt.map(a=>`<option value="${((a.articulo_hiopos||a.articulo_comercial||a.codigo_barras)+"  ("+(a.codigo_barras||"")+")").replace(/"/g,"&quot;")}">`).join("");
+  $("modalProd").classList.add("on");
+  setTimeout(()=>$("mpArt").focus(), 120);
+}
+async function guardarProducto(){
+  const nom=$("mpArt").value.trim();
+  if(!nom){ $("mpErr").textContent="Elegí el insumo de la lista."; return; }
+  const limpio=nom.replace(/\s*\([^)]*\)\s*$/,"").trim();
+  const art = adminArt.find(a=>(a.articulo_hiopos||"")===limpio)
+           || adminArt.find(a=>(a.articulo_comercial||"")===limpio)
+           || adminArt.find(a=>(a.codigo_barras||"")===limpio)
+           || adminArt.find(a=>((a.articulo_hiopos||"")+" ("+(a.codigo_barras||"")+")")===nom);
+  if(!art){ $("mpErr").textContent="No encontré ese insumo. Creálo primero en la pestaña Artículos."; return; }
+  const pr=$("mpPrecio").value!==""? Number($("mpPrecio").value):null;
+  const r=await SB.from("catalogo_compras").insert({codigo_barras:art.codigo_barras, id_proveedor:mpProvId,
+      prioridad:Number($("mpPrio").value)||1, precio_negociado:pr, estado:"Aprobado"});
+  if(r.error){ $("mpErr").textContent="No se pudo: "+r.error.message; return; }
+  const prov=adminProv.find(x=>x.id===mpProvId)||{};
+  $("modalProd").classList.remove("on");
+  adminCargado=false; await cargarAdmin();
+  alert("¡Listo! "+(art.articulo_hiopos||art.codigo_barras)+" quedó asignado a "+(prov.razon_social||""));
+  verCatalogo(mpProvId);
 }
 function agregarAlCatalogo(pid){
   const prov=adminProv.find(x=>x.id===pid)||{};
@@ -435,7 +458,7 @@ function adminNuevo(){
   } else {
     const pid=Number($("catProv").value||0);
     if(!pid){alert("Elegí primero el proveedor.");return;}
-    agregarAlCatalogo(pid); return;
+    asignarA(pid); return;
     const cb=prompt("Código del artículo (ej: ORD010):"); if(!cb) return;
     const pr=prompt("Precio negociado (opcional):")||null;
     const pi=prompt("Prioridad (1 = primera opción):")||"1";
@@ -1047,6 +1070,23 @@ async function guardarNov(){
   cerrar(); await cargar();
 }
 </script>
+<div id="modalProd" class="modal"><div class="card" style="max-width:640px">
+  <h1>＋ Asignar producto</h1>
+  <p class="mut" id="mpProv"></p>
+  <label class="mut">Insumo — están todos, escribí para buscar</label>
+  <input list="dlProd" id="mpArt" placeholder="🔎 buscá por nombre o por código..." style="margin:0" autocomplete="off">
+  <datalist id="dlProd"></datalist>
+  <div class="row" style="margin-top:12px">
+    <div style="flex:1"><label class="mut">Precio negociado</label><input id="mpPrecio" type="number" step="1" placeholder="opcional"></div>
+    <div style="flex:1"><label class="mut">Prioridad (1 = primera opción)</label><input id="mpPrio" type="number" value="1"></div>
+  </div>
+  <div class="err" id="mpErr"></div>
+  <div class="row"><span class="sp"></span>
+    <button onclick="$('modalProd').classList.remove('on')">Cancelar</button>
+    <button class="p" onclick="guardarProducto()">Asignar</button>
+  </div>
+</div></div>
+
 <div id="modalAmarre" class="modal"><div class="card" style="max-width:640px">
   <h1 id="amTitulo">🔗 Amarrar</h1>
   <input id="amBuscar" placeholder="🔎 Escribí para buscar..." oninput="pintarAmarre()" autocomplete="off">
