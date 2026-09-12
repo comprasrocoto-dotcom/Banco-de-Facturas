@@ -44,6 +44,11 @@ input,textarea,select{width:100%;padding:10px 12px;margin:8px 0;background:#fff;
 input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(15,118,110,.12)}
 textarea{min-height:80px;resize:vertical}
 h2{font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:1px;margin:22px 0 10px;font-weight:700}
+table{width:100%;border-collapse:collapse;table-layout:auto}
+th{padding:10px 10px;text-align:left;font-size:11.5px;letter-spacing:.4px}
+td{padding:10px;border-bottom:1px solid var(--line);font-size:13px}
+tbody tr:nth-child(even){background:#f8fafc}
+tr:hover td{background:#f1f5f9}
 .modal{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;padding:20px;z-index:20}
 .modal.on{display:flex}
 .modal .card{max-width:470px;width:100%;max-height:92vh;overflow:auto;box-shadow:0 20px 50px rgba(15,23,42,.25);border:none}
@@ -218,17 +223,17 @@ async function filtrarArticulos(){
   }
   $("np_lineas").innerHTML=""; agregarLinea(); calcularTotal();
 }
-function opcionesArticulos(){
-  if(provArts.length){
-    return provArts.map(a=>`<option value="${a.codigo||a.insumo}">${a.insumo||a.codigo}</option>`).join("");
-  }
-  if($("np_prov").value){
-    return '<option value="__TODOS__">— este proveedor no tiene historial: elegí acá para ver TODOS los artículos —</option>';
-  }
+function listaArticulos(){
+  if(provArts.length) return provArts.map(a=>({codigo:a.codigo||a.insumo, nombre:a.insumo||a.codigo}));
   const id=Number($("np_prov").value||0);
   const delProv=new Set(cat.filter(c=>c.id_proveedor===id).map(c=>c.codigo_barras));
-  const lista = delProv.size ? arts.filter(a=>delProv.has(a.codigo_barras)) : arts;
-  return lista.map(a=>`<option value="${a.codigo_barras}">${a.articulo_hiopos||a.articulo_comercial} (${a.unimedida_compra||""})</option>`).join("");
+  const l = delProv.size ? arts.filter(a=>delProv.has(a.codigo_barras)) : arts;
+  return l.map(a=>({codigo:a.codigo_barras, nombre:(a.articulo_hiopos||a.articulo_comercial||"")+(a.unimedida_compra?" ("+a.unimedida_compra+")":"")}));
+}
+function codigoDe(nombre){
+  const l=listaArticulos();
+  const x=l.find(a=>a.nombre===nombre) || l.find(a=>a.codigo===nombre);
+  return x? x.codigo : nombre;
 }
 function precioDe(codigo){
   const prov=Number($("np_prov").value||0);
@@ -241,7 +246,9 @@ function agregarLinea(verTodos){
   const id="nl"+npLineas;
   const div=document.createElement("div");
   div.className="row"; div.id=id; div.style.marginTop="6px";
-  div.innerHTML=`<select style="flex:3;margin:0" id="${id}_art" onchange="calcularTotal()">${opcionesArticulos()}</select>
+  const L=listaArticulos();
+  div.innerHTML=`<input list="dl_${id}" id="${id}_art" style="flex:3;margin:0" placeholder="🔎 escribí para buscar el artículo..." oninput="calcularTotal()" autocomplete="off">
+    <datalist id="dl_${id}">${L.map(a=>`<option value="${a.nombre.replace(/"/g,"&quot;")}">`).join("")}</datalist>
     <input type="number" step="0.001" value="1" style="flex:1;margin:0" id="${id}_cant" oninput="calcularTotal()" placeholder="cant.">
     <span class="mut" id="${id}_pre" style="min-width:90px"></span>
     <button class="d" onclick="this.parentNode.remove();calcularTotal()">✕</button>`;
@@ -251,11 +258,11 @@ function agregarLinea(verTodos){
 function calcularTotal(){
   let tot=0;
   $("np_lineas").querySelectorAll("div.row").forEach(r=>{
-    const a=r.querySelector("select"), c=r.querySelector("input[type=number]");
+    const a=r.querySelector("input[list]"), c=r.querySelector("input[type=number]");
     if(!a) return;
-    const pr=precioDe(a.value), cant=Number(c.value||0);
+    const pr=precioDe(codigoDe(a.value)), cant=Number(c.value||0);
     const sp=r.querySelector("span");
-    const nom=(a.options[a.selectedIndex]?.text||"").replace(/\s*\(.*\)$/,"").trim().toUpperCase();
+    const nom=(a.value||"").replace(/\s*\(.*\)$/,"").trim().toUpperCase();
     const mm=minmax.find(x=>(x.articulo||"").toUpperCase().trim()===nom);
     let aviso="";
     if(mm){
@@ -272,8 +279,8 @@ async function guardarPedido(){
   const prov=Number($("np_prov").value||0);
   if(!prov){$("np_err").textContent="Elegí el proveedor.";return;}
   const filas=[...$("np_lineas").querySelectorAll("div.row")].map(r=>{
-    const a=r.querySelector("select"), c=r.querySelector("input[type=number]");
-    return a? {codigo:a.value, cant:Number(c.value||0), nombre:a.options[a.selectedIndex]?.text||""}:null;
+    const a=r.querySelector("input[list]"), c=r.querySelector("input[type=number]");
+    return a? {codigo:codigoDe(a.value), cant:Number(c.value||0), nombre:a.value}:null;
   }).filter(x=>x && x.codigo && x.cant>0);
   if(!filas.length){$("np_err").textContent="Agregá al menos un artículo con cantidad.";return;}
   const sedeId = perfil.rol==="sede" ? perfil.sede_id : Number($("np_sede").value);
@@ -447,6 +454,63 @@ async function ponerErp(id){
   const i=pedidos.findIndex(x=>x.id===id); if(i>=0) pedidos[i].pedido_erp=v.trim()||null;
   pintarPedidos();
 }
+let amModo=null, amId=null, amDatos=[];
+async function abrirAmarre(modo, id){
+  amModo=modo; amId=id; $("amErr").textContent=""; $("amBuscar").value="";
+  if(modo==="pedido"){
+    const p=pedidos.find(x=>x.id===id)||{};
+    $("amTitulo").textContent="🔗 Facturas sin pedido — para amarrar al pedido "+(p.pedido_erp||p.numero||"");
+    if(!facturas.length) await cargar();
+    amDatos=facturas.filter(f=>!f.pedido_num && f.tipo==="factura");
+  }else{
+    const f=facturas.find(x=>x.cufe===id)||{};
+    $("amTitulo").textContent="🔗 Buscar el pedido de la factura "+(((f.prefijo||"")+(f.folio||""))||"");
+    if(!pedidosCargados) await cargarPedidos();
+    amDatos=pedidos;
+  }
+  pintarAmarre();
+  $("modalAmarre").classList.add("on");
+  setTimeout(()=>$("amBuscar").focus(),120);
+}
+function pintarAmarre(){
+  const q=($("amBuscar").value||"").trim().toLowerCase();
+  let l=amDatos;
+  if(q) l=l.filter(x=>JSON.stringify(x).toLowerCase().includes(q));
+  l=l.slice(0,200);
+  if(!l.length){ $("amLista").innerHTML='<div class="vacio">No encontré nada con "'+q+'"</div>'; return; }
+  $("amLista").innerHTML=l.map(x=>{
+    if(amModo==="pedido"){
+      return `<div class="card" style="margin:6px 0;cursor:pointer" onclick="amarrarConFactura('${x.cufe}')">
+        <div class="row"><div><div class="emisor">${x.emisor||"—"}</div>
+          <div class="mut">${(x.prefijo||"")+(x.folio||"")} · ${fch(x.fecha_emision)} · NIT ${x.nit_emisor||"—"}</div></div>
+        <div class="total">${money(x.total)}</div></div></div>`;
+    }else{
+      return `<div class="card" style="margin:6px 0;cursor:pointer" onclick="amarrarConPedido(${x.id})">
+        <div class="row"><div><div class="emisor">${x.proveedor_texto||"—"}</div>
+          <div class="mut">${x.sede_texto||""} · ${fch(x.fecha)} · Orden #${x.numero||""}</div></div>
+        <div class="row" style="gap:6px">
+          ${x.pedido_erp?`<span class="badge st-sellada">ERP ${x.pedido_erp}</span>`:""}
+          ${x.factura_cufe?`<span class="badge">ya amarrado</span>`:`<span class="badge st-pool">sin factura</span>`}</div></div></div>`;
+    }
+  }).join("") + (l.length>=200?'<div class="vacio">Escribí para afinar la búsqueda.</div>':"");
+}
+async function amarrarConFactura(cufe){
+  const up=await SB.from("pedidos").update({factura_cufe:cufe}).eq("id",amId);
+  if(up.error){$("amErr").textContent="No se pudo: "+up.error.message;return;}
+  const f=facturas.find(x=>x.cufe===cufe)||{};
+  await SB.from("historial").insert({cufe,accion:"pedido amarrado",detalle:"pedido "+(pedidos.find(x=>x.id===amId)||{}).numero,usuario:usuario.id}).then(()=>{},()=>{});
+  $("modalAmarre").classList.remove("on");
+  pedidosCargados=false; await cargarPedidos(); await cargar();
+  alert("¡Amarrado! "+(f.prefijo||"")+(f.folio||"")+" ↔ "+((pedidos.find(x=>x.id===amId)||{}).numero||""));
+}
+async function amarrarConPedido(pid){
+  const up=await SB.from("pedidos").update({factura_cufe:amId}).eq("id",pid);
+  if(up.error){$("amErr").textContent="No se pudo: "+up.error.message;return;}
+  await SB.from("historial").insert({cufe:amId,accion:"pedido amarrado",detalle:"pedido "+(pedidos.find(x=>x.id===pid)||{}).numero,usuario:usuario.id}).then(()=>{},()=>{});
+  $("modalAmarre").classList.remove("on");
+  pedidosCargados=false; await cargarPedidos(); await cargar();
+  alert("¡Amarrado!");
+}
 async function abrirPedido(id){
   const c=$("det_"+id), ch=$("ch_"+id);
   if(c.dataset.on==="1"){ c.innerHTML=""; c.dataset.on="0"; if(ch) ch.textContent="⌄"; return; }
@@ -498,7 +562,7 @@ async function abrirPedido(id){
        </div>
      </div>
      <div class="row" style="margin-top:14px">
-       ${!p.factura_cufe?`<button class="s" onclick="amarrarPedido(${p.id})">🔗 Amarrar a factura</button>`:""}
+       ${!p.factura_cufe?`<button class="s" onclick="abrirAmarre('pedido',${p.id})">🔗 Amarrar a factura</button>`:""}
        ${p.factura_cufe?`<span class="badge st-sellada">Amarrado a ${p.numero_factura||"factura"}</span>`:""}
        ${p.observacion_pedido?`<span class="mut">Obs: ${p.observacion_pedido}</span>`:""}
      </div>
@@ -601,6 +665,7 @@ function pintar(){
         ${f.archivo_pdf_sellado?`<button class="p" onclick="window.open('', '_blank'); verPdfArchivo('${f.archivo_pdf_sellado}')">✅ Ver sellada</button>`:""}
         ${f.archivo_recibo?`<button onclick="verPdfArchivo('${f.archivo_recibo}')">📸 Ver recibo</button>`:""}
         ${((perfil.rol==="admin"||perfil.rol==="pagos")&&f.estado!=="pool")?`<button onclick="pedirIngreso('${f.cufe}')">✎ ${f.num_ingreso?"Nº ingreso":"Poner Nº de ingreso"}</button>`:""}
+        ${((perfil.rol==="admin"||perfil.rol==="pagos")&&f.tipo==="factura")?`<button class="s" onclick="abrirAmarre('factura','${f.cufe}')">🔗 Buscar pedido</button>`:""}
         ${(f.estado!="pagada")?`<button onclick="abrirNov('${f.cufe}')">Novedad</button>`:""}
       </div>
       ${nv?`<div class="mut" style="margin-top:10px">📝 ${nv.texto||nv.motivo}</div>`:""}
@@ -788,6 +853,15 @@ async function guardarNov(){
   cerrar(); await cargar();
 }
 </script>
+<div id="modalAmarre" class="modal"><div class="card" style="max-width:640px">
+  <h1 id="amTitulo">🔗 Amarrar</h1>
+  <input id="amBuscar" placeholder="🔎 Escribí para buscar..." oninput="pintarAmarre()" autocomplete="off">
+  <div id="amLista" style="max-height:52vh;overflow:auto;margin-top:6px"></div>
+  <div class="err" id="amErr"></div>
+  <div class="row"><span class="sp"></span>
+    <button onclick="$('modalAmarre').classList.remove('on')">Cerrar</button></div>
+</div></div>
+
 <div id="modalEditar" class="modal"><div class="card" style="max-width:520px">
   <h1>✎ Editar pedido</h1>
   <div id="editForm"></div>
