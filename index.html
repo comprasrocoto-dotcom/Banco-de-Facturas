@@ -104,7 +104,7 @@ h2{font-size:14px;color:var(--mut);text-transform:uppercase;letter-spacing:1px;m
 
 <script>
 const SB = supabase.createClient("https://egzggxwfyqeihzgpjgmp.supabase.co", "sb_publishable_3rzP6pCef1S5nRzFkG-eHw_-BF73n91");
-let usuario=null, perfil=null, facturas=[], novedades=[], tipo="factura", vista="pool", novActual=null;
+let usuario=null, perfil=null, facturas=[], novedades=[], sedes=[], tipo="factura", vista="pool", novActual=null;
 const $=id=>document.getElementById(id);
 const money=n=>"$ "+(n||0).toLocaleString("es-CO",{maximumFractionDigits:0});
 const fch=s=>s?new Date(s+"T12:00:00").toLocaleDateString("es-CO",{day:"2-digit",month:"short",year:"numeric"}):"";
@@ -120,6 +120,8 @@ async function sesion(u){
   $("login").style.display="none"; $("app").style.display="block";
   const s=perfil.sedes;
   if(perfil.rol==="admin"||perfil.rol==="pagos"){$("btnsubir").style.display="inline-block";}
+  const {data:ss}=await SB.from("sedes").select("id,nombre,marca_id").order("nombre");
+  sedes=ss||[];
   const {data:ms}=await SB.from("marcas").select("id,nombre").order("nombre");
   $("mar").innerHTML=(ms||[]).map(m=>`<option value="${m.id}">${m.nombre}</option>`).join("");
   $("sede").textContent=(s?s.nombre:"—")+(s&&s.marcas?" · "+s.marcas.nombre:"");
@@ -169,7 +171,8 @@ function pintar(){
         <span class="badge">${(f.categoria||"otro").replace("_"," ")}</span>
         ${nv?`<span class="badge st-pool">CON NOVEDAD: ${nv.motivo}</span>`:""}
         <span class="sp"></span>
-        ${f.estado=="pool"?`<button class="s" onclick="tomar('${f.cufe}')">Es mía</button>`:""}
+        ${(perfil.rol==="sede"&&f.estado=="pool")?`<button class="s" onclick="tomar('${f.cufe}')">Es mía</button>`:""}
+        ${((perfil.rol==="admin"||perfil.rol==="pagos")&&f.estado!=="sellada"&&f.estado!=="pagada")?`<select id="sel_${f.cufe}" style="width:auto;margin:0">${sedes.filter(s=>s.marca_id===f.marca_id).map(s=>`<option value="${s.id}"${f.sede_id===s.id?" selected":""}>${s.nombre}</option>`).join("")}</select><button class="s" onclick="asignar('${f.cufe}')">Asignar</button>`:""}
         ${f.estado=="asignada"?`<button class="p" onclick="sellar('${f.cufe}')">✔ Sellar y aprobar</button>`:""}
         ${(f.estado!="pagada")?`<button onclick="abrirNov('${f.cufe}')">Novedad</button>`:""}
       </div>
@@ -184,6 +187,16 @@ async function tomar(cufe){
   }).eq("cufe",cufe);
   if(error){alert("No se pudo: "+error.message);return;}
   await SB.from("historial").insert({cufe,accion:"asignada",a:perfil.sedes?.nombre,usuario:usuario.id});
+  await cargar();
+}
+async function asignar(cufe){
+  const sel=$("sel_"+cufe); if(!sel)return;
+  const sid=Number(sel.value);
+  const {error}=await SB.from("facturas").update({
+    estado:"asignada", sede_id:sid, asignada_por:usuario.id, asignada_en:new Date().toISOString()
+  }).eq("cufe",cufe);
+  if(error){alert("No se pudo asignar: "+error.message);return;}
+  await SB.from("historial").insert({cufe,accion:"asignada por admin",usuario:usuario.id});
   await cargar();
 }
 async function sellar(cufe){
