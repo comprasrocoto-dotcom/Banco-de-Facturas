@@ -347,12 +347,16 @@ function pintarAdmin(){
         <div><div class="emisor">${x.razon_social||x.nombre_comercial||"—"}</div>
         <div class="mut">NIT ${x.nit||"—"} · Tel ${x.telefono1||"—"} · ${x.correo||"—"}${x.asesor?" · "+x.asesor:""}</div></div>
         <span class="sp"></span>
-        <span class="badge">${adminCat.filter(k=>k.id_proveedor===x.id).length} artículos en el catálogo</span></div></div>`).join("") || '<div class="vacio">Sin resultados.</div>';
+        <span class="badge">${adminCat.filter(k=>k.id_proveedor===x.id).length} artículos en el catálogo</span>
+        <button class="p" onclick="asignarA(${x.id})">＋ Asignar producto</button>
+        <button onclick="verCatalogo(${x.id})">Ver catálogo</button></div></div>`).join("") || '<div class="vacio">Sin resultados.</div>';
   } else if(adminVista==="art"){
     let l=adminArt.filter(x=>!q||((x.codigo_barras||"")+" "+(x.articulo_hiopos||"")+" "+(x.subfamilia||"")).toLowerCase().includes(q));
     c.innerHTML = l.slice(0,400).map(x=>`<div class="card" style="margin:6px 0"><div class="row">
         <div><div class="emisor">${x.articulo_hiopos||x.articulo_comercial||"—"}</div>
-        <div class="mut">Código ${x.codigo_barras||"—"} · ${x.unimedida_compra||x.unimedida_hiopos||"—"} ${x.subfamilia?"· "+x.subfamilia:""}</div></div></div></div>`).join("") || '<div class="vacio">Sin resultados.</div>';
+        <div class="mut">Código ${x.codigo_barras||"—"} · ${x.unimedida_compra||x.unimedida_hiopos||"—"} ${x.subfamilia?"· "+x.subfamilia:""}</div></div>
+        <span class="sp"></span>
+        <button class="s" onclick="amarrarA('${(x.codigo_barras||"").replace(/'/g,"")}')">＋ Amarrar a proveedor</button></div></div></div>`).join("") || '<div class="vacio">Sin resultados.</div>';
   } else {
     const pid=Number($("catProv").value||0);
     if(!pid){ c.innerHTML='<div class="vacio">Elegí un proveedor para ver qué se le compra.</div>'; return; }
@@ -365,6 +369,47 @@ function pintarAdmin(){
         <button class="d" onclick="quitarDelCatalogo(${k.id})">✕</button></div>`).join("")
       : '<div class="mut">Este proveedor no tiene artículos en el catálogo todavía.</div>') + '</div>';
   }
+}
+function verCatalogo(pid){ $("catProv").value=pid; setAdmin("cat"); }
+function asignarA(pid){
+  $("catProv").value=pid; setAdmin("cat");
+  adminVista="cat"; $("ad-cat").classList.add("on");
+  $("catProv").value=pid; pintarAdmin();
+  agregarAlCatalogo(pid);
+}
+function agregarAlCatalogo(pid){
+  const prov=adminProv.find(x=>x.id===pid)||{};
+  const cb=prompt("Artículo para "+(prov.razon_social||"")+"\n\nCódigo del artículo (ej: ORD010) — o parte del nombre:");
+  if(!cb) return;
+  let cod=cb.trim();
+  const q=cod.toLowerCase();
+  const enc=adminArt.filter(a=>((a.codigo_barras||"")+" "+(a.articulo_hiopos||"")+" "+(a.articulo_comercial||"")).toLowerCase().includes(q));
+  if(!enc.length){ alert("No encontré ese artículo. Creálo primero en la pestaña Artículos."); return; }
+  if(enc.length>1 && !enc.some(a=>a.codigo_barras===cod)){
+    const t=enc.slice(0,12).map((a,i)=>(i+1)+". "+a.codigo_barras+" — "+(a.articulo_hiopos||"")).join("\n");
+    const el=prompt("Encontré varios, escribí el número:\n\n"+t);
+    const n=Number(el); if(!n||!enc[n-1]) return;
+    cod=enc[n-1].codigo_barras;
+  } else { cod=enc[0].codigo_barras; }
+  const pr=prompt("Precio negociado con este proveedor (opcional):")||null;
+  const pi=prompt("Prioridad (1 = primera opción):")||"1";
+  SB.from("catalogo_compras").insert({codigo_barras:cod, id_proveedor:pid, prioridad:Number(pi)||1,
+      precio_negociado:pr?Number(String(pr).replace(/[^0-9.]/g,"")):null, estado:"Aprobado"})
+    .then(async r=>{ if(r.error){alert("No se pudo: "+r.error.message);return;}
+      adminCargado=false; await cargarAdmin(); setAdmin("cat"); $("catProv").value=pid; pintarAdmin(); });
+}
+function amarrarA(codigo){
+  if(!codigo) return;
+  const lista=adminProv.slice(0,40).map((x,i)=>(i+1)+". "+(x.razon_social||x.nombre_comercial)+"  (NIT "+(x.nit||"—")+")").join("\n");
+  const el=prompt("¿A qué proveedor le amarrás "+codigo+"?\n(Escribí el número)\n\n"+lista);
+  const n=Number(el); if(!n||!adminProv[n-1]) return;
+  const pid=adminProv[n-1].id;
+  const pr=prompt("Precio negociado (opcional):")||null;
+  SB.from("catalogo_compras").insert({codigo_barras:codigo, id_proveedor:pid, prioridad:1,
+      precio_negociado:pr?Number(String(pr).replace(/[^0-9.]/g,"")):null, estado:"Aprobado"})
+    .then(async r=>{ if(r.error){alert("No se pudo: "+r.error.message);return;}
+      adminCargado=false; await cargarAdmin();
+      alert("¡Listo! "+codigo+" quedó amarrado a "+(adminProv[n-1].razon_social||"")); });
 }
 function adminNuevo(){
   if(adminVista==="prov"){
@@ -390,6 +435,7 @@ function adminNuevo(){
   } else {
     const pid=Number($("catProv").value||0);
     if(!pid){alert("Elegí primero el proveedor.");return;}
+    agregarAlCatalogo(pid); return;
     const cb=prompt("Código del artículo (ej: ORD010):"); if(!cb) return;
     const pr=prompt("Precio negociado (opcional):")||null;
     const pi=prompt("Prioridad (1 = primera opción):")||"1";
