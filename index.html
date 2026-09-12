@@ -177,7 +177,7 @@ async function salir(){await SB.auth.signOut();location.reload();}
 
 let arts=[], provs=[], cat=[], minmax=[], provArts=[], npLineas=0;
 async function nuevoPedido(){
-  $("np_err").textContent=""; $("np_lineas").innerHTML=""; npLineas=0;
+  $("np_err").textContent=""; $("np_lineas").innerHTML=""; npLineas=0; provArts=[];
   const hoy=new Date().toISOString().slice(0,10);
   $("np_fecha").value=hoy; $("np_entrega").value=""; $("np_obs").value=""; $("np_resp").value="";
   if(!provs.length){
@@ -596,10 +596,21 @@ async function editarPedido(id){
                 ["numero_nota_credito","N° nota crédito",p.numero_nota_credito],["observacion_factura","Observación de factura",p.observacion_factura]];
   let html="";
   for(const [k,lab,v] of campos) html+=`<label class="mut">${lab}</label><input id="ed_${k}" value="${(v||"").toString().replace(/"/g,"&quot;")}">`;
-  html+='<label class="mut" style="margin-top:10px">Artículos del pedido (podés cambiar cantidades o anexar)</label><div id="editLineas"></div>';
+  html+='<label class="mut" style="margin-top:10px">Artículos del pedido <span id="edProv"></span></label><div id="editLineas"></div>';
   html+=`<button style="margin-top:8px" onclick="insertarLinea()">＋ Anexar artículo</button>`;
   $("editForm").innerHTML=html; editActual=id;
   $("modalEditar").classList.add("on");
+  // lo que se le compra a ESE proveedor, para el buscador
+  provArts=[];
+  if(p.proveedor_id){
+    $("edProv").textContent="(cargando artículos del proveedor...)";
+    const pa=await SB.from("proveedor_articulos").select("codigo,insumo,veces")
+        .eq("proveedor_id",p.proveedor_id).order("veces",{ascending:false}).limit(500);
+    provArts=pa.data||[];
+    $("edProv").textContent = provArts.length
+      ? "— "+provArts.length+" artículos que le comprás a "+(p.proveedor_texto||"este proveedor")+" (tocá el campo para ver la lista)"
+      : "— este proveedor no tiene historial";
+  }
   const l=await SB.from("pedido_lineas").select("id,codigo,insumo,cantidad").eq("pedido_id",id);
   editLineas=l.data||[];
   $("editLineas").innerHTML=editLineas.map(x=>lineaEdit(x.id,x.insumo,x.cantidad,x.codigo)).join("");
