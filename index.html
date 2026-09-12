@@ -183,6 +183,7 @@ function pintar(){
         ${(perfil.rol==="sede"&&f.estado=="pool")?`<button class="s" onclick="tomar('${f.cufe}')">Es mía</button>`:""}
         ${((perfil.rol==="admin"||perfil.rol==="pagos")&&f.estado!=="sellada"&&f.estado!=="pagada")?`<select id="sel_${f.cufe}" style="width:auto;margin:0">${sedes.filter(s=>s.marca_id===f.marca_id).map(s=>`<option value="${s.id}"${f.sede_id===s.id?" selected":""}>${s.nombre}</option>`).join("")}</select><button class="s" onclick="asignar('${f.cufe}')">Asignar</button>`:""}
         ${f.estado=="asignada"?`<button class="p" onclick="sellar('${f.cufe}')">✔ Sellar y aprobar</button>`:""}
+        ${f.archivo_pdf?`<button onclick="verPdf('${f.cufe}')">📄 Ver PDF</button>`:""}
         ${(f.estado!="pagada")?`<button onclick="abrirNov('${f.cufe}')">Novedad</button>`:""}
       </div>
       ${nv?`<div class="mut" style="margin-top:10px">📝 ${nv.texto||nv.motivo}</div>`:""}
@@ -197,6 +198,13 @@ async function tomar(cufe){
   if(error){alert("No se pudo: "+error.message);return;}
   await SB.from("historial").insert({cufe,accion:"asignada",a:perfil.sedes?.nombre,usuario:usuario.id});
   await cargar();
+}
+async function verPdf(cufe){
+  const f=facturas.find(x=>x.cufe===cufe);
+  if(!f||!f.archivo_pdf){alert("Esta factura no tiene PDF guardado.");return;}
+  const {data,error}=await SB.storage.from("facturas").createSignedUrl(f.archivo_pdf,300);
+  if(error||!data){alert("No pude abrir el PDF: "+(error?error.message:"sin enlace"));return;}
+  window.open(data.signedUrl,"_blank");
 }
 async function descargarSelladas(){
   const d1=$("d1").value, d2=$("d2").value;
