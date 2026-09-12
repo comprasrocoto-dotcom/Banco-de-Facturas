@@ -578,6 +578,17 @@ function csvPedido(id){
     a.download="Orden_"+(p.numero||"")+".csv"; document.body.appendChild(a); a.click(); a.remove();
   });
 }
+let editActual=null, editLineas=[];
+function insertarLinea(){ $("editLineas").insertAdjacentHTML("beforeend", lineaEdit("","",1,"")); }
+function lineaEdit(id, insumo, cant, codigo){
+  const L=listaArticulos();
+  const uid="el"+Math.random().toString(36).slice(2,7);
+  return `<div class="row" data-id="${id||""}" data-cod="${(codigo||"").replace(/"/g,"&quot;")}" style="margin-top:6px">
+    <input list="dll_${uid}" value="${(insumo||"").replace(/"/g,"&quot;")}" placeholder="🔎 artículo" style="flex:3;margin:0">
+    <datalist id="dll_${uid}">${L.map(a=>`<option value="${a.nombre.replace(/"/g,"&quot;")}">`).join("")}</datalist>
+    <input type="number" step="0.001" value="${cant!=null?cant:1}" style="flex:1;margin:0" placeholder="cant.">
+    <button class="d" onclick="this.parentNode.remove()">✕</button></div>`;
+}
 async function editarPedido(id){
   const p=pedidos.find(x=>x.id===id)||{};
   const campos=[["responsable","Responsable",p.responsable],["forma_pago","Medio / Tipo de pago",p.forma_pago],
@@ -585,14 +596,37 @@ async function editarPedido(id){
                 ["numero_nota_credito","N° nota crédito",p.numero_nota_credito],["observacion_factura","Observación de factura",p.observacion_factura]];
   let html="";
   for(const [k,lab,v] of campos) html+=`<label class="mut">${lab}</label><input id="ed_${k}" value="${(v||"").toString().replace(/"/g,"&quot;")}">`;
-  $("editForm").innerHTML=html; editActual=id; $("modalEditar").classList.add("on");
+  html+='<label class="mut" style="margin-top:10px">Artículos del pedido (podés cambiar cantidades o anexar)</label><div id="editLineas"></div>';
+  html+=`<button style="margin-top:8px" onclick="insertarLinea()">＋ Anexar artículo</button>`;
+  $("editForm").innerHTML=html; editActual=id;
+  $("modalEditar").classList.add("on");
+  const l=await SB.from("pedido_lineas").select("id,codigo,insumo,cantidad").eq("pedido_id",id);
+  editLineas=l.data||[];
+  $("editLineas").innerHTML=editLineas.map(x=>lineaEdit(x.id,x.insumo,x.cantidad,x.codigo)).join("");
 }
-let editActual=null;
 async function guardarEdicion(){
   const campos=["responsable","forma_pago","numero_factura","pedido_erp","numero_nota_credito","observacion_factura"];
   const upd={}; campos.forEach(k=>upd[k]=$("ed_"+k).value.trim()||null);
   const {error}=await SB.from("pedidos").update(upd).eq("id",editActual);
   if(error){alert("No se pudo guardar: "+error.message);return;}
+  // lineas: actualizar, anexar y borrar las quitadas
+  const filas=[...$("editLineas").querySelectorAll("div.row")];
+  const vivos=[];
+  for(const r of filas){
+    const a=r.querySelector("input[list]"), c=r.querySelector("input[type=number]");
+    if(!a) continue;
+    const cant=Number(c.value||0); if(cant<=0) continue;
+    const cod=r.dataset.cod || codigoDe(a.value);
+    if(r.dataset.id){
+      await SB.from("pedido_lineas").update({cantidad:cant, insumo:a.value, codigo:cod}).eq("id",Number(r.dataset.id));
+      vivos.push(Number(r.dataset.id));
+    }else if(a.value.trim()){
+      const ins=await SB.from("pedido_lineas").insert({pedido_id:editActual, codigo:cod, insumo:a.value.trim(), cantidad:cant}).select("id").single();
+      if(ins.data) vivos.push(ins.data.id);
+    }
+  }
+  const borrar=editLineas.map(x=>x.id).filter(i=>!vivos.includes(i));
+  if(borrar.length) await SB.from("pedido_lineas").delete().in("id",borrar);
   $("modalEditar").classList.remove("on");
   pedidosCargados=false; await cargarPedidos();
 }
@@ -663,7 +697,7 @@ function pintar(){
         ${((perfil.rol==="admin"||perfil.rol==="pagos")&&f.estado!=="sellada"&&f.estado!=="pagada")?`<select id="sel_${f.cufe}" style="width:auto;margin:0">${sedes.filter(s=>s.marca_id===f.marca_id).map(s=>`<option value="${s.id}"${f.sede_id===s.id?" selected":""}>${s.nombre}</option>`).join("")}</select><button class="s" onclick="asignar('${f.cufe}')">Asignar</button>`:""}
         ${f.estado=="asignada"?`<button class="p" onclick="sellar('${f.cufe}')">✔ Sellar y aprobar</button>`:""}
         ${f.archivo_pdf?`<button onclick="verPdf('${f.cufe}')">📄 Ver PDF</button>`:""}
-        ${f.archivo_pdf_sellado?`<button class="p" onclick="window.open('', '_blank'); verPdfArchivo('${f.archivo_pdf_sellado}')">✅ Ver sellada</button>`:""}
+        ${(f.archivo_pdf_sellado&&(f.estado==="sellada"||f.estado==="pagada"))?`<button class="p" onclick="verPdfArchivo('${f.archivo_pdf_sellado}')">✅ Ver sellada</button>`:""}
         ${f.archivo_recibo?`<button onclick="verPdfArchivo('${f.archivo_recibo}')">📸 Ver recibo</button>`:""}
         ${((perfil.rol==="admin"||perfil.rol==="pagos")&&f.estado!=="pool")?`<button onclick="pedirIngreso('${f.cufe}')">✎ ${f.num_ingreso?"Nº ingreso":"Poner Nº de ingreso"}</button>`:""}
         ${((perfil.rol==="admin"||perfil.rol==="pagos")&&f.tipo==="factura")?`<button class="s" onclick="abrirAmarre('factura','${f.cufe}')">🔗 Buscar pedido</button>`:""}
