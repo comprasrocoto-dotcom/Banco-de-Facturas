@@ -56,6 +56,8 @@ h2{font-size:14px;color:var(--mut);text-transform:uppercase;letter-spacing:1px;m
 <div id="app" style="display:none">
   <header>
     <h1>🏦 BANCO DE FACTURAS</h1>
+    <button class="chip on" id="m-banco" onclick="setModulo('banco')">Facturas</button>
+    <button class="chip"    id="m-pedidos" onclick="setModulo('pedidos')">📋 Pedidos</button>
     <span id="sede" class="badge"></span>
     <span class="sp"></span>
     <button onclick="salir()">Salir</button>
@@ -90,6 +92,17 @@ h2{font-size:14px;color:var(--mut);text-transform:uppercase;letter-spacing:1px;m
       <button class="chip"    id="v-nov"      onclick="setVista('nov')">Con novedad</button>
     </div>
     <div id="lista"></div>
+
+    <div id="vistaPedidos" style="display:none">
+      <div class="row" style="margin-bottom:14px">
+        <button class="chip on" id="pe-pend" onclick="setPedVista('pendiente')">Pendientes</button>
+        <button class="chip"    id="pe-fact" onclick="setPedVista('facturado')">Facturados</button>
+        <button class="chip"    id="pe-todos" onclick="setPedVista('todos')">Todos</button>
+        <span class="sp"></span>
+        <input id="qp" placeholder="🔎 N° de orden, proveedor o factura" style="width:300px;margin:0" oninput="pintarPedidos()">
+      </div>
+      <div id="listaped"></div>
+    </div>
   </div>
 </div>
 
@@ -114,7 +127,8 @@ h2{font-size:14px;color:var(--mut);text-transform:uppercase;letter-spacing:1px;m
 
 <script>
 const SB = supabase.createClient("https://egzggxwfyqeihzgpjgmp.supabase.co", "sb_publishable_3rzP6pCef1S5nRzFkG-eHw_-BF73n91");
-let usuario=null, perfil=null, facturas=[], novedades=[], sedes=[], tipo="factura", vista="pool", novActual=null;
+let usuario=null, perfil=null, facturas=[], novedades=[], sedes=[], pedidos=[], pedidosCargados=false, pedVista="pendiente", modulo="banco";
+let tipo="factura", vista="pool", novActual=null;
 const $=id=>document.getElementById(id);
 const money=n=>"$ "+(n||0).toLocaleString("es-CO",{maximumFractionDigits:0});
 const fch=s=>s?new Date(s+"T12:00:00").toLocaleDateString("es-CO",{day:"2-digit",month:"short",year:"numeric"}):"";
@@ -145,6 +159,73 @@ async function entrar(){
 }
 async function salir(){await SB.auth.signOut();location.reload();}
 
+function setModulo(m){
+  modulo=m;
+  $("m-banco").classList.toggle("on",m=="banco");
+  $("m-pedidos").classList.toggle("on",m=="pedidos");
+  document.querySelector(".wrap > .row").style.display = (m=="banco")?"flex":"none";
+  document.querySelectorAll(".wrap > .row")[1] && (document.querySelectorAll(".wrap > .row")[1].style.display=(m=="banco")?"flex":"none");
+  $("barraDescarga").style.display = (m=="banco" && (perfil.rol==="admin"||perfil.rol==="pagos"))?"flex":"none";
+  $("lista").style.display = (m=="banco")?"block":"none";
+  $("vistaPedidos").style.display = (m=="pedidos")?"block":"none";
+  if(m=="pedidos" && !pedidosCargados) cargarPedidos();
+}
+function setPedVista(v){ pedVista=v;
+  ["pend","fact","todos"].forEach(x=>$("pe-"+x).classList.toggle("on", x==(v=="pendiente"?"pend":v=="facturado"?"fact":"todos")));
+  pintarPedidos();
+}
+async function cargarPedidos(){
+  const {data,error}=await SB.from("pedidos").select("*").order("fecha",{ascending:false}).limit(1200);
+  if(error){$("listaped").innerHTML='<div class="vacio">No pude cargar los pedidos: '+error.message+'</div>';return;}
+  pedidos=data||[]; pedidosCargados=true; pintarPedidos();
+}
+function pintarPedidos(){
+  const q=($("qp").value||"").trim().toLowerCase();
+  let l=pedidos.filter(p=>pedVista=="todos"||p.estado===pedVista);
+  if(q) l=l.filter(p=>((p.numero||"")+" "+(p.proveedor_texto||p.proveedor||"")+" "+(p.numero_factura||"")+" "+(p.pedido_erp||"")+" "+(p.sede_texto||"")).toLowerCase().includes(q));
+  const cont=$("listaped");
+  if(!l.length){cont.innerHTML='<div class="vacio">No hay pedidos acá.</div>';return;}
+  cont.innerHTML=l.slice(0,300).map(p=>{
+    const est = p.estado==="facturado" ? '<span class="badge st-sellada">Facturado</span>' : '<span class="badge st-pool">Pendiente</span>';
+    const am  = p.factura_cufe ? '<span class="badge st-asignada">Amarrado a '+(p.numero_factura||"factura")+'</span>' : '';
+    const erp = p.pedido_erp ? '<span class="badge">ERP '+p.pedido_erp+'</span>' : '';
+    return `<div class="card">
+      <div class="row">
+        <div><div class="emisor">${p.proveedor_texto||p.proveedor||"—"}</div>
+          <div class="mut">Orden ${p.numero||"—"} · ${fch(p.fecha)} · ${p.sede_texto||"—"}${p.responsable?" · "+p.responsable:""}</div></div>
+        <span class="sp"></span>
+        ${est} ${erp} ${am}
+        <button onclick="verLineas(${p.id},this)">Ver líneas</button>
+        ${!p.factura_cufe?`<button class="s" onclick="amarrarPedido(${p.id})">🔗 Amarrar a factura</button>`:""}
+      </div>
+      <div id="lin_${p.id}"></div>
+    </div>`;
+  }).join("") + (l.length>300?'<div class="vacio">Mostrando 300 de '+l.length+' — usá el buscador para afinar.</div>':"");
+}
+async function verLineas(id,btn){
+  const c=$("lin_"+id);
+  if(c.dataset.on==="1"){c.innerHTML="";c.dataset.on="0";return;}
+  const {data}=await SB.from("pedido_lineas").select("codigo,insumo,cantidad").eq("pedido_id",id);
+  c.dataset.on="1";
+  c.innerHTML='<div class="mut" style="margin-top:10px">'+(data||[]).map(l=>
+      `• ${l.insumo||l.codigo||"?"} — ${l.cantidad!=null?l.cantidad:""} <span style="opacity:.6">(${l.codigo||""})</span>`).join("<br>")+'</div>';
+}
+async function amarrarPedido(id){
+  const p=pedidos.find(x=>x.id===id); if(!p) return;
+  const libres=facturas.filter(f=>f.categoria&&f.tipo==="factura");
+  if(!libres.length){alert("No hay facturas en el banco para amarrar.");return;}
+  const lista=libres.slice(0,40).map(f=>((f.prefijo||"")+(f.folio||""))+" | "+(f.emisor||"")+" | "+money(f.total)).join("\n");
+  const elegido=prompt("¿A cuál factura la amarramos?\n(pedido "+(p.numero||"")+" · "+(p.proveedor_texto||"")+")\n\nFacturas disponibles:\n"+lista+"\n\nEscribí el número EXACTO (ej: MF443367)");
+  if(!elegido) return;
+  const busc=(elegido||"").trim().toUpperCase();
+  const f=facturas.find(x=>(((x.prefijo||"")+(x.folio||"")).toUpperCase()===busc) || (x.cufe||"").toUpperCase().startsWith(busc));
+  if(!f){alert("No encontré esa factura.");return;}
+  const up=await SB.from("pedidos").update({factura_cufe:f.cufe}).eq("id",id);
+  if(up.error){alert("No se pudo amarrar: "+up.error.message);return;}
+  await SB.from("historial").insert({cufe:f.cufe,accion:"pedido amarrado",detalle:p.numero,usuario:usuario.id});
+  f.pedido_num=p.numero; await cargar(); await cargarPedidos();
+  alert("¡Amarrado! "+p.numero+" ↔ "+((f.prefijo||"")+(f.folio||"")));
+}
 async function cargar(){
   const {data:f}=await SB.from("facturas_busqueda").select("*").order("fecha_emision",{ascending:false});
   facturas=f||[];
