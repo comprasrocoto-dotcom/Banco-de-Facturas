@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Banco de Facturas</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <style>
 :root{--bg:#0d1117;--card:#161b22;--line:#30363d;--txt:#e6edf3;--mut:#8b949e;--ok:#3fb950;--warn:#d29922;--bad:#f85149;--blue:#58a6ff}
 *{box-sizing:border-box}
@@ -69,6 +70,8 @@ h2{font-size:14px;color:var(--mut);text-transform:uppercase;letter-spacing:1px;m
         <option value="aseo">Aseo</option>
         <option value="loza_utensilios">Loza y utensilios</option>
       </select>
+      <input id="q" placeholder="🔎 Nº factura, proveedor o CUFE" style="width:300px;margin:0" oninput="pintar()">
+      <button class="s" id="btnsubir" style="display:none" onclick="abrirSubir()">⬆ Subir PDFs</button>
     </div>
     <div class="row" style="margin-bottom:16px">
       <button class="chip on" id="v-pool"     onclick="setVista('pool')">Sin asignar</button>
@@ -116,6 +119,9 @@ async function sesion(u){
   perfil=p||{nombre:u.email,rol:"sede"};
   $("login").style.display="none"; $("app").style.display="block";
   const s=perfil.sedes;
+  if(perfil.rol==="admin"||perfil.rol==="pagos"){$("btnsubir").style.display="inline-block";}
+  const {data:ms}=await SB.from("marcas").select("id,nombre").order("nombre");
+  $("mar").innerHTML=(ms||[]).map(m=>`<option value="${m.id}">${m.nombre}</option>`).join("");
   $("sede").textContent=(s?s.nombre:"—")+(s&&s.marcas?" · "+s.marcas.nombre:"");
   await cargar();
 }
@@ -128,7 +134,7 @@ async function entrar(){
 async function salir(){await SB.auth.signOut();location.reload();}
 
 async function cargar(){
-  const {data:f}=await SB.from("facturas_visibles").select("*").order("fecha_emision",{ascending:false});
+  const {data:f}=await SB.from("facturas_busqueda").select("*").order("fecha_emision",{ascending:false});
   facturas=f||[];
   const {data:n}=await SB.from("novedades").select("cufe,motivo,texto,created_at");
   novedades=n||[];
@@ -145,6 +151,8 @@ function pintar(){
   if(vista=="mias")     l=l.filter(f=>f.estado=="asignada");
   if(vista=="selladas") l=l.filter(f=>f.estado=="sellada"||f.estado=="pagada");
   if(vista=="nov")      l=l.filter(f=>novDe(f.cufe));
+  const q=($("q").value||"").trim().toLowerCase();
+  if(q) l=l.filter(f=>((f.numero||"")+" "+(f.prefijo||"")+(f.folio||"")+" "+(f.documento||"")+" "+(f.emisor||"")+" "+(f.cufe||"")).toLowerCase().includes(q));
   const cont=$("lista");
   if(!l.length){cont.innerHTML='<div class="vacio">No hay documentos acá.</div>';return;}
   cont.innerHTML=l.map(f=>{
@@ -203,6 +211,92 @@ async function guardarNov(){
   if(error){$("merr").textContent="No se pudo: "+error.message;return;}
   cerrar(); await cargar();
 }
+<div id="modal2" class="modal"><div class="card">
+  <h1>⬆ Subir facturas (solo PDF)</h1>
+  <p class="mut">Del <b>nombre del archivo</b> saco la clave (CUFE); del contenido, los datos. Si algo sale mal, lo corregís después.</p>
+  <label class="mut">Marca / empresa</label><select id="mar"></select>
+  <label class="mut">Tipo</label><select id="tipo2"><option value="factura">Factura</option><option value="nota_credito">Nota crédito</option></select>
+  <label class="mut">Categoría</label><select id="cat2">
+    <option value="insumos">Insumos</option><option value="empaque">Material de empaque</option>
+    <option value="aseo">Aseo</option><option value="loza_utensilios">Loza y utensilios</option>
+    <option value="otro">Otra (no se muestra)</option></select>
+  <input type="file" id="files" accept="application/pdf,.pdf" multiple onchange="elegir(event)">
+  <div id="res" class="mut"></div>
+  <div class="row"><span class="sp"></span>
+    <button onclick="cerrarSubir()">Cerrar</button>
+    <button class="p" onclick="subirPdfs()">Subir a Supabase</button>
+  </div>
+</div></div>
+
+<script>
+let archivos=[];
+function abrirSubir(){$("modal2").classList.add("on");$("res").innerHTML="";archivos=[];}
+function cerrarSubir(){$("modal2").classList.remove("on");}
+function elegir(ev){
+  const todos=[...ev.target.files];
+  archivos=todos.filter(f=>f.name.toLowerCase().endsWith(".pdf")||f.type==="application/pdf");
+  const n=archivos.length;
+  $("res").innerHTML=(n?"📄 "+n+" PDF listo(s): ":"")+archivos.map(f=>f.name).join(" · ")
+    +(todos.length!==n?"<br>⚠️ "+ (todos.length-n)+" archivo(s) NO eran PDF y los ignoré":"");
+}
+async function textoPdf(f){
+  const buf=await f.arrayBuffer();
+  const doc=await pdfjsLib.getDocument({data:buf}).promise;
+  let t="";
+  for(let i=1;i<=Math.min(doc.numPages,4);i++){
+    const pg=await doc.getPage(i); const c=await pg.getTextContent();
+    t+=c.items.map(x=>x.str).join(" ")+"\n";
+  }
+  return t;
+}
+async function datosDePdf(f){
+  const t=await textoPdf(f);
+  const num=t.match(/([A-Z]{2,4})\s*-?\s*(\d{4,})/)||[];
+  const nits=t.match(/NIT[^\d]{0,12}([\d\.]{9,15})/)||[];
+  const fecIso=(t.match(/(\d{4}-\d{2}-\d{2})/)||[])[1];
+  const fecCo=(t.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/)||[]);
+  const tot=(t.match(/(?:TOTAL|Total a pagar)[^\d]{0,25}([\d\.,]{5,})/)||[])[1];
+  const em=(t.match(/(?:Raz[oó]n\s*Social|Nombre o raz[oó]n social)[^\n]{0,8}([^\n]{5,60})/i)||[])[1];
+  return {
+    prefijo:num[1]||null, folio:num[2]||null, documento:((num[1]||"")+(num[2]||""))||null,
+    nit:nits[1]?nits[1].replace(/\./g,""):null,
+    fecha:fecIso||(fecCo.length?[fecCo[3],fecCo[2].padStart(2,"0"),fecCo[1].padStart(2,"0")].join("-"):null),
+    total:tot?Number(tot.replace(/\./g,"").replace(",","."))||null:null,
+    emisor:em?em.trim():null
+  };
+}
+async function subirPdfs(){
+  if(!archivos.length){$("res").innerHTML="⚠️ Elegí primero los PDF.";return;}
+  const marca=Number($("mar").value), tipo=$("tipo2").value, categoria=$("cat2").value;
+  const marcas={}; document.querySelectorAll("#mar option").forEach(o=>marcas[o.value]=o.textContent);
+  let ok=0; const errs=[];
+  $("res").innerHTML="⏳ Procesando "+archivos.length+" archivo(s)...";
+  for(const f of archivos){
+    try{
+      let cufe=(f.name.match(/[0-9a-fA-F]{96}/)||[])[0];
+      let d={};
+      if(!cufe){ d=await datosDePdf(f); const t=await textoPdf(f); cufe=(t.match(/[0-9a-f]{96}/i)||[])[0]; }
+      if(!cufe){ errs.push(f.name+": no encontré el CUFE"); continue; }
+      cufe=cufe.toLowerCase();
+      const path=(marcas[marca]||"sin-marca")+"/"+cufe+".pdf";
+      const up=await SB.storage.from("facturas").upload(path,f,{upsert:true});
+      if(up.error) throw new Error(up.error.message);
+      if(Object.keys(d).length===0) d=await datosDePdf(f);
+      const ins=await SB.from("facturas").insert({
+        cufe:cufe, marca_id:marca, tipo:tipo, categoria:categoria,
+        prefijo:d.prefijo, folio:d.folio, documento:d.documento, emisor:d.emisor,
+        nit_emisor:d.nit, fecha_emision:d.fecha, total:d.total,
+        estado:"pool", archivo_pdf:path});
+      if(ins.error) throw new Error(ins.error.message);
+      ok++;
+    }catch(e){ errs.push(f.name+": "+e.message); }
+  }
+  $("res").innerHTML="✅ "+ok+" de "+archivos.length+" subida(s) y guardada(s) como pendientes (pool)."
+    +(errs.length?"<br>⚠️ "+errs.join("<br>"):"");
+  archivos=[];
+  await cargar();
+}
+pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
 SB.auth.onAuthStateChange((_e,s)=>{if(!s){$("login").style.display="block";$("app").style.display="none";}});
 init();
 </script>
