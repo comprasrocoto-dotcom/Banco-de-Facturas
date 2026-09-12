@@ -98,6 +98,7 @@ h2{font-size:14px;color:var(--mut);text-transform:uppercase;letter-spacing:1px;m
         <button class="chip on" id="pe-pend" onclick="setPedVista('pendiente')">Pendientes</button>
         <button class="chip"    id="pe-fact" onclick="setPedVista('facturado')">Facturados</button>
         <button class="chip"    id="pe-todos" onclick="setPedVista('todos')">Todos</button>
+        <button class="p" onclick="nuevoPedido()">➕ Nuevo pedido</button>
         <span class="sp"></span>
         <input id="qp" placeholder="🔎 N° de orden, proveedor o factura" style="width:300px;margin:0" oninput="pintarPedidos()">
       </div>
@@ -159,6 +160,94 @@ async function entrar(){
 }
 async function salir(){await SB.auth.signOut();location.reload();}
 
+let arts=[], provs=[], cat=[], npLineas=0;
+async function nuevoPedido(){
+  $("np_err").textContent=""; $("np_lineas").innerHTML=""; npLineas=0;
+  const hoy=new Date().toISOString().slice(0,10);
+  $("np_fecha").value=hoy; $("np_entrega").value=""; $("np_obs").value=""; $("np_resp").value="";
+  if(!provs.length){
+    const a=await SB.from("proveedores").select("id,nit,razon_social,nombre_comercial").order("razon_social");
+    provs=a.data||[];
+    const b=await SB.from("articulos").select("codigo_barras,articulo_hiopos,articulo_comercial,unimedida_compra").order("articulo_comercial");
+    arts=b.data||[];
+    const c=await SB.from("catalogo_compras").select("codigo_barras,id_proveedor,precio_negociado");
+    cat=c.data||[];
+  }
+  $("np_prov").innerHTML='<option value="">— elegí proveedor —</option>'+provs.map(x=>`<option value="${x.id}">${x.razon_social||x.nombre_comercial}</option>`).join("");
+  if(perfil.rol==="sede"){
+    $("np_sede").innerHTML=`<option value="${perfil.sede_id}">${(perfil.sedes&&perfil.sedes.nombre)||"mi sede"}</option>`;
+    $("np_sede").disabled=true;
+  }else{
+    $("np_sede").disabled=false;
+    $("np_sede").innerHTML=sedes.map(s=>`<option value="${s.id}">${s.nombre}</option>`).join("");
+  }
+  agregarLinea();
+  $("modalPedido").classList.add("on");
+}
+function filtrarArticulos(){ pintarLineas(); }
+function opcionesArticulos(){
+  const prov=Number($("np_prov").value||0);
+  const delProv=new Set(cat.filter(c=>c.id_proveedor===prov).map(c=>c.codigo_barras));
+  const lista = delProv.size ? arts.filter(a=>delProv.has(a.codigo_barras)) : arts;
+  return lista.map(a=>`<option value="${a.codigo_barras}">${a.articulo_hiopos||a.articulo_comercial} (${a.unimedida_compra||""})</option>`).join("");
+}
+function precioDe(codigo){
+  const prov=Number($("np_prov").value||0);
+  const c=cat.find(x=>x.codigo_barras===codigo && x.id_proveedor===prov) || cat.find(x=>x.codigo_barras===codigo);
+  return c? Number(c.precio_negociado||0):0;
+}
+function agregarLinea(){
+  npLineas++;
+  const id="nl"+npLineas;
+  const div=document.createElement("div");
+  div.className="row"; div.id=id; div.style.marginTop="6px";
+  div.innerHTML=`<select style="flex:3;margin:0" id="${id}_art" onchange="calcularTotal()">${opcionesArticulos()}</select>
+    <input type="number" step="0.001" value="1" style="flex:1;margin:0" id="${id}_cant" oninput="calcularTotal()" placeholder="cant.">
+    <span class="mut" id="${id}_pre" style="min-width:90px"></span>
+    <button class="d" onclick="this.parentNode.remove();calcularTotal()">✕</button>`;
+  $("np_lineas").appendChild(div);
+  calcularTotal();
+}
+function calcularTotal(){
+  let tot=0;
+  $("np_lineas").querySelectorAll("div.row").forEach(r=>{
+    const a=r.querySelector("select"), c=r.querySelector("input[type=number]");
+    if(!a) return;
+    const pr=precioDe(a.value), cant=Number(c.value||0);
+    const sp=r.querySelector("span"); if(sp) sp.textContent= pr? money(pr): "s/precio";
+    tot += pr*cant;
+  });
+  $("np_total").textContent="Total: "+money(tot);
+}
+async function guardarPedido(){
+  const prov=Number($("np_prov").value||0);
+  if(!prov){$("np_err").textContent="Elegí el proveedor.";return;}
+  const filas=[...$("np_lineas").querySelectorAll("div.row")].map(r=>{
+    const a=r.querySelector("select"), c=r.querySelector("input[type=number]");
+    return a? {codigo:a.value, cant:Number(c.value||0), nombre:a.options[a.selectedIndex]?.text||""}:null;
+  }).filter(x=>x && x.codigo && x.cant>0);
+  if(!filas.length){$("np_err").textContent="Agregá al menos un artículo con cantidad.";return;}
+  const sedeId = perfil.rol==="sede" ? perfil.sede_id : Number($("np_sede").value);
+  const sedeNom = (sedes.find(s=>s.id===sedeId)||{}).nombre || (perfil.sedes&&perfil.sedes.nombre) || "";
+  const marcaId = (sedes.find(s=>s.id===sedeId)||{}).marca_id || perfil.sedes?.marca_id || null;
+  const total = filas.reduce((t,f)=>t+precioDe(f.codigo)*f.cant,0);
+  const pv = provs.find(x=>x.id===prov)||{};
+  const {data,error}=await SB.from("pedidos").insert({
+    numero:"WEB-"+Date.now().toString().slice(-8), marca_id:marcaId, sede_id:sedeId,
+    sede_texto:sedeNom, proveedor: pv.razon_social||pv.nombre_comercial, proveedor_texto: pv.razon_social||pv.nombre_comercial,
+    nit_proveedor: pv.nit, fecha:$("np_fecha").value||null, total:total||null,
+    tipo:$("np_tipo").value, fecha_entrega:$("np_entrega").value||null,
+    responsable:$("np_resp").value||null, observacion_pedido:$("np_obs").value||null,
+    estado:"pendiente", subido_por:usuario.id
+  }).select("id").single();
+  if(error){$("np_err").textContent="No se pudo guardar: "+error.message;return;}
+  const rows=filas.map(f=>({pedido_id:data.id, codigo:f.codigo, insumo:f.nombre, cantidad:f.cant}));
+  const l=await SB.from("pedido_lineas").insert(rows);
+  if(l.error){$("np_err").textContent="El pedido quedó, pero fallaron las líneas: "+l.error.message;return;}
+  await SB.from("historial").insert({accion:"pedido creado desde la web",detalle:"WEB "+sedeNom,usuario:usuario.id}).then(()=>{},()=>{});
+  $("modalPedido").classList.remove("on");
+  pedidosCargados=false; await cargarPedidos();
+}
 function setModulo(m){
   modulo=m;
   $("m-banco").classList.toggle("on",m=="banco");
@@ -450,6 +539,29 @@ async function guardarNov(){
   cerrar(); await cargar();
 }
 </script>
+<div id="modalPedido" class="modal"><div class="card" style="max-width:720px">
+  <h1>➕ Nuevo pedido</h1>
+  <div class="row">
+    <div style="flex:1"><label class="mut">Sede</label><select id="np_sede"></select></div>
+    <div style="flex:1"><label class="mut">Tipo</label>
+      <select id="np_tipo"><option>Requisicion</option><option>Pedido</option><option>Traslado</option></select></div>
+  </div>
+  <label class="mut">Proveedor</label><select id="np_prov" onchange="filtrarArticulos()"></select>
+  <div class="row">
+    <div style="flex:1"><label class="mut">Fecha</label><input type="date" id="np_fecha"></div>
+    <div style="flex:1"><label class="mut">Fecha de entrega</label><input type="date" id="np_entrega"></div>
+    <div style="flex:1"><label class="mut">Responsable</label><input id="np_resp" placeholder="quién pide"></div>
+  </div>
+  <label class="mut">Artículos</label>
+  <div id="np_lineas"></div>
+  <button onclick="agregarLinea()">＋ Agregar artículo</button>
+  <label class="mut">Observación</label><input id="np_obs" placeholder="opcional">
+  <div class="row"><b id="np_total" style="margin-right:auto">Total: $ 0</b>
+    <button onclick="$('modalPedido').classList.remove('on')">Cancelar</button>
+    <button class="p" onclick="guardarPedido()">Guardar pedido</button></div>
+  <div class="err" id="np_err"></div>
+</div></div>
+
 <div id="modalSello" class="modal"><div class="card">
   <h1>✔ Sellar y aprobar</h1>
   <p class="mut" id="msello"></p>
