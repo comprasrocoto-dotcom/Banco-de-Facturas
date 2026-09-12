@@ -6,6 +6,7 @@
 <title>Banco de Facturas</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 :root{--bg:#0d1117;--card:#161b22;--line:#30363d;--txt:#e6edf3;--mut:#8b949e;--ok:#3fb950;--warn:#d29922;--bad:#f85149;--blue:#58a6ff}
 *{box-sizing:border-box}
@@ -73,6 +74,14 @@ h2{font-size:14px;color:var(--mut);text-transform:uppercase;letter-spacing:1px;m
       <input id="q" placeholder="🔎 Nº factura, proveedor o CUFE" style="width:300px;margin:0" oninput="pintar()">
       <button class="s" id="btnsubir" style="display:none" onclick="abrirSubir()">⬆ Subir PDFs</button>
     </div>
+    <div class="row" id="barraDescarga" style="margin-bottom:16px;display:none">
+      <span class="mut">Descargar selladas del</span>
+      <input type="date" id="d1" style="width:auto;margin:0">
+      <span class="mut">al</span>
+      <input type="date" id="d2" style="width:auto;margin:0">
+      <button class="p" onclick="descargarSelladas()">⬇ Descargar ZIP</button>
+      <span class="mut" id="resdesc"></span>
+    </div>
     <div class="row" style="margin-bottom:16px">
       <button class="chip on" id="v-pool"     onclick="setVista('pool')">Sin asignar</button>
       <button class="chip"    id="v-mias"     onclick="setVista('mias')">Mías</button>
@@ -119,7 +128,7 @@ async function sesion(u){
   perfil=p||{nombre:u.email,rol:"sede"};
   $("login").style.display="none"; $("app").style.display="block";
   const s=perfil.sedes;
-  if(perfil.rol==="admin"||perfil.rol==="pagos"){$("btnsubir").style.display="inline-block";}
+  if(perfil.rol==="admin"||perfil.rol==="pagos"){$("btnsubir").style.display="inline-block";$("barraDescarga").style.display="flex";}
   const {data:ss}=await SB.from("sedes").select("id,nombre,marca_id").order("nombre");
   sedes=ss||[];
   const {data:ms}=await SB.from("marcas").select("id,nombre").order("nombre");
@@ -188,6 +197,33 @@ async function tomar(cufe){
   if(error){alert("No se pudo: "+error.message);return;}
   await SB.from("historial").insert({cufe,accion:"asignada",a:perfil.sedes?.nombre,usuario:usuario.id});
   await cargar();
+}
+async function descargarSelladas(){
+  const d1=$("d1").value, d2=$("d2").value;
+  const res=$("resdesc"); res.textContent="";
+  let l=facturas.filter(f=>f.estado==="sellada"||f.estado==="pagada");
+  if(d1) l=l.filter(f=>(f.fecha_emision||"")>=d1);
+  if(d2) l=l.filter(f=>(f.fecha_emision||"")<=d2);
+  l=l.filter(f=>f.archivo_pdf);
+  if(!l.length){res.textContent="No hay selladas en ese rango.";return;}
+  res.textContent="Preparando "+l.length+" PDF(s)...";
+  const zip=new JSZip(); let ok=0;
+  for(const f of l){
+    const {data:sig}=await SB.storage.from("facturas").createSignedUrl(f.archivo_pdf,120);
+    if(!sig){continue;}
+    const r=await fetch(sig.signedUrl); if(!r.ok) continue;
+    const blob=await r.blob();
+    const num=((f.prefijo||"")+(f.folio||""))||f.cufe.slice(0,12);
+    const em=(f.emisor||"proveedor").replace(/[^\w\s\-]/g,"").trim().split("\s+").slice(0,3).join("_");
+    zip.file(num+"_"+em+".pdf", blob); ok++;
+  }
+  if(!ok){res.textContent="No pude descargar los PDFs.";return;}
+  const out=await zip.generateAsync({type:"blob"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(out);
+  a.download="facturas_selladas_"+(d1||"inicio")+"_a_"+(d2||"hoy")+".zip";
+  document.body.appendChild(a); a.click(); a.remove();
+  res.textContent="✅ "+ok+" PDF(s) en el ZIP.";
 }
 async function asignar(cufe){
   const sel=$("sel_"+cufe); if(!sel)return;
