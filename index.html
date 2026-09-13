@@ -449,8 +449,8 @@ async function guardarProducto(){
            || adminArt.find(a=>((a.articulo_hiopos||"")+" ("+(a.codigo_barras||"")+")")===nom);
   if(!art){ $("mpErr").textContent="No encontré ese insumo. Creálo primero en la pestaña Artículos."; return; }
   const pr=$("mpPrecio").value!==""? Number($("mpPrecio").value):null;
-  const r=await SB.from("catalogo_compras").insert({codigo_barras:art.codigo_barras, id_proveedor:mpProvId,
-      prioridad:Number($("mpPrio").value)||1, precio_negociado:pr, estado:"Aprobado"});
+  const r=await SB.from("catalogo_compras").upsert({codigo_barras:art.codigo_barras, id_proveedor:mpProvId,
+      prioridad:Number($("mpPrio").value)||1, precio_negociado:pr, estado:"Aprobado"}, {onConflict:"codigo_barras,id_proveedor"});
   if(r.error){ $("mpErr").textContent="No se pudo: "+r.error.message; return; }
   const prov=adminProv.find(x=>x.id===mpProvId)||{};
   $("modalProd").classList.remove("on");
