@@ -443,15 +443,51 @@ function pintarAdmin(){
   } else {
     const pid=Number($("catProv").value||0);
     if(!pid){ c.innerHTML='<div class="vacio">Elegí un proveedor para ver qué se le compra.</div>'; return; }
-    let l=adminCat.filter(k=>k.id_proveedor===pid);
+    if(!adminProvArts[pid]){ c.innerHTML='<div class="vacio">⏳ Buscando los artículos que le comprás a este proveedor...</div>'; cargarArtsProv(pid); return; }
+    const catDe={}; adminCat.filter(k=>k.id_proveedor===pid).forEach(k=>{catDe[k.codigo_barras]=k;});
+    const lista=[], vistos={};
+    (adminProvArts[pid]||[]).forEach(a=>{ if(!a.codigo||vistos[a.codigo]) return; vistos[a.codigo]=1;
+      lista.push({codigo:a.codigo, nombre:a.insumo||a.codigo, veces:a.veces, k:catDe[a.codigo]||null}); });
+    adminCat.filter(k=>k.id_proveedor===pid).forEach(k=>{ if(vistos[k.codigo_barras]) return; vistos[k.codigo_barras]=1;
+      const art=adminArt.find(a=>a.codigo_barras===k.codigo_barras)||{};
+      lista.push({codigo:k.codigo_barras, nombre:art.articulo_hiopos||art.articulo_comercial||k.codigo_barras, veces:null, k}); });
+    let l=lista;
+    if(q) l=l.filter(x=>((x.nombre||"")+" "+(x.codigo||"")).toLowerCase().includes(q));
     const nomDe=cd=>(adminArt.find(a=>a.codigo_barras===cd)||{}).articulo_hiopos||cd;
-    c.innerHTML = '<div class="card">'+( l.length? l.map(k=>`<div class="row" style="border-bottom:1px solid var(--line);padding:6px 0">
-        <div style="flex:3">${nomDe(k.codigo_barras)} <span class="mut">(${k.codigo_barras})</span></div>
-        <div style="flex:1" class="mut">prioridad ${k.prioridad||"—"}</div>
-        <div style="flex:1;text-align:right;font-weight:700">${k.precio_negociado?money(k.precio_negociado):"s/precio"}</div>
-        <button class="d" onclick="quitarDelCatalogo(${k.id})">✕</button></div>`).join("")
-      : '<div class="mut">Este proveedor no tiene artículos en el catálogo todavía.</div>') + '</div>';
+    c.innerHTML = '<div class="card">'+( l.length? l.map(x=>{
+        const k=x.k||{}, precio=k.precio_negociado, iid="pp_"+pid+"_"+x.codigo;
+        return `<div class="row" style="border-bottom:1px solid var(--line);padding:7px 0">
+        <div style="flex:3">${x.nombre} <span class="mut">(${x.codigo})</span>${x.veces?`<span class="mut"> · ${x.veces} compras</span>`:""}</div>
+        <div style="flex:1.2;display:flex;gap:6px;align-items:center;justify-content:flex-end">
+          <span class="mut">precio</span>
+          <input id="${iid}" value="${precio!=null?precio:""}" placeholder="s/precio" style="width:120px;margin:0;text-align:right">
+          <button class="s" title="Guardar precio" onclick="guardarPrecio(${pid},'${x.codigo}', numEs(document.getElementById('${iid}').value), this)">💾</button>
+        </div>
+        ${k.id?`<button class="d" onclick="quitarDelCatalogo(${k.id})">✕</button>`:""}</div>`;}).join("")
+      : '<div class="mut">Este proveedor no tiene compras en el histórico ni artículos en el catálogo todavía.</div>') + '</div>';
   }
+}
+// Artículos que se le compran a un proveedor (del histórico de compras) + precio editable
+let adminProvArts={};
+async function cargarArtsProv(pid){
+  if(!pid || adminProvArts[pid]) return;
+  let {data}=await SB.from("proveedor_articulos").select("codigo,insumo,veces")
+      .eq("proveedor_id",pid).order("veces",{ascending:false}).limit(800);
+  if(!data||!data.length){
+    const pv=adminProv.find(x=>x.id===pid)||{};
+    const nom=((pv.razon_social||pv.nombre_comercial||"").split(" ")[0]||"");
+    if(nom){ const alt=await SB.from("proveedor_articulos").select("codigo,insumo,veces")
+        .ilike("proveedor",nom+"%").order("veces",{ascending:false}).limit(800); data=alt.data||[]; }
+  }
+  adminProvArts[pid]=data||[];
+  pintarAdmin();
+}
+async function guardarPrecio(pid, cod, precio, btn){
+  const r=await SB.from("catalogo_compras").upsert({codigo_barras:cod, id_proveedor:pid,
+      prioridad:1, precio_negociado:precio, estado:"Aprobado"}, {onConflict:"codigo_barras,id_proveedor"});
+  if(r.error){ alert("No se pudo guardar: "+r.error.message); return; }
+  if(btn){ btn.textContent="✓"; setTimeout(()=>{btn.textContent="💾";},1200); }
+  adminCargado=false; await cargarAdmin(); $("catProv").value=pid; pintarAdmin();
 }
 function verCatalogo(pid){ $("catProv").value=pid; setAdmin("cat"); }
 let mpProvId=null;
@@ -511,11 +547,13 @@ function amarrarA(codigo){
   const n=Number(el); if(!n||!adminProv[n-1]) return;
   const pid=adminProv[n-1].id;
   const pr=prompt("Precio negociado (opcional):")||null;
-  SB.from("catalogo_compras").insert({codigo_barras:codigo, id_proveedor:pid, prioridad:1,
-      precio_negociado:pr?Number(String(pr).replace(/[^0-9.]/g,"")):null, estado:"Aprobado"})
+  // upsert: si el articulo YA esta amarrado a ese proveedor, actualiza el precio en vez de fallar
+  SB.from("catalogo_compras").upsert({codigo_barras:codigo, id_proveedor:pid, prioridad:1,
+      precio_negociado:pr?Number(String(pr).replace(/[^0-9.]/g,"")):null, estado:"Aprobado"},
+      {onConflict:"codigo_barras,id_proveedor"})
     .then(async r=>{ if(r.error){alert("No se pudo: "+r.error.message);return;}
       adminCargado=false; await cargarAdmin();
-      alert("¡Listo! "+codigo+" quedó amarrado a "+(adminProv[n-1].razon_social||"")); });
+      alert("¡Listo! "+codigo+" quedó con "+(adminProv[n-1].razon_social||"")+(pr?" a $"+pr:" (sin precio)")); });
 }
 function adminNuevo(){
   if(adminVista==="prov"){
@@ -808,9 +846,9 @@ async function abrirPedido(id){
   const filas=lineas.map(x=>{
     const pr = prec[x.codigo];
     const cant = x.cantidad!=null? Number(x.cantidad):null;
-    return `<tr><td class="mut">${x.codigo||""}</td><td>${x.insumo||""}</td>
+    return `<tr><td class="mut">${x.codigo||""}</td><td style="text-align:center">${x.insumo||""}</td>
       <td class="mut">${uni[x.codigo]||x.unidad||"—"}</td>
-      <td class="num" style="font-weight:700">${cant!=null?cant:""}</td>
+      <td style="text-align:center;font-weight:700">${cant!=null?cant:""}</td>
       <td class="num">${pr!=null? money(pr):"—"}</td>
       <td class="num" style="font-weight:700">${(pr!=null&&cant!=null)? money(pr*cant):"—"}</td></tr>`;
   }).join("");
@@ -841,8 +879,8 @@ async function abrirPedido(id){
        </div>
      </div>
      <table style="margin-top:18px"><thead><tr style="background:#166534;color:#fff">
-        <th style="background:#166534">CÓDIGO</th><th style="background:#166534">ARTÍCULO</th>
-        <th style="background:#166534">UNIDAD</th><th style="background:#166534;text-align:right">CANT.</th>
+        <th style="background:#166534">CÓDIGO</th><th style="background:#166534;text-align:center">ARTÍCULO</th>
+        <th style="background:#166534">UNIDAD</th><th style="background:#166534;text-align:center">CANT.</th>
         <th style="background:#166534;text-align:right">PRECIO</th><th style="background:#166534;text-align:right">TOTAL</th></tr></thead>
        <tbody>${filas}</tbody></table>
      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
@@ -957,11 +995,13 @@ async function amarrarPedido(id){
   const busc=(elegido||"").trim().toUpperCase();
   const f=facturas.find(x=>(((x.prefijo||"")+(x.folio||"")).toUpperCase()===busc) || (x.cufe||"").toUpperCase().startsWith(busc));
   if(!f){alert("No encontré esa factura.");return;}
-  const up=await SB.from("pedidos").update({factura_cufe:f.cufe}).eq("id",id);
+  // Guardar tambien el NUMERO de la factura en el pedido: asi el detalle muestra N. FACTURA.
+  const numF = (((f.prefijo||"")+(f.folio||"")).replace(/[^A-Za-z0-9]/g,"")) || (f.documento||"").replace(/[^A-Za-z0-9]/g,"") || "";
+  const up=await SB.from("pedidos").update({factura_cufe:f.cufe, numero_factura: numF || null}).eq("id",id);
   if(up.error){alert("No se pudo amarrar: "+up.error.message);return;}
   await SB.from("historial").insert({cufe:f.cufe,accion:"pedido amarrado",detalle:p.numero,usuario:usuario.id});
   f.pedido_num=p.numero; await cargar(); await cargarPedidos();
-  alert("¡Amarrado! "+p.numero+" ↔ "+((f.prefijo||"")+(f.folio||"")));
+  alert("¡Amarrado! "+p.numero+" ↔ "+(numF||"la factura"));
 }
 async function cargar(){
   const {data:f}=await SB.from("facturas_busqueda").select("*").order("fecha_emision",{ascending:false});
@@ -1347,7 +1387,9 @@ async function datosDePdf(f){
   const t=await textoPdf(f);
   const g=(re)=>{const m=t.match(re); return m&&m[1]?m[1].trim():null;};
   const plata=(s)=> s? Number(s.replace(/\./g,"").replace(",",".")) : null;
-  const pf=t.match(/N[uú]mero de Factura:?\s*([A-Za-z]{2,4})\s*-\s*(\d+)/i);
+  // Acepta las dos formas: "IT08-1898792" y "IT081898792" (sin separadores, como quedo
+  // en la base). El prefijo es letras + hasta 2 digitos; el folio, los digitos que siguen.
+  const pf=t.match(/N[uú]mero de Factura:?\s*([A-Za-z]{2,4}\d{0,2})\s*-?\s*(\d{4,})/i);
   const fe=g(/Fecha de Emisi[oó]n:?\s*(\d{2}\/\d{2}\/\d{4})/i);
   let iso=null; if(fe){const [d1,m1,a1]=fe.split("/"); iso=a1+"-"+m1+"-"+d1;}
   return {
