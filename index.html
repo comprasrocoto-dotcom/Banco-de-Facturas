@@ -1147,15 +1147,25 @@ async function generarSellado(cufe,recibido,rutaFoto){
     const sede=(perfil.sedes&&perfil.sedes.nombre)||"punto de venta";
     recibido=(recibido||"").trim().toUpperCase();
     const num=numeroFactura(f)||"s/n";   // el N° de factura NUNCA debe ser el CUFE
+    const nvSello=novDe(f.cufe);         // la NOVEDAD viaja impresa en la factura sellada
+    const corto=(t,n)=>{t=String(t||"").replace(/\s+/g," ").trim(); return t.length>n? t.slice(0,n-1)+"…" : t;};
+    const filas=[
+      {t:"APROBADA  ·  "+sede,                        s:11.5, b:true,  c:[0.08,0.40,0.16]},
+      {t:"Factura "+num+"  ·  "+fecha,                s:8,    b:false, c:[0.35,0.35,0.35]},
+      {t:"Recibido por: "+(recibido||"—"),            s:10.5, b:true,  c:[0.10,0.10,0.10]}
+    ];
+    if(f.num_ingreso) filas.push({t:"N° de ingreso ERP: "+f.num_ingreso, s:10.5, b:true, c:[0.10,0.10,0.10]});
+    if(nvSello) filas.push({t:"NOVEDAD: "+nvSello.motivo+(nvSello.texto? " — "+nvSello.texto : ""),
+                            s:10, b:true, c:[0.72,0.11,0.11]});
     doc.getPages().forEach(pg=>{
       const {width}=pg.getSize();
-      const bw=Math.min(410,width*0.70), bh=(f.num_ingreso?78:62), x=24, y=22;
+      const bw=Math.min(430,width*0.72), bh=14+filas.length*16.5, x=24, y=22;
       pg.drawRectangle({x, y, width:bw, height:bh, color:rgb(0.94,0.99,0.95), opacity:0.96,
                         borderColor:rgb(0.13,0.53,0.21), borderWidth:1.4});
-      pg.drawText("APROBADA  ·  "+sede,{x:x+12,y:y+bh-17,size:11.5,font:bold,color:rgb(0.08,0.40,0.16)});
-      pg.drawText("Factura "+num+"  ·  "+fecha,{x:x+12,y:y+bh-30,size:8,font:reg,color:rgb(0.35,0.35,0.35)});
-      pg.drawText("Recibido por: "+(recibido||"—"),{x:x+12,y:y+bh-47,size:10.5,font:bold,color:rgb(0.10,0.10,0.10)});
-      if(f.num_ingreso) pg.drawText("N° de ingreso ERP: "+f.num_ingreso,{x:x+12,y:y+bh-63,size:10.5,font:bold,color:rgb(0.10,0.10,0.10)});
+      filas.forEach((l,i)=>{
+        pg.drawText(corto(l.t, nvSello&&i===filas.length-1 ? 66 : 58),
+          {x:x+12, y:y+bh-17-i*16.5, size:l.s, font:l.b?bold:reg, color:rgb(l.c[0],l.c[1],l.c[2])});
+      });
     });
     if(rutaFoto){
       try{
