@@ -574,7 +574,7 @@ function setPedVista(v){ pedVista=v;
   pintarPedidos();
 }
 async function cargarPedidos(){
-  const {data,error}=await SB.from("pedidos").select("*").order("fecha",{ascending:false}).limit(1200);
+  const {data,error}=await SB.from("pedidos").select("*").order("id",{ascending:false}).limit(1200);
   if(error){$("listaped").innerHTML='<div class="vacio">No pude cargar los pedidos: '+error.message+'</div>';return;}
   pedidos=data||[]; pedidosCargados=true; pintarPedidos();
 }
@@ -598,6 +598,7 @@ function pintarPedidos(){
         <span class="mut" style="font-weight:700">#${p.numero||""}</span>
         <span style="width:22px;height:22px;border-radius:50%;background:#15803d;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px">${p.estado==="facturado"?"✓":"●"}</span>
         <span class="mut" id="ch_${p.id}">⌄</span>
+        ${perfil.rol==="admin"?`<button class="d" title="Borrar pedido" onclick="event.stopPropagation();borrarPedido(${p.id})">🗑</button>`:""}
       </div>
       <div id="det_${p.id}"></div>
       </div>
@@ -736,6 +737,15 @@ async function abrirAmarre(modo, id){
   pintarAmarre();
   $("modalAmarre").classList.add("on");
   setTimeout(()=>$("amBuscar").focus(),120);
+}
+async function borrarPedido(id){
+  const p=pedidos.find(x=>x.id===id)||{};
+  if(!confirm("¿BORRAR el pedido "+(p.numero||"")+" de "+(p.proveedor_texto||"")+"?\n\nSe borran también sus artículos. Esta acción no se puede deshacer.")) return;
+  const r=await SB.from("pedidos").delete().eq("id",id);
+  if(r.error){alert("No se pudo borrar: "+r.error.message);return;}
+  await SB.from("historial").insert({accion:"pedido borrado",detalle:(p.numero||"")+" · "+(p.proveedor_texto||""),usuario:usuario.id}).then(()=>{},()=>{});
+  pedidosCargados=false; await cargarPedidos();
+  alert("Pedido "+(p.numero||"")+" borrado.");
 }
 function pintarAmarre(){
   const q=($("amBuscar").value||"").trim().toLowerCase();
