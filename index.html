@@ -774,8 +774,8 @@ async function abrirPedido(id){
     const pr = prec[x.codigo];
     const cant = x.cantidad!=null? Number(x.cantidad):null;
     return `<tr><td class="mut">${x.codigo||""}</td><td>${x.insumo||""}</td>
-      <td class="num" style="font-weight:700">${cant!=null?cant:""}</td>
       <td class="mut">${uni[x.codigo]||x.unidad||"—"}</td>
+      <td class="num" style="font-weight:700">${cant!=null?cant:""}</td>
       <td class="num">${pr!=null? money(pr):"—"}</td>
       <td class="num" style="font-weight:700">${(pr!=null&&cant!=null)? money(pr*cant):"—"}</td></tr>`;
   }).join("");
@@ -807,7 +807,7 @@ async function abrirPedido(id){
      </div>
      <table style="margin-top:18px"><thead><tr style="background:#166534;color:#fff">
         <th style="background:#166534">CÓDIGO</th><th style="background:#166534">ARTÍCULO</th>
-        <th style="background:#166534;text-align:right">CANT.</th><th style="background:#166534">UNIDAD</th>
+        <th style="background:#166534">UNIDAD</th><th style="background:#166534;text-align:right">CANT.</th>
         <th style="background:#166534;text-align:right">PRECIO</th><th style="background:#166534;text-align:right">TOTAL</th></tr></thead>
        <tbody>${filas}</tbody></table>
      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
