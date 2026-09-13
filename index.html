@@ -945,13 +945,31 @@ function pintarEstadoOrden(){
              error:"⚠️ Terminó con error (mirá el log)"}[o.estado]||o.estado;
   const cuando=String(o.terminada_en||o.tomada_en||o.pedida_en||"").slice(0,16).replace("T"," ");
   c.style.display="block";
+  const conProblema = o.estado==="error" || /no se confirmo|no se pudo|⚠️/.test(o.resultado||"");
   c.innerHTML=`<div class="card" style="border-left:5px solid ${col}">
     <div style="font-weight:700;color:${col}">${txt}</div>
-    <div class="mut">Orden #${o.id} · ${cuando}${o.resultado? " · "+o.resultado : ""}</div></div>`;
+    <div class="mut">Orden #${o.id} · ${cuando}${o.resultado? " · "+o.resultado : ""}</div>
+    ${conProblema?`<div class="row" style="margin-top:10px"><button class="p" onclick="relanzar()">🔁 Relanzar este ingreso</button>
+      <span class="mut">vuelve a intentar facturar lo que quedó pendiente</span></div>`:""}</div>`;
+}
+// Relanza: crea una orden nueva para que el agente retome lo que quedó con novedad
+async function relanzar(){
+  if(!confirm("Se va a RELANZAR el ingreso al ERP.\n\nEl agente va a:\n1) buscar pedidos ya ingresados que quedaron SIN FACTURAR y facturarlos\n2) tomar los pedidos nuevos con factura amarrada\n\n¿Pedimos la orden?")) return;
+  const r=await SB.from("ordenes").insert({tipo:"ingresos",estado:"pendiente",pedida_por:usuario.id});
+  if(r.error){ alert("No se pudo pedir: "+r.error.message); return; }
+  await cargarOrdenes();
+  alert("✅ Orden de relanzamiento enviada.\n\nEl VIGILANTE la toma en menos de 30 segundos (si está encendido en tu PC).");
 }
 async function pedirIngresos(){
   const eleg=pedidos.filter(p=>!p.pedido_erp && p.factura_cufe);
-  if(!eleg.length){ alert("No hay pedidos con factura amarrada pendientes de ingresar.\n\nPrimero subí la factura y amarrála al pedido."); return; }
+  if(!eleg.length){
+    const pendFac=pedidos.filter(p=>p.pedido_erp && p.factura_cufe);
+    if(pendFac.length){
+      if(confirm("No hay pedidos NUEVOS para ingresar.\n\nPero hay "+pendFac.length+" pedido(s) ya ingresados al ERP.\n¿Reviso si alguno quedó SIN FACTURAR y lo facturo?")) return relanzar();
+      return;
+    }
+    alert("No hay pedidos con factura amarrada pendientes de ingresar.\n\nPrimero subí la factura y amarrála al pedido."); return;
+  }
   if(!confirm("Se van a ingresar al ERP estos pedidos (los que ya tienen factura amarrada):\n\n"+
       eleg.slice(0,15).map(p=>"• "+p.numero+" · "+(p.proveedor_texto||"")).join("\n")+
       (eleg.length>15?"\n… y "+(eleg.length-15)+" más":"")+"\n\n¿Pedimos la orden?")) return;
