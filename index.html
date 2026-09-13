@@ -364,7 +364,8 @@ async function guardarPedido(){
   const total = filas.reduce((t,f)=>t+precioDe(f.codigo)*f.cant,0);
   const pv = provs.find(x=>x.id===prov)||{};
   const {data,error}=await SB.from("pedidos").insert({
-    numero:(await SB.rpc("siguiente_pedido")).data || ("WEB-"+Date.now().toString().slice(-8)), marca_id:marcaId, sede_id:sedeId,
+    numero:(await SB.rpc("siguiente_pedido")).data || ("WEB-"+Date.now().toString().slice(-8)),
+    marca_id:marcaId, sede_id:sedeId, proveedor_id:prov,
     sede_texto:sedeNom, proveedor: pv.razon_social||pv.nombre_comercial, proveedor_texto: pv.razon_social||pv.nombre_comercial,
     nit_proveedor: pv.nit, fecha:$("np_fecha").value||null, total:total||null,
     tipo:$("np_tipo").value, fecha_entrega:$("np_entrega").value||null,
