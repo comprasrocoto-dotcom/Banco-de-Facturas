@@ -131,9 +131,11 @@ tr:hover td{background:#f1f5f9}
         <button class="chip"    id="pe-fact" onclick="setPedVista('facturado')">Facturados</button>
         <button class="chip"    id="pe-todos" onclick="setPedVista('todos')">Todos</button>
         <button class="p" onclick="nuevoPedido()">➕ Nuevo pedido</button>
+        <button class="p" id="btnIngresos" style="display:none;background:#1e3a8a;border-color:#1e3a8a" onclick="pedirIngresos()">🚀 Iniciar ingresos al ERP</button>
         <span class="sp"></span>
         <input id="qp" placeholder="🔎 N° de orden, proveedor o factura" style="width:300px;margin:0" oninput="pintarPedidos()">
       </div>
+      <div id="estadoOrden" style="display:none;margin-bottom:10px"></div>
       <div id="listaped"></div>
     </div>
   </div>
@@ -177,7 +179,7 @@ async function sesion(u){
   $("login").style.display="none"; $("app").style.display="block";
   const s=perfil.sedes;
   if(perfil.rol==="admin"||perfil.rol==="pagos"){$("btnsubir").style.display="inline-block";$("barraDescarga").style.display="flex";}
-  if(perfil.rol==="admin"){ $("m-admin").style.display="inline-block"; }
+  if(perfil.rol==="admin"){ $("m-admin").style.display="inline-block"; $("btnIngresos").style.display="inline-block"; }
   const {data:ss}=await SB.from("sedes").select("id,nombre,marca_id").order("nombre");
   sedes=ss||[];
   const {data:ms}=await SB.from("marcas").select("id,nombre").order("nombre");
@@ -623,6 +625,7 @@ async function cargarPedidos(){
   const {data,error}=await SB.from("pedidos").select("*").order("id",{ascending:false}).limit(1200);
   if(error){$("listaped").innerHTML='<div class="vacio">No pude cargar los pedidos: '+error.message+'</div>';return;}
   pedidos=data||[]; pedidosCargados=true; pintarPedidos();
+  await cargarOrdenes();   // estado del bot local (ordenes)
 }
 function pintarPedidos(){
   const q=($("qp").value||"").trim().toLowerCase();
@@ -918,6 +921,45 @@ function numeroFactura(f){
   return String(brut).replace(/[^A-Za-z0-9]/g,"");
 }
 // Numero de factura del pedido: usa el guardado y, si falta, lo saca de la factura amarrada
+// ---- ORDENES PARA EL VIGILANTE LOCAL (el bot corre en tu PC, sin tokens) ----
+let ordenesUlt=[], ordEstadoPrev=null;
+async function cargarOrdenes(){
+  const {data}=await SB.from("ordenes").select("id,estado,pedida_en,tomada_en,terminada_en,resultado").order("id",{ascending:false}).limit(3);
+  ordenesUlt=data||[]; pintarEstadoOrden();
+  const e=(ordenesUlt[0]||{}).estado||null;
+  if(ordEstadoPrev!==null && ordEstadoPrev!==e && (e==="hecho"||e==="terminado"||e==="error")){
+    ordEstadoPrev=e;
+    pedidosCargados=false; await cargarPedidos();     // recargar pedidos cuando el bot termina
+  } else { ordEstadoPrev=e; }
+}
+// refresco liviano del estado del bot (cada 15s)
+setInterval(()=>{ if(typeof usuario!=="undefined" && usuario) cargarOrdenes().catch(()=>{}); }, 15000);
+function pintarEstadoOrden(){
+  const c=$("estadoOrden"), o=ordenesUlt[0];
+  if(!c) return;
+  if(!o){ c.style.display="none"; return; }
+  const col={pendiente:"#b45309",corriendo:"#1e3a8a",hecho:"#166534",terminado:"#166534",error:"#b91c1c"}[o.estado]||"#334155";
+  const txt={pendiente:"🕓 Pedida — esperando que el vigilante la tome (revisa cada 20s)",
+             corriendo:"⚙️ El bot está trabajando en el ERP — NO toques el ERP ahora",
+             hecho:"✅ Terminada bien",terminado:"✅ Terminada (mirá el resultado)",
+             error:"⚠️ Terminó con error (mirá el log)"}[o.estado]||o.estado;
+  const cuando=String(o.terminada_en||o.tomada_en||o.pedida_en||"").slice(0,16).replace("T"," ");
+  c.style.display="block";
+  c.innerHTML=`<div class="card" style="border-left:5px solid ${col}">
+    <div style="font-weight:700;color:${col}">${txt}</div>
+    <div class="mut">Orden #${o.id} · ${cuando}${o.resultado? " · "+o.resultado : ""}</div></div>`;
+}
+async function pedirIngresos(){
+  const eleg=pedidos.filter(p=>!p.pedido_erp && p.factura_cufe);
+  if(!eleg.length){ alert("No hay pedidos con factura amarrada pendientes de ingresar.\n\nPrimero subí la factura y amarrála al pedido."); return; }
+  if(!confirm("Se van a ingresar al ERP estos pedidos (los que ya tienen factura amarrada):\n\n"+
+      eleg.slice(0,15).map(p=>"• "+p.numero+" · "+(p.proveedor_texto||"")).join("\n")+
+      (eleg.length>15?"\n… y "+(eleg.length-15)+" más":"")+"\n\n¿Pedimos la orden?")) return;
+  const r=await SB.from("ordenes").insert({tipo:"ingresos",estado:"pendiente",pedida_por:usuario.id});
+  if(r.error){ alert("No se pudo pedir: "+r.error.message); return; }
+  await cargarOrdenes();
+  alert("✅ Orden enviada.\n\nEl VIGILANTE local la toma en menos de 30 segundos (si está encendido en tu PC).\n\nSi no arranca: abrí el VIGILANTE (INICIAR-VIGILANTE.bat).");
+}
 function numFacturaDe(p){
   if(p && p.numero_factura) return p.numero_factura;
   return numeroFactura((facturas||[]).find(x=>x.cufe===p.factura_cufe));
