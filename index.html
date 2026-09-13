@@ -216,7 +216,8 @@ async function nuevoPedido(){
     $("np_sede").disabled=false;
     $("np_sede").innerHTML=sedes.map(s=>`<option value="${s.id}">${s.nombre}</option>`).join("");
   }
-  agregarLinea();
+  npCant={}; $("np_q").value=""; $("np_sub").innerHTML='<option value="">Todas las subfamilias</option>';
+  pintarProductos();
   $("modalPedido").classList.add("on");
 }
 async function filtrarArticulos(){
@@ -239,15 +240,55 @@ async function filtrarArticulos(){
   } else {
     $("np_arts_info").textContent="";
   }
-  $("np_lineas").innerHTML=""; agregarLinea(); calcularTotal();
+  npCant={}; $("np_q").value=""; pintarProductos();
+}
+let npCant={};
+function pintarProductos(){
+  const q=($("np_q").value||"").trim().toLowerCase();
+  const sub=$("np_sub").value;
+  const L=listaArticulos();
+  const subs=[...new Set(L.map(a=>(a.subfamilia||"")).filter(Boolean))].sort();
+  const sel=$("np_sub");
+  if(sel.options.length-1 !== subs.length){
+    sel.innerHTML='<option value="">Todas las subfamilias</option>'+subs.map(s=>`<option ${s===sub?"selected":""}>${s}</option>`).join("");
+  }
+  const filas=L.filter(a=>{
+    if(sub && (a.subfamilia||"")!==sub) return false;
+    if(!q) return true;
+    return ((a.codigo||"")+" "+(a.nombre||"")).toLowerCase().includes(q);
+  });
+  const nomDe=a=>((a.nombre||"").replace(/\s*\([^)]*\)\s*$/,"")).trim().toUpperCase();
+  $("np_tabla").innerHTML = filas.slice(0,400).map(a=>{
+    const nom=nomDe(a);
+    const mm=minmax.find(x=>(x.articulo||"").toUpperCase().trim()===nom)||{};
+    const c=npCant[a.codigo]||0;
+    return `<tr><td class="mut">${a.codigo||""}</td><td>${a.nombre||""}</td>
+      <td class="mut">${a.unidad||"—"}</td>
+      <td class="num mut">${mm.minimo!=null&&mm.minimo!==""?Number(mm.minimo).toFixed(0):"---"}</td>
+      <td class="num mut">${mm.maximo!=null&&mm.maximo!==""?Number(mm.maximo).toFixed(0):"---"}</td>
+      <td class="num"><span style="display:inline-flex;align-items:center;gap:6px;justify-content:flex-end">
+        <button style="padding:4px 10px" onclick="paso('${(a.codigo||"").replace(/'/g,"")}',${c-1})">−</button>
+        <input type="number" step="0.001" value="${c}" style="width:86px;margin:0;text-align:center"
+               onchange="paso('${(a.codigo||"").replace(/'/g,"")}',Number(this.value))">
+        <button class="s" style="padding:4px 10px" onclick="paso('${(a.codigo||"").replace(/'/g,"")}',${c+1})">＋</button>
+      </span></td></tr>`;
+  }).join("") || '<tr><td colspan="6" class="mut" style="padding:16px">Sin artículos para mostrar.</td></tr>';
+}
+function paso(cod,v){
+  if(v<0) v=0;
+  npCant[cod]=v;
+  let tot=0; for(const k in npCant) tot+=Number(npCant[k]||0);
+  $("np_total").textContent="Total: "+money(0)+"  ·  "+tot+" artículos";
+  pintarProductos();
 }
 function listaArticulos(){
   const uDe=cd=>((arts.find(a=>a.codigo_barras===cd)||{}).unimedida_compra)||"";
-  if(provArts.length) return provArts.map(a=>({codigo:a.codigo||a.insumo, nombre:a.insumo||a.codigo, unidad:uDe(a.codigo)}));
+  const sDe=cd=>((arts.find(a=>a.codigo_barras===cd)||{}).subfamilia)||"";
+  if(provArts.length) return provArts.map(a=>({codigo:a.codigo||a.insumo, nombre:a.insumo||a.codigo, unidad:uDe(a.codigo), subfamilia:sDe(a.codigo)}));
   const id=Number($("np_prov").value||0);
   const delProv=new Set(cat.filter(c=>c.id_proveedor===id).map(c=>c.codigo_barras));
   const l = delProv.size ? arts.filter(a=>delProv.has(a.codigo_barras)) : arts;
-  return l.map(a=>({codigo:a.codigo_barras, unidad:a.unimedida_compra||"",
+  return l.map(a=>({codigo:a.codigo_barras, unidad:a.unimedida_compra||"", subfamilia:a.subfamilia||"",
                     nombre:(a.articulo_hiopos||a.articulo_comercial||"")+(a.unimedida_compra?" ("+a.unimedida_compra+")":"")}));
 }
 function unidadDe(nombre){
@@ -304,10 +345,18 @@ function calcularTotal(){
 async function guardarPedido(){
   const prov=Number($("np_prov").value||0);
   if(!prov){$("np_err").textContent="Elegí el proveedor.";return;}
-  const filas=[...$("np_lineas").querySelectorAll("div.row")].map(r=>{
+  const L=listaArticulos();
+  const filas=[];
+  for(const cod in npCant){
+    const cant=Number(npCant[cod]||0); if(cant<=0) continue;
+    const a=L.find(x=>x.codigo===cod) || (arts.find(x=>x.codigo_barras===cod)||{});
+    filas.push({codigo:cod, cant:cant, nombre:a.nombre||a.articulo_hiopos||cod, unidad:a.unidad||a.unimedida_compra||null});
+  }
+  [...$("np_lineas").querySelectorAll("div.row")].forEach(r=>{
     const a=r.querySelector("input[list]"), c=r.querySelector("input[type=number]");
-    return a? {codigo:codigoDe(a.value), cant:Number(c.value||0), nombre:a.value, unidad:unidadDe(a.value)}:null;
-  }).filter(x=>x && x.codigo && x.cant>0);
+    if(a && a.value.trim() && Number(c.value||0)>0)
+      filas.push({codigo:codigoDe(a.value), cant:Number(c.value||0), nombre:a.value, unidad:unidadDe(a.value)});
+  });
   if(!filas.length){$("np_err").textContent="Agregá al menos un artículo con cantidad.";return;}
   const sedeId = perfil.rol==="sede" ? perfil.sede_id : Number($("np_sede").value);
   const sedeNom = (sedes.find(s=>s.id===sedeId)||{}).nombre || (perfil.sedes&&perfil.sedes.nombre) || "";
@@ -1159,10 +1208,24 @@ async function guardarNov(){
     <div style="flex:1"><label class="mut">Fecha de entrega</label><input type="date" id="np_entrega"></div>
     <div style="flex:1"><label class="mut">Responsable</label><input id="np_resp" placeholder="quién pide"></div>
   </div>
-  <label class="mut">Artículos</label>
-  <div class="mut" id="np_arts_info" style="margin-bottom:6px"></div>
-  <div id="np_lineas"></div>
-  <button onclick="agregarLinea()">＋ Agregar artículo</button>
+  <div class="row" style="margin-top:12px;align-items:center">
+    <span style="font-weight:700;color:#12306b">3. PRODUCTOS <span class="mut" id="np_arts_info"></span></span>
+    <span class="sp"></span>
+    <button onclick="agregarLinea()">＋ Artículo libre</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <input id="np_q" placeholder="🔍 Buscar artículo..." style="flex:2;margin:0" oninput="pintarProductos()" autocomplete="off">
+    <select id="np_sub" style="flex:1;margin:0" onchange="pintarProductos()"><option value="">Todas las subfamilias</option></select>
+  </div>
+  <div id="np_lineas" style="display:none"></div>
+  <div style="max-height:44vh;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:10px">
+    <table style="margin:0"><thead><tr style="background:#12306b;color:#fff;position:sticky;top:0">
+      <th style="background:#12306b">CÓDIGO</th><th style="background:#12306b">ARTÍCULO</th>
+      <th style="background:#12306b">UNIDAD</th>
+      <th style="background:#12306b;text-align:center">MÍN.</th><th style="background:#12306b;text-align:center">MÁX.</th>
+      <th style="background:#12306b;text-align:right">CANTIDAD</th></tr></thead>
+      <tbody id="np_tabla"></tbody></table>
+  </div>
   <label class="mut">Observación</label><input id="np_obs" placeholder="opcional">
   <div class="row"><b id="np_total" style="margin-right:auto">Total: $ 0</b>
     <button onclick="$('modalPedido').classList.remove('on')">Cancelar</button>
