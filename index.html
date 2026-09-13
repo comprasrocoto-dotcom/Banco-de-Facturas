@@ -243,6 +243,7 @@ async function filtrarArticulos(){
   npCant={}; $("np_q").value=""; pintarProductos();
 }
 let npCant={};
+function numEs(v){ if(v==null) return 0; const s=String(v).trim().replace(/\s/g,"").replace(",","."); const x=Number(s); return isNaN(x)?0:x; }
 function pintarProductos(){
   const q=($("np_q").value||"").trim().toLowerCase();
   const sub=$("np_sub").value;
@@ -268,14 +269,14 @@ function pintarProductos(){
       <td class="num mut">${mm.maximo!=null&&mm.maximo!==""?Number(mm.maximo).toFixed(0):"---"}</td>
       <td class="num"><span style="display:inline-flex;align-items:center;gap:6px;justify-content:flex-end">
         <button style="padding:4px 10px" onclick="paso('${(a.codigo||"").replace(/'/g,"")}',${c-1})">−</button>
-        <input type="number" step="0.001" value="${c}" style="width:86px;margin:0;text-align:center"
-               onchange="paso('${(a.codigo||"").replace(/'/g,"")}',Number(this.value))">
+        <input type="text" inputmode="decimal" value="${c}" style="width:88px;margin:0;text-align:center"
+               onchange="paso('${(a.codigo||"").replace(/'/g,"")}',this.value)">
         <button class="s" style="padding:4px 10px" onclick="paso('${(a.codigo||"").replace(/'/g,"")}',${c+1})">＋</button>
       </span></td></tr>`;
   }).join("") || '<tr><td colspan="6" class="mut" style="padding:16px">Sin artículos para mostrar.</td></tr>';
 }
 function paso(cod,v){
-  if(v<0) v=0;
+  v=numEs(v); if(v<0) v=0;
   npCant[cod]=v;
   let tot=0; for(const k in npCant) tot+=Number(npCant[k]||0);
   $("np_total").textContent="Total: "+money(0)+"  ·  "+tot+" artículos";
@@ -326,7 +327,7 @@ function calcularTotal(){
   $("np_lineas").querySelectorAll("div.row").forEach(r=>{
     const a=r.querySelector("input[list]"), c=r.querySelector("input[type=number]");
     if(!a) return;
-    const pr=precioDe(codigoDe(a.value)), cant=Number(c.value||0);
+    const pr=precioDe(codigoDe(a.value)), cant=numEs(c.value);
     const sp=r.querySelector("span");
     const nom=(a.value||"").replace(/\s*\(.*\)$/,"").trim().toUpperCase();
     const mm=minmax.find(x=>(x.articulo||"").toUpperCase().trim()===nom);
@@ -354,8 +355,8 @@ async function guardarPedido(){
   }
   [...$("np_lineas").querySelectorAll("div.row")].forEach(r=>{
     const a=r.querySelector("input[list]"), c=r.querySelector("input[type=number]");
-    if(a && a.value.trim() && Number(c.value||0)>0)
-      filas.push({codigo:codigoDe(a.value), cant:Number(c.value||0), nombre:a.value, unidad:unidadDe(a.value)});
+    if(a && a.value.trim() && numEs(c.value)>0)
+      filas.push({codigo:codigoDe(a.value), cant:numEs(c.value), nombre:a.value, unidad:unidadDe(a.value)});
   });
   if(!filas.length){$("np_err").textContent="Agregá al menos un artículo con cantidad.";return;}
   const sedeId = perfil.rol==="sede" ? perfil.sede_id : Number($("np_sede").value);
@@ -848,7 +849,7 @@ function lineaEdit(id, insumo, cant, codigo){
   return `<div class="row" data-id="${id||""}" data-cod="${(codigo||"").replace(/"/g,"&quot;")}" style="margin-top:6px">
     <input list="dll_${uid}" value="${(insumo||"").replace(/"/g,"&quot;")}" placeholder="🔎 artículo" style="flex:3;margin:0">
     <datalist id="dll_${uid}">${L.map(a=>`<option value="${a.nombre.replace(/"/g,"&quot;")}">`).join("")}</datalist>
-    <input type="number" step="0.001" value="${cant!=null?cant:1}" style="flex:1;margin:0" placeholder="cant.">
+    <input type="text" inputmode="decimal" value="${cant!=null?cant:1}" style="flex:1;margin:0" placeholder="cant.">
     <span class="mut" style="min-width:80px">${unidadDe(insumo)||""}</span>
     <button class="d" onclick="this.parentNode.remove()">✕</button></div>`;
 }
@@ -887,9 +888,9 @@ async function guardarEdicion(){
   const filas=[...$("editLineas").querySelectorAll("div.row")];
   const vivos=[];
   for(const r of filas){
-    const a=r.querySelector("input[list]"), c=r.querySelector("input[type=number]");
-    if(!a) continue;
-    const cant=Number(c.value||0); if(cant<=0) continue;
+    const a=r.querySelector("input[list]"), c=r.querySelector("input[list]")? r.querySelectorAll("input")[1]:null;
+    if(!a||!c) continue;
+    const cant=numEs(c.value); if(cant<=0) continue;
     const cod=r.dataset.cod || codigoDe(a.value);
     if(r.dataset.id){
       await SB.from("pedido_lineas").update({cantidad:cant, insumo:a.value, codigo:cod, unidad:unidadDe(a.value)||null}).eq("id",Number(r.dataset.id));
