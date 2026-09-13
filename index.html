@@ -922,9 +922,9 @@ function numeroFactura(f){
 }
 // Numero de factura del pedido: usa el guardado y, si falta, lo saca de la factura amarrada
 // ---- ORDENES PARA EL VIGILANTE LOCAL (el bot corre en tu PC, sin tokens) ----
-let ordenesUlt=[], ordEstadoPrev=null;
+let ordenesUlt=[], ordEstadoPrev=null, ordenOculta=null;
 async function cargarOrdenes(){
-  const {data}=await SB.from("ordenes").select("id,estado,pedida_en,tomada_en,terminada_en,resultado").order("id",{ascending:false}).limit(3);
+  const {data}=await SB.from("ordenes").select("id,estado,pedida_en,tomada_en,terminada_en,resultado,log").order("id",{ascending:false}).limit(3);
   ordenesUlt=data||[]; pintarEstadoOrden();
   const e=(ordenesUlt[0]||{}).estado||null;
   if(ordEstadoPrev!==null && ordEstadoPrev!==e && (e==="hecho"||e==="terminado"||e==="error")){
@@ -944,13 +944,31 @@ function pintarEstadoOrden(){
              hecho:"✅ Terminada bien",terminado:"✅ Terminada (mirá el resultado)",
              error:"⚠️ Terminó con error (mirá el log)"}[o.estado]||o.estado;
   const cuando=String(o.terminada_en||o.tomada_en||o.pedida_en||"").slice(0,16).replace("T"," ");
+  const acabada=(o.estado==="hecho"||o.estado==="terminado"||o.estado==="error");
+  // El aviso se limpia solo: a los 10 minutos de terminar, o si lo ocultan a mano
+  const fin=o.terminada_en? new Date(o.terminada_en).getTime():null;
+  if(o.id===ordenOculta || (acabada && fin && (Date.now()-fin)>10*60*1000)){ c.style.display="none"; return; }
   c.style.display="block";
-  const conProblema = o.estado==="error" || /no se confirmo|no se pudo|⚠️/.test(o.resultado||"");
+  const conProblema = o.estado==="error" || /no se confirmo|no se pudo|sin facturar|⚠️/.test(o.resultado||"");
   c.innerHTML=`<div class="card" style="border-left:5px solid ${col}">
     <div style="font-weight:700;color:${col}">${txt}</div>
     <div class="mut">Orden #${o.id} · ${cuando}${o.resultado? " · "+o.resultado : ""}</div>
-    ${conProblema?`<div class="row" style="margin-top:10px"><button class="p" onclick="relanzar()">🔁 Relanzar este ingreso</button>
-      <span class="mut">vuelve a intentar facturar lo que quedó pendiente</span></div>`:""}</div>`;
+    <div class="row" style="margin-top:10px">
+      ${conProblema?`<button class="p" onclick="relanzar()">🔁 Relanzar este ingreso</button>`:""}
+      ${acabada?`<button class="s" onclick="enviarResumen()">📧 Mandar el resumen al correo</button>
+      <button class="s" onclick="ocultarOrden()">🧹 Ocultar</button>`:""}
+    </div></div>`;
+}
+function ocultarOrden(){ ordenOculta=(ordenesUlt[0]||{}).id||null; pintarEstadoOrden(); }
+function enviarResumen(){
+  const o=ordenesUlt[0]||{};
+  const cuerpo="RESUMEN DEL INGRESO AL ERP (Banco de Facturas)\n\n"+
+    "Orden #"+o.id+"\nEstado: "+(o.estado||"")+"\n"+
+    String(o.terminada_en||"").slice(0,16).replace("T"," ")+"\n\n"+
+    "RESULTADO:\n"+(o.resultado||"(sin novedades)")+"\n\nDETALLE:\n"+(o.log||"(sin detalle)");
+  location.href="mailto:comprasrocoto@gmail.com?subject="+
+    encodeURIComponent("Banco de Facturas: resumen del ingreso #"+o.id)+"&body="+
+    encodeURIComponent(cuerpo.slice(0,1800));
 }
 // Relanza: crea una orden nueva para que el agente retome lo que quedó con novedad
 async function relanzar(){
