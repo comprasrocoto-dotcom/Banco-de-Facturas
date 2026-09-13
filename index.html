@@ -890,7 +890,7 @@ async function abrirPedido(id){
      <div style="border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-top:16px">
        <div style="font-weight:700;color:#1e3a8a">📄 DATOS DE FACTURA</div>
        <div class="row" style="gap:40px;margin-top:8px;align-items:flex-start">
-         <div><div class="mut" style="font-weight:700">N. FACTURA</div><div>${p.numero_factura||"—"}</div></div>
+         <div><div class="mut" style="font-weight:700">N. FACTURA</div><div>${numFacturaDe(p)||"—"}</div></div>
          <div><div class="mut" style="font-weight:700">TIPO</div><div>${p.forma_pago||p.tipo||"—"}</div></div>
          <div><div class="mut" style="font-weight:700">OBSERVACIÓN</div><div>${p.observacion_factura||"—"}</div></div>
          <div><div class="mut" style="font-weight:700">NOTA DE CRÉDITO</div><div>${p.numero_nota_credito||"—"}</div></div>
@@ -898,10 +898,18 @@ async function abrirPedido(id){
      </div>
      <div class="row" style="margin-top:14px">
        ${!p.factura_cufe?`<button class="s" onclick="abrirAmarre('pedido',${p.id})">🔗 Amarrar a factura</button>`:""}
-       ${p.factura_cufe?`<span class="badge st-sellada">Amarrado a ${p.numero_factura||"factura"}</span>`:""}
+       ${p.factura_cufe?`<span class="badge st-sellada">Amarrado a ${numFacturaDe(p)||"factura"}</span>`:""}
        ${p.observacion_pedido?`<span class="mut">Obs: ${p.observacion_pedido}</span>`:""}
      </div>
    </div>`;
+}
+// Numero de factura del pedido: usa el guardado y, si falta, lo saca de la factura amarrada
+function numFacturaDe(p){
+  if(p && p.numero_factura) return p.numero_factura;
+  const f=(facturas||[]).find(x=>x.cufe===p.factura_cufe);
+  if(!f) return "";
+  const brut=(f.documento||"") || ((f.prefijo||"")+(f.folio||""));
+  return String(brut).replace(/[^A-Za-z0-9]/g,"");
 }
 function csvPedido(id){
   const p=pedidos.find(x=>x.id===id)||{};
