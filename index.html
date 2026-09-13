@@ -201,7 +201,7 @@ async function nuevoPedido(){
   if(!provs.length){
     const a=await SB.from("proveedores").select("id,nit,razon_social,nombre_comercial").order("razon_social");
     provs=a.data||[];
-    const b=await SB.from("articulos").select("codigo_barras,articulo_hiopos,articulo_comercial,unimedida_compra").order("articulo_comercial");
+    const b=await SB.from("articulos").select("codigo_barras,articulo_hiopos,articulo_comercial,unimedida_compra,subfamilia").order("articulo_comercial");
     arts=b.data||[];
     const c=await SB.from("catalogo_compras").select("codigo_barras,id_proveedor,precio_negociado");
     cat=c.data||[];
