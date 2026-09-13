@@ -51,7 +51,7 @@ tbody tr:nth-child(even){background:#f8fafc}
 tr:hover td{background:#f1f5f9}
 .modal{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;padding:20px;z-index:20}
 .modal.on{display:flex}
-.modal .card{max-width:470px;width:100%;max-height:92vh;overflow:auto;box-shadow:0 20px 50px rgba(15,23,42,.25);border:none}
+.modal .card{max-width:470px;width:100%;max-height:94vh;overflow:auto;box-shadow:0 20px 50px rgba(15,23,42,.25);border:none}
 .err{color:var(--bad);font-size:13px;min-height:18px}
 .vacio{text-align:center;color:var(--mut);padding:44px;background:#fff;border:1px dashed var(--line);border-radius:14px}
 .login-tag{display:inline-block;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
@@ -351,35 +351,59 @@ async function guardarPedido(){
   for(const cod in npCant){
     const cant=Number(npCant[cod]||0); if(cant<=0) continue;
     const a=L.find(x=>x.codigo===cod) || (arts.find(x=>x.codigo_barras===cod)||{});
-    filas.push({codigo:cod, cant:cant, nombre:a.nombre||a.articulo_hiopos||cod, unidad:a.unidad||a.unimedida_compra||null});
+    filas.push({codigo:cod, cant:cant, nombre:a.nombre||a.articulo_hiopos||cod, unidad:a.unidad||a.unimedida_compra||null, subfamilia:a.subfamilia||""});
   }
   [...$("np_lineas").querySelectorAll("div.row")].forEach(r=>{
     const a=r.querySelector("input[list]"), c=r.querySelector("input[type=number]");
     if(a && a.value.trim() && numEs(c.value)>0)
-      filas.push({codigo:codigoDe(a.value), cant:numEs(c.value), nombre:a.value, unidad:unidadDe(a.value)});
+      filas.push({codigo:codigoDe(a.value), cant:numEs(c.value), nombre:a.value, unidad:unidadDe(a.value), subfamilia:(arts.find(x=>x.codigo_barras===codigoDe(a.value))||{}).subfamilia||""});
   });
   if(!filas.length){$("np_err").textContent="Agregá al menos un artículo con cantidad.";return;}
   const sedeId = perfil.rol==="sede" ? perfil.sede_id : Number($("np_sede").value);
   const sedeNom = (sedes.find(s=>s.id===sedeId)||{}).nombre || (perfil.sedes&&perfil.sedes.nombre) || "";
   const marcaId = (sedes.find(s=>s.id===sedeId)||{}).marca_id || perfil.sedes?.marca_id || null;
-  const total = filas.reduce((t,f)=>t+precioDe(f.codigo)*f.cant,0);
   const pv = provs.find(x=>x.id===prov)||{};
-  const {data,error}=await SB.from("pedidos").insert({
-    numero:(await SB.rpc("siguiente_pedido")).data || ("WEB-"+Date.now().toString().slice(-8)),
-    marca_id:marcaId, sede_id:sedeId, proveedor_id:prov,
-    sede_texto:sedeNom, proveedor: pv.razon_social||pv.nombre_comercial, proveedor_texto: pv.razon_social||pv.nombre_comercial,
-    nit_proveedor: pv.nit, fecha:$("np_fecha").value||null, total:total||null,
-    tipo:$("np_tipo").value, fecha_entrega:$("np_entrega").value||null,
-    responsable:$("np_resp").value||null, observacion_pedido:$("np_obs").value||null,
-    estado:"pendiente", subido_por:usuario.id
-  }).select("id").single();
-  if(error){$("np_err").textContent="No se pudo guardar: "+error.message;return;}
-  const rows=filas.map(f=>({pedido_id:data.id, codigo:f.codigo, insumo:f.nombre, cantidad:f.cant, unidad:f.unidad||null}));
-  const l=await SB.from("pedido_lineas").insert(rows);
-  if(l.error){$("np_err").textContent="El pedido quedó, pero fallaron las líneas: "+l.error.message;return;}
-  await SB.from("historial").insert({accion:"pedido creado desde la web",detalle:"WEB "+sedeNom,usuario:usuario.id}).then(()=>{},()=>{});
+  const catDe = s => { s=(s||"").toUpperCase();
+    if(s.includes("ASEO")) return "aseo";
+    if(s.includes("EMPAQUE")) return "empaque";
+    if(s.includes("UTENSIL")||s.includes("LOZA")) return "loza";
+    return "insumos"; };
+  const grupoA=[], grupoB=[];
+  filas.forEach(f=>{ (catDe(f.subfamilia)==="insumos" ? grupoA : grupoB).push(f); });
+  const grupos = grupoB.length && grupoA.length ? [[grupoA,""],[grupoB,"Material de aseo / empaque (separado del pedido de insumos)"]] : [[filas,""]];
+
+  async function crearPedido(lineas, obsExtra, nota){
+    const numero=(await SB.rpc("siguiente_pedido")).data || ("WEB-"+Date.now().toString().slice(-8));
+    const total=lineas.reduce((t,f)=>t+precioDe(f.codigo)*f.cant,0);
+    const ins=await SB.from("pedidos").insert({
+      numero:numero, marca_id:marcaId, sede_id:sedeId, proveedor_id:prov,
+      sede_texto:sedeNom, proveedor: pv.razon_social||pv.nombre_comercial, proveedor_texto: pv.razon_social||pv.nombre_comercial,
+      nit_proveedor: pv.nit, fecha:$("np_fecha").value||null, total:total||null,
+      tipo:$("np_tipo").value, fecha_entrega:$("np_entrega").value||null,
+      responsable:$("np_resp").value||null,
+      observacion_pedido:[$("np_obs").value||"", obsExtra, nota||""].filter(Boolean).join(" · ")||null,
+      estado:"pendiente", subido_por:usuario.id
+    }).select("id").single();
+    if(ins.error) throw new Error(ins.error.message);
+    const rows=lineas.map(f=>({pedido_id:ins.data.id, codigo:f.codigo, insumo:f.nombre, cantidad:f.cant, unidad:f.unidad||null}));
+    const l=await SB.from("pedido_lineas").insert(rows);
+    if(l.error) throw new Error(l.error.message);
+    return numero;
+  }
+
+  let nums=[];
+  try{
+    for(const [lineas,obs] of grupos){
+      const esAseo = grupos.length>1 && lineas.some(f=>catDe(f.subfamilia)!=="insumos");
+      nums.push(await crearPedido(lineas, obs,
+        esAseo ? "Material de aseo/empaque — va en orden aparte" : (grupos.length>1 ? "Solo insumos — el aseo/empaque va en otra orden" : "")));
+    }
+  }catch(e){ $("np_err").textContent="No se pudo guardar: "+e.message; return; }
+  await SB.from("historial").insert({accion:"pedido creado desde la web",detalle:"PED "+sedeNom+" → "+nums.join(" + "),usuario:usuario.id}).then(()=>{},()=>{});
   $("modalPedido").classList.remove("on");
   pedidosCargados=false; await cargarPedidos();
+  if(nums.length>1) alert("Se crearon DOS órdenes separadas (no se mezclan):\n\n• "+nums[0]+"  → insumos\n• "+nums[1]+"  → material de aseo / empaque");
+  else alert("Pedido "+nums[0]+" guardado.");
 }
 let adminCargado=false, adminVista="prov", adminProv=[], adminArt=[], adminCat=[];
 function setAdmin(v){ adminVista=v;
@@ -1197,7 +1221,7 @@ async function guardarNov(){
     <button class="p" onclick="guardarEdicion()">Guardar cambios</button></div>
 </div></div>
 
-<div id="modalPedido" class="modal"><div class="card" style="max-width:720px">
+<div id="modalPedido" class="modal"><div class="card" style="max-width:1080px;width:96vw">
   <h1>➕ Nuevo pedido</h1>
   <div class="row">
     <div style="flex:1"><label class="mut">Sede</label><select id="np_sede"></select></div>
@@ -1220,7 +1244,7 @@ async function guardarNov(){
     <select id="np_sub" style="flex:1;margin:0" onchange="pintarProductos()"><option value="">Todas las subfamilias</option></select>
   </div>
   <div id="np_lineas" style="display:none"></div>
-  <div style="max-height:44vh;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:10px">
+  <div style="max-height:54vh;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:10px">
     <table style="margin:0"><thead><tr style="background:#12306b;color:#fff;position:sticky;top:0">
       <th style="background:#12306b">CÓDIGO</th><th style="background:#12306b">ARTÍCULO</th>
       <th style="background:#12306b">UNIDAD</th>
