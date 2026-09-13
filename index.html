@@ -543,14 +543,22 @@ async function ordenCompra(id){
     const a=await SB.from("articulos").select("codigo_barras,unimedida_compra").in("codigo_barras",cds.slice(0,300));
     (a.data||[]).forEach(x=>{ uni[x.codigo_barras]=x.unimedida_compra; });
   }
+  let prec={};
+  if(p.proveedor_id && cds.length){
+    const q=await SB.from("catalogo_compras").select("codigo_barras,precio_negociado")
+        .eq("id_proveedor",p.proveedor_id).in("codigo_barras",cds.slice(0,300));
+    (q.data||[]).forEach(x=>{ if(x.precio_negociado!=null) prec[x.codigo_barras]=Number(x.precio_negociado); });
+  }
   const hayUni = lineas.some(x=>uni[x.codigo]);
   const filas=lineas.map(x=>`<tr>
       <td>${x.codigo||""}</td>
       <td>${x.insumo||""}</td>
       ${hayUni?`<td>${uni[x.codigo]||"—"}</td>`:""}
       <td class="num">${x.cantidad!=null?x.cantidad:""}</td>
-      <td class="num">${x.cantidad!=null?x.cantidad:""}</td></tr>`).join("");
+      <td class="num">${prec[x.codigo]!=null ? money(prec[x.codigo]*Number(x.cantidad||0)) : "—"}</td></tr>`).join("");
   const total=lineas.reduce((t,x)=>t+Number(x.cantidad||0),0);
+  const totalPlata=lineas.reduce((t,x)=>t+(prec[x.codigo]!=null?prec[x.codigo]*Number(x.cantidad||0):0),0);
+  const hayPrecios=lineas.some(x=>prec[x.codigo]!=null);
   const hoy=new Date().toLocaleDateString("es-CO");
   const cont=document.createElement("div");
   cont.style.cssText="position:absolute;left:-9999px;top:0;width:794px;background:#fff";
@@ -572,7 +580,7 @@ async function ordenCompra(id){
    td{padding:8px;border-bottom:1px solid #e2e8f0}
    tbody tr:nth-child(even){background:#f8fafc}
    .num{text-align:right}
-   .res{display:flex;justify-content:flex-end;margin-top:12px}
+   .res{display:flex;justify-content:flex-end;margin-top:12px;gap:10px}
    .res div{background:#f0fdf4;border:1px solid #86efac;color:#166534;font-weight:700;padding:9px 18px;border-radius:8px;font-size:15px}
    h3{color:#12306b;font-size:12.5px;margin:20px 0 6px;text-transform:uppercase;letter-spacing:.6px}
    .f{color:#475569;line-height:1.9}
@@ -602,7 +610,10 @@ async function ordenCompra(id){
      </div>
      <table><thead><tr><th>CÓDIGO</th><th>ARTÍCULO</th>${hayUni?"<th>UNIDAD</th>":""}<th class="num">CANT.</th><th class="num">TOTAL</th></tr></thead>
        <tbody>${filas}</tbody></table>
-     <div class="res"><div>Total artículos: ${total}</div></div>
+     <div class="res" style="gap:10px">
+       <div>Total artículos: ${total}</div>
+       ${hayPrecios?`<div>Total compra: ${money(totalPlata)}</div>`:""}
+     </div>
      <h3>Información de Factura / Documento</h3>
      <div class="f">N° Factura: ${p.numero_factura||"—"}<br>Tipo: ${p.forma_pago||p.tipo||"—"}<br>N° Pedido Sistema: ${p.pedido_erp||"—"}</div>
      <div class="pie"><span>Banco de Facturas · ${p.sede_texto||sede.nombre||""}</span><span>Generado el ${hoy}</span></div>
