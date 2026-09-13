@@ -714,9 +714,26 @@ async function abrirPedido(id){
     const a=await SB.from("articulos").select("codigo_barras,unimedida_compra").in("codigo_barras",cds.slice(0,300));
     (a.data||[]).forEach(x=>{uni[x.codigo_barras]=x.unimedida_compra;});
   }
-  const filas=lineas.map(x=>`<tr><td class="mut">${x.codigo||""}</td><td>${x.insumo||""}</td>
-      <td class="num" style="font-weight:700">${x.cantidad!=null?x.cantidad:""}</td>
-      <td class="mut">${uni[x.codigo]||"—"}</td></tr>`).join("");
+  let prec={};
+  if(p.proveedor_id && cds.length){
+    const q=await SB.from("catalogo_compras").select("codigo_barras,precio_negociado")
+        .eq("id_proveedor",p.proveedor_id).in("codigo_barras",cds.slice(0,300));
+    (q.data||[]).forEach(x=>{ if(x.precio_negociado!=null) prec[x.codigo_barras]=Number(x.precio_negociado); });
+  }
+  const filas=lineas.map(x=>{
+    const pr = prec[x.codigo];
+    const cant = x.cantidad!=null? Number(x.cantidad):null;
+    return `<tr><td class="mut">${x.codigo||""}</td><td>${x.insumo||""}</td>
+      <td class="num" style="font-weight:700">${cant!=null?cant:""}</td>
+      <td class="mut">${uni[x.codigo]||x.unidad||"—"}</td>
+      <td class="num">${pr!=null? money(pr):"—"}</td>
+      <td class="num" style="font-weight:700">${(pr!=null&&cant!=null)? money(pr*cant):"—"}</td></tr>`;
+  }).join("");
+  const totalPlata=lineas.reduce((t,x)=>{
+    const pr=prec[x.codigo]; return t + (pr!=null? pr*Number(x.cantidad||0):0);
+  },0);
+  const hayPrecios=lineas.some(x=>prec[x.codigo]!=null);
+  const totalArts=lineas.reduce((t,x)=>t+Number(x.cantidad||0),0);
   c.dataset.on="1"; if(ch) ch.textContent="⌃";
   c.innerHTML=`
    <div style="padding:0 16px 16px">
@@ -740,8 +757,13 @@ async function abrirPedido(id){
      </div>
      <table style="margin-top:18px"><thead><tr style="background:#166534;color:#fff">
         <th style="background:#166534">CÓDIGO</th><th style="background:#166534">ARTÍCULO</th>
-        <th style="background:#166534;text-align:right">CANT.</th><th style="background:#166534">UNIDAD</th></tr></thead>
+        <th style="background:#166534;text-align:right">CANT.</th><th style="background:#166534">UNIDAD</th>
+        <th style="background:#166534;text-align:right">PRECIO</th><th style="background:#166534;text-align:right">TOTAL</th></tr></thead>
        <tbody>${filas}</tbody></table>
+     <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
+       <div style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:8px 16px;font-weight:700">Total artículos: ${totalArts}</div>
+       ${hayPrecios?`<div style="background:#f0fdf4;border:1px solid #86efac;color:#166534;border-radius:8px;padding:8px 16px;font-weight:700">Total compra: ${money(totalPlata)}</div>`:""}
+     </div>
      <div style="border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-top:16px">
        <div style="font-weight:700;color:#1e3a8a">📄 DATOS DE FACTURA</div>
        <div class="row" style="gap:40px;margin-top:8px;align-items:flex-start">
