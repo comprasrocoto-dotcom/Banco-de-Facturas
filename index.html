@@ -1010,6 +1010,7 @@ function pintar(){
         ${f.archivo_recibo?`<button onclick="verPdfArchivo('${f.archivo_recibo}')">📸 Ver recibo</button>`:""}
         ${((perfil.rol==="admin"||perfil.rol==="pagos")&&f.estado!=="pool")?`<button onclick="pedirIngreso('${f.cufe}')">✎ ${f.num_ingreso?"Nº ingreso":"Poner Nº de ingreso"}</button>`:""}
         ${((perfil.rol==="admin"||perfil.rol==="pagos")&&f.tipo==="factura")?`<button class="s" onclick="abrirAmarre('factura','${f.cufe}')">🔗 Buscar pedido</button>`:""}
+        ${(perfil.rol==="admin")?`<button class="d" title="Borrar factura" onclick="borrarFactura('${f.cufe}')">🗑</button>`:""}
         ${(f.estado!="pagada")?`<button onclick="abrirNov('${f.cufe}')">Novedad</button>`:""}
       </div>
       ${nv?`<div class="mut" style="margin-top:10px">📝 ${nv.texto||nv.motivo}</div>`:""}
@@ -1074,6 +1075,22 @@ async function generarSellado(cufe,recibido,rutaFoto){
     const up=await SB.storage.from("facturas").upload(path,new Blob([out],{type:"application/pdf"}),{upsert:true});
     if(!up.error){ await SB.from("facturas").update({archivo_pdf_sellado:path}).eq("cufe",cufe); }
   }catch(e){ console.warn("sellado:",e); }
+}
+async function borrarFactura(cufe){
+  const f=facturas.find(x=>x.cufe===cufe)||{};
+  const num=((f.prefijo||"")+(f.folio||""))||f.cufe.slice(0,10);
+  let aviso = (f.estado==="sellada") ? "⚠️ OJO: esta factura YA ESTÁ SELLADA y aprobada.\n\n" : "";
+  if(f.pedido_erp||f.pedido_num) aviso += "Está amarrada al pedido "+(f.pedido_erp||f.pedido_num)+" (se suelta el amarre, el pedido queda).\n\n";
+  if(!confirm(aviso+"¿BORRAR la factura "+num+" de "+(f.emisor||"")+"?\n\nSe borra el registro y su PDF. No se puede deshacer.")) return;
+  await SB.from("pedidos").update({factura_cufe:null}).eq("factura_cufe",cufe);
+  if(f.archivo_pdf) { const x=await SB.storage.from("facturas").remove([f.archivo_pdf]); if(x.error) console.warn(x.error.message); }
+  if(f.archivo_pdf_sellado) { await SB.storage.from("facturas").remove([f.archivo_pdf_sellado]); }
+  if(f.archivo_recibo) { await SB.storage.from("facturas").remove([f.archivo_recibo]); }
+  const r=await SB.from("facturas").delete().eq("cufe",cufe);
+  if(r.error){ alert("No se pudo borrar: "+r.error.message); return; }
+  await SB.from("historial").insert({accion:"factura borrada",detalle:num+" · "+(f.emisor||""),usuario:usuario.id}).then(()=>{},()=>{});
+  await cargar();
+  alert("Factura "+num+" borrada.");
 }
 async function verPdf(cufe){
   const f=facturas.find(x=>x.cufe===cufe);
