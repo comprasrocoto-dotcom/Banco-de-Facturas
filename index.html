@@ -911,13 +911,16 @@ async function abrirPedido(id){
      </div>
    </div>`;
 }
-// Numero de factura del pedido: usa el guardado y, si falta, lo saca de la factura amarrada
-function numFacturaDe(p){
-  if(p && p.numero_factura) return p.numero_factura;
-  const f=(facturas||[]).find(x=>x.cufe===p.factura_cufe);
+// N° de factura: documento o prefijo+folio, SIEMPRE sin separadores (IT081898792). Nunca el CUFE.
+function numeroFactura(f){
   if(!f) return "";
   const brut=(f.documento||"") || ((f.prefijo||"")+(f.folio||""));
   return String(brut).replace(/[^A-Za-z0-9]/g,"");
+}
+// Numero de factura del pedido: usa el guardado y, si falta, lo saca de la factura amarrada
+function numFacturaDe(p){
+  if(p && p.numero_factura) return p.numero_factura;
+  return numeroFactura((facturas||[]).find(x=>x.cufe===p.factura_cufe));
 }
 function csvPedido(id){
   const p=pedidos.find(x=>x.id===id)||{};
@@ -1101,7 +1104,7 @@ async function generarSellado(cufe,recibido,rutaFoto){
     const fecha=new Date().toLocaleString("es-CO",{dateStyle:"short",timeStyle:"short"});
     const sede=(perfil.sedes&&perfil.sedes.nombre)||"punto de venta";
     recibido=(recibido||"").trim().toUpperCase();
-    const num=((f.prefijo||"")+(f.folio||""))||f.cufe.slice(0,10);
+    const num=numeroFactura(f)||"s/n";   // el N° de factura NUNCA debe ser el CUFE
     doc.getPages().forEach(pg=>{
       const {width}=pg.getSize();
       const bw=Math.min(410,width*0.70), bh=(f.num_ingreso?78:62), x=24, y=22;
