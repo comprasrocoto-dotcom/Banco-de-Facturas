@@ -106,7 +106,14 @@ tr:hover td{background:#f1f5f9}
       <button class="chip on" id="v-pool"     onclick="setVista('pool')">Sin asignar</button>
       <button class="chip"    id="v-mias"     onclick="setVista('mias')">Mías</button>
       <button class="chip"    id="v-selladas" onclick="setVista('selladas')">Selladas</button>
+      <button class="chip"    id="v-hecho"    onclick="setVista('hecho')">✅ Proceso terminado</button>
       <button class="chip"    id="v-nov"      onclick="setVista('nov')">Con novedad</button>
+      <span class="sp"></span>
+      <span class="mut">Fecha:</span>
+      <input type="date" id="fdesde" style="width:auto;margin:0" onchange="pintar()">
+      <span class="mut">→</span>
+      <input type="date" id="fhasta" style="width:auto;margin:0" onchange="pintar()">
+      <button class="mut" style="padding:4px 10px" onclick="$('fdesde').value='';$('fhasta').value='';pintar()">limpiar</button>
     </div>
     <div id="lista"></div>
 
@@ -134,6 +141,11 @@ tr:hover td{background:#f1f5f9}
         <button class="p" onclick="nuevoPedido()">➕ Nuevo pedido</button>
         <button class="p" id="btnIngresos" style="display:none;background:#1e3a8a;border-color:#1e3a8a" onclick="pedirIngresos()">🚀 Iniciar ingresos al ERP</button>
         <span class="sp"></span>
+        <span class="mut">Fecha:</span>
+        <input type="date" id="fped_desde" style="width:auto;margin:0" onchange="pintarPedidos()">
+        <span class="mut">→</span>
+        <input type="date" id="fped_hasta" style="width:auto;margin:0" onchange="pintarPedidos()">
+        <button class="mut" style="padding:4px 10px" onclick="$('fped_desde').value='';$('fped_hasta').value='';pintarPedidos()">limpiar</button>
         <input id="qp" placeholder="🔎 N° de orden, proveedor o factura" style="width:300px;margin:0" oninput="pintarPedidos()">
       </div>
       <div id="estadoOrden" style="display:none;margin-bottom:10px"></div>
@@ -702,6 +714,17 @@ async function cargarPedidos(){
 function pintarPedidos(){
   const q=($("qp").value||"").trim().toLowerCase();
   let l=pedidos.filter(p=>pedVista=="todos"||p.estado===pedVista);
+  // Filtro por fecha
+  const fd=$("fped_desde").value, fh=$("fped_hasta").value;
+  if(fd||fh){
+    l=l.filter(p=>{
+      const fe=p.fecha||""; // formato ISO yyyy-mm-dd
+      if(!fe) return false;
+      if(fd&&fe<fd) return false;
+      if(fh&&fe>fh) return false;
+      return true;
+    });
+  }
   if(q) l=l.filter(p=>((p.numero||"")+" "+(p.proveedor_texto||p.proveedor||"")+" "+(p.numero_factura||"")+" "+(p.pedido_erp||"")+" "+(p.sede_texto||"")).toLowerCase().includes(q));
   const cont=$("listaped");
   if(!l.length){cont.innerHTML='<div class="vacio">No hay pedidos acá.</div>';return;}
@@ -853,7 +876,8 @@ async function abrirAmarre(modo, id){
     const f=facturas.find(x=>x.cufe===id)||{};
     $("amTitulo").textContent="🔗 Buscar el pedido de la factura "+(((f.prefijo||"")+(f.folio||""))||"");
     if(!pedidosCargados) await cargarPedidos();
-    amDatos=pedidos;
+    // Las sedes solo ven sus propios pedidos; admin/pagos ven todos
+    amDatos = (perfil.rol==="sede") ? pedidos.filter(p=>p.sede_id===perfil.sede_id) : pedidos;
   }
   pintarAmarre();
   $("modalAmarre").classList.add("on");
@@ -1180,7 +1204,7 @@ async function cargar(){
   pintar();
 }
 function setTipo(t){tipo=t;$("t-fac").classList.toggle("on",t=="factura");$("t-nc").classList.toggle("on",t=="nota_credito");pintar();}
-function setVista(v){vista=v;["pool","mias","selladas","nov"].forEach(x=>$("v-"+x).classList.toggle("on",x==v));pintar();}
+function setVista(v){vista=v;["pool","mias","selladas","hecho","nov"].forEach(x=>$("v-"+x).classList.toggle("on",x==v));pintar();}
 function novDe(c){return novedades.find(n=>n.cufe===c);}
 
 function pintar(){
@@ -1189,7 +1213,19 @@ function pintar(){
   if(vista=="pool")     l=l.filter(f=>f.estado=="pool"||f.estado=="asignada");
   if(vista=="mias")     l=l.filter(f=>f.estado=="asignada");
   if(vista=="selladas") l=l.filter(f=>f.estado=="sellada"||f.estado=="pagada");
+  if(vista=="hecho")    l=l.filter(f=>(f.estado=="sellada"||f.estado=="pagada")&&f.num_ingreso);
   if(vista=="nov")      l=l.filter(f=>novDe(f.cufe));
+  // Filtro por fecha (fecha_emision)
+  const fd=$("fdesde").value, fh=$("fhasta").value;
+  if(fd||fh){
+    l=l.filter(f=>{
+      const fe=f.fecha_emision||""; // formato ISO yyyy-mm-dd
+      if(!fe) return false;
+      if(fd&&fe<fd) return false;
+      if(fh&&fe>fh) return false;
+      return true;
+    });
+  }
   const q=($("q").value||"").trim().toLowerCase();
   if(q) l=l.filter(f=>((f.numero||"")+" "+(f.prefijo||"")+(f.folio||"")+" "+(f.documento||"")+" "+(f.emisor||"")+" "+(f.cufe||"")+" "+(f.num_ingreso||"")).toLowerCase().includes(q));
   const cont=$("lista");
@@ -1217,8 +1253,8 @@ function pintar(){
         ${f.archivo_pdf?`<button onclick="verPdf('${f.cufe}')">📄 Ver PDF</button>`:""}
         ${(f.archivo_pdf_sellado&&(f.estado==="sellada"||f.estado==="pagada"))?`<button class="p" onclick="verPdfArchivo('${f.archivo_pdf_sellado}')">✅ Ver sellada</button>`:""}
         ${f.archivo_recibo?`<button onclick="verPdfArchivo('${f.archivo_recibo}')">📸 Ver recibo</button>`:""}
-        ${((perfil.rol==="admin"||perfil.rol==="pagos")&&f.estado!=="pool")?`<button onclick="pedirIngreso('${f.cufe}')">✎ ${f.num_ingreso?"Nº ingreso":"Poner Nº de ingreso"}</button>`:""}
-        ${((perfil.rol==="admin"||perfil.rol==="pagos")&&f.tipo==="factura")?`<button class="s" onclick="abrirAmarre('factura','${f.cufe}')">🔗 Buscar pedido</button>`:""}
+        ${(f.estado!=="pool")?`<button onclick="pedirIngreso('${f.cufe}')">✎ ${f.num_ingreso?"Nº ingreso ERP":"Poner Nº de ingreso"}</button>`:""}
+        ${(f.tipo=="factura")?`<button class="s" onclick="abrirAmarre('factura','${f.cufe}')">🔗 Buscar pedido</button>`:""}
         ${(perfil.rol==="admin")?`<button class="d" title="Borrar factura" onclick="borrarFactura('${f.cufe}')">🗑</button>`:""}
         ${(f.estado!="pagada")?`<button onclick="abrirNov('${f.cufe}')">Novedad</button>`:""}
       </div>
@@ -1561,7 +1597,7 @@ async function guardarNov(){
 
 <div id="modal2" class="modal"><div class="card">
   <h1>⬆ Subir facturas (solo PDF)</h1>
-  <p class="mut">Del <b>nombre del archivo</b> saco la clave (CUFE); del contenido, los datos. Si algo sale mal, lo corregís después.</p>
+  <p class="mut">Del <b>nombre del archivo</b> saco el número de factura si no lo encuentro en el PDF; del contenido, los demás datos. Si no encuentro el número, te lo pregunto antes de subir.</p>
   <label class="mut">Marca / empresa</label><select id="mar"></select>
   <label class="mut">Tipo</label><select id="tipo2"><option value="factura">Factura</option><option value="nota_credito">Nota crédito</option></select>
   <label class="mut">Categoría</label><select id="cat2">
@@ -1602,19 +1638,49 @@ async function textoPdf(f){
   }
   return t;
 }
+// --- Extrae el número de factura del NOMBRE del archivo ---
+// Busca patrones como: "FCRC2579", "FCRC-2579", "IT08-1898792", "Factura 12345",
+// o cualquier secencia letras+números que parezca un prefijo de factura.
+function numDeNombreArchivo(nombre){
+  const n=String(nombre||"").replace(/\.pdf$/i,"");
+  // 1) Patron claro: PREFIJO-NUMERO o PREFIJO NUMERO (letras 2-4 + dígitos)
+  let m=n.match(/([A-Za-z]{2,4})\s*[-_]?\s*(\d{4,})/);
+  if(m) return {prefijo:m[1].toUpperCase(), folio:m[2], documento:m[1].toUpperCase()+m[2]};
+  // 2) "Factura 12345" o "Factura FCRC12345"
+  m=n.match(/factura\s*[-_]?\s*([A-Za-z]{0,4})(\d{3,})/i);
+  if(m) return {prefijo:(m[1]||"").toUpperCase()||null, folio:m[2], documento:(m[1]?m[1].toUpperCase():"")+m[2]};
+  // 3) Cualquier número largo aislado (>=5 dígitos) en el nombre
+  m=n.match(/\b(\d{5,})\b/);
+  if(m) return {prefijo:null, folio:m[1], documento:m[1]};
+  return null;
+}
 async function datosDePdf(f){
   const t=await textoPdf(f);
   const g=(re)=>{const m=t.match(re); return m&&m[1]?m[1].trim():null;};
   const plata=(s)=> s? Number(s.replace(/\./g,"").replace(",",".")) : null;
   // Acepta las dos formas: "IT08-1898792" y "IT081898792" (sin separadores, como quedo
   // en la base). El prefijo es letras + hasta 2 digitos; el folio, los digitos que siguen.
-  const pf=t.match(/N[uú]mero de Factura:?\s*([A-Za-z]{2,4}\d{0,2})\s*-?\s*(\d{4,})/i);
+  // También acepta "Número de Factura: 12345" (solo folio, sin prefijo).
+  let pf=t.match(/N[uú]mero de Factura:?\s*([A-Za-z]{2,4}\d{0,2})\s*-?\s*(\d{4,})/i);
+  // Sin prefijo: "Número de Factura: 12345" o "Número Factura  12345"
+  if(!pf){
+    const m2=t.match(/N[uú]mero de Factura:?\s*(\d{4,})/i);
+    if(m2) pf=[null,null,m2[1],m2[1]];
+  }
   const fe=g(/Fecha de Emisi[oó]n:?\s*(\d{2}\/\d{2}\/\d{4})/i);
   let iso=null; if(fe){const [d1,m1,a1]=fe.split("/"); iso=a1+"-"+m1+"-"+d1;}
+  let prefijo=pf? (pf[1]||"").toUpperCase()||null : null;
+  let folio=pf? pf[2] : null;
+  let documento=pf? ((pf[1]||"").toUpperCase()||"")+pf[2] : null;
+  // Si el PDF no trae número, intentar del nombre del archivo
+  if(!documento){
+    const na=numDeNombreArchivo(f.name);
+    if(na){ prefijo=na.prefijo; folio=na.folio; documento=na.documento; }
+  }
   return {
-    prefijo: pf? pf[1].toUpperCase(): null,
-    folio:   pf? pf[2]: null,
-    documento: pf? pf[1].toUpperCase()+pf[2]: null,
+    prefijo: prefijo,
+    folio:   folio,
+    documento: documento,
     emisor:  g(/Raz[oó]n Social:?\s*([^\n]{4,80})/i),
     nit:     (g(/Nit del Emisor:?\s*([\d\.\-]+)/i)||"").replace(/[\.\-]/g,"") || null,
     fecha:   iso,
@@ -1628,20 +1694,64 @@ async function subirPdfs(){
   const marcas={}; document.querySelectorAll("#mar option").forEach(o=>marcas[o.value]=o.textContent);
   let ok=0; const errs=[];
   $("res").innerHTML="⏳ Procesando "+archivos.length+" archivo(s)...";
+
+  // Fase 1: pre-procesar todos los PDFs y extraer datos
+  let datosArchivos=[];
   for(const f of archivos){
     try{
+      let d=await datosDePdf(f);
+      // Buscar CUFE en nombre y contenido
       let cufe=(f.name.match(/[0-9a-fA-F]{96}/)||[])[0];
-      let d={};
-      if(!cufe){ d=await datosDePdf(f); const t=await textoPdf(f); cufe=(t.match(/[0-9a-f]{96}/i)||[])[0]; }
-      if(!cufe){ errs.push(f.name+": no encontré el CUFE"); continue; }
-      cufe=cufe.toLowerCase();
+      if(!cufe){ const t=await textoPdf(f); cufe=(t.match(/[0-9a-f]{96}/i)||[])[0]; }
+      if(cufe) cufe=cufe.toLowerCase();
+      datosArchivos.push({file:f, datos:d, cufe:cufe, nombre:f.name});
+    }catch(e){ errs.push(f.name+": "+e.message); }
+  }
+
+  // Fase 2: mostrar tabla editable con los datos extraídos
+  // Si un PDF no tiene número de factura, el usuario puede escribirlo a mano
+  const sinNumero=datosArchivos.filter(x=>!x.datos.documento);
+  if(sinNumero.length){
+    // Generar HTML con campos editables para los que no tienen número
+    let html='<div style="margin:10px 0;padding:12px;background:#fffbeb;border:1px solid #fcd34d;border-radius:9px">';
+    html+='<b style="color:#92400e">⚠️ '+sinNumero.length+' PDF(s) sin número de factura detectado</b>';
+    html+='<p class="mut" style="margin:6px 0">Revisá y escribí el número a mano si lo conocés. Los que queden vacíos se suben igual (los podés editar después).</p>';
+    html+='<table style="width:100%;margin-top:8px"><tr><th>Archivo</th><th>N° Factura</th><th>NIT</th><th>Total</th></tr>';
+    datosArchivos.forEach((x,i)=>{
+      if(!x.datos.documento){
+        html+='<tr><td style="font-size:12px;word-break:break-all">'+x.nombre+'</td>';
+        html+='<td><input id="mn_'+i+'" placeholder="ej: FCRC2579" value="" style="margin:0;padding:6px 8px"></td>';
+        html+='<td><input id="ni_'+i+'" placeholder="NIT" value="'+(x.datos.nit||"")+'" style="margin:0;padding:6px 8px;width:120px"></td>';
+        html+='<td><input id="tt_'+i+'" placeholder="0" value="'+(x.datos.total||"")+'" style="margin:0;padding:6px 8px;width:120px"></td></tr>';
+      }
+    });
+    html+='</table>';
+    html+='<div class="row" style="margin-top:10px"><span class="sp"></span>';
+    html+='<button class="p" onclick="confirmarSubidaConManual()">Confirmar y subir</button></div>';
+    html+='</div>';
+    $("res").innerHTML=html;
+    // Guardar datos para la función de confirmación
+    window._datosSubida=datosArchivos;
+    window._marcasSubida=marcas;
+    return; // esperar a que el usuario confirme
+  }
+
+  // Si todos tienen número, subir directo
+  for(const x of datosArchivos){
+    try{
+      const f=x.file, d=x.datos;
+      let cufe=x.cufe;
+      // Sin CUFE: generar clave = NIT + número + total
+      if(!cufe){
+        const nitLimpio=(d.nit||"").replace(/[^0-9]/g,"");
+        const numLimpio=(d.documento||"").replace(/[^A-Za-z0-9]/g,"");
+        const totLimpio=String(d.total||"0");
+        if(!nitLimpio||!numLimpio){ errs.push(f.name+": sin CUFE y no pude generar clave (falta NIT o número)"); continue; }
+        cufe="MANUAL-"+nitLimpio+"-"+numLimpio+"-"+totLimpio;
+      }
       const path=(marcas[marca]||"sin-marca")+"/"+cufe+".pdf";
       const up=await SB.storage.from("facturas").upload(path,f,{upsert:true});
       if(up.error) throw new Error(up.error.message);
-      if(Object.keys(d).length===0) d=await datosDePdf(f);
-      // upsert: si esa factura YA estaba subida, la ACTUALIZA en vez de reventar
-      // con "duplicate key". (Antes eran insert y fallaba al resubir la misma factura.)
-      // Y si el PDF no trae prefijo, el numero de factura queda SOLO con el folio.
       if(!d.documento) d.documento = String(d.prefijo||"").replace(/[^A-Za-z0-9]/g,"") + String(d.folio||"").replace(/[^A-Za-z0-9]/g,"");
       const ins=await SB.from("facturas").upsert({
         cufe:cufe, marca_id:marca, tipo:tipo, categoria:categoria,
@@ -1651,11 +1761,60 @@ async function subirPdfs(){
       if(ins.error) throw new Error(ins.error.message);
       if(!d.folio) console.log("⚠️ sin folio leido del PDF:", f.name, d);
       ok++;
-    }catch(e){ errs.push(f.name+": "+e.message); }
+    }catch(e){ errs.push(x.nombre+": "+e.message); }
   }
-  $("res").innerHTML="✅ "+ok+" de "+archivos.length+" subida(s) y guardada(s) como pendientes (pool)."
+  $("res").innerHTML="✅ "+ok+" de "+datosArchivos.length+" subida(s) y guardada(s) como pendientes (pool)."
     +(errs.length?"<br>⚠️ "+errs.join("<br>"):"");
   archivos=[];
+  await cargar();
+}
+async function confirmarSubidaConManual(){
+  const datosArchivos=window._datosSubida||[];
+  const marcas=window._marcasSubida||{};
+  const marca=Number($("mar").value), tipo=$("tipo2").value, categoria=$("cat2").value;
+  let ok=0; const errs=[];
+  $("res").innerHTML="⏳ Subiendo...";
+  for(let i=0;i<datosArchivos.length;i++){
+    const x=datosArchivos[i]; if(!x) continue;
+    try{
+      const f=x.file, d=x.datos;
+      // Leer valores manuales
+      const mn=$("mn_"+i), ni=$("ni_"+i), tt=$("tt_"+i);
+      if(mn && mn.value.trim()){
+        const val=mn.value.trim();
+        d.documento=val.replace(/[^A-Za-z0-9]/g,"");
+        // Separar prefijo y folio
+        const parts=val.match(/^([A-Za-z]{2,4})\s*[-_]?\s*(\d+)$/);
+        if(parts){ d.prefijo=parts[1].toUpperCase(); d.folio=parts[2]; }
+        else { d.prefijo=null; d.folio=val; }
+      }
+      if(ni && ni.value.trim()) d.nit=ni.value.trim().replace(/[^0-9]/g,"");
+      if(tt && tt.value.trim()) d.total=Number(tt.value.trim().replace(/[^\d,.]/g,"").replace(/\./g,"").replace(",","."))||0;
+      // CUFE o clave manual
+      let cufe=x.cufe;
+      if(!cufe){
+        const nitLimpio=(d.nit||"").replace(/[^0-9]/g,"");
+        const numLimpio=(d.documento||"").replace(/[^A-Za-z0-9]/g,"");
+        const totLimpio=String(d.total||"0");
+        if(!numLimpio){ errs.push(f.name+": sin número, no pude generar clave"); continue; }
+        cufe="MANUAL-"+nitLimpio+"-"+numLimpio+"-"+totLimpio;
+      }
+      const path=(marcas[marca]||"sin-marca")+"/"+cufe+".pdf";
+      const up=await SB.storage.from("facturas").upload(path,f,{upsert:true});
+      if(up.error) throw new Error(up.error.message);
+      const ins=await SB.from("facturas").upsert({
+        cufe:cufe, marca_id:marca, tipo:tipo, categoria:categoria,
+        prefijo:d.prefijo, folio:d.folio, documento:d.documento, emisor:d.emisor,
+        nit_emisor:d.nit, fecha_emision:d.fecha, total:d.total,
+        estado:"pool", archivo_pdf:path}, {onConflict:"cufe"});
+      if(ins.error) throw new Error(ins.error.message);
+      ok++;
+    }catch(e){ errs.push(x.nombre+": "+e.message); }
+  }
+  $("res").innerHTML="✅ "+ok+" de "+datosArchivos.length+" subida(s) y guardada(s) como pendientes (pool)."
+    +(errs.length?"<br>⚠️ "+errs.join("<br>"):"");
+  archivos=[];
+  window._datosSubida=null;
   await cargar();
 }
 pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
