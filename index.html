@@ -1658,15 +1658,19 @@ async function datosDePdf(f){
   const t=await textoPdf(f);
   const g=(re)=>{const m=t.match(re); return m&&m[1]?m[1].trim():null;};
   const plata=(s)=> s? Number(s.replace(/\./g,"").replace(",",".")) : null;
-  // Acepta las dos formas: "IT08-1898792" y "IT081898792" (sin separadores, como quedo
-  // en la base). El prefijo es letras + hasta 2 digitos; el folio, los digitos que siguen.
-  // También acepta "Número de Factura: 12345" (solo folio, sin prefijo).
-  let pf=t.match(/N[uú]mero de Factura:?\s*([A-Za-z]{2,4}\d{0,2})\s*-?\s*(\d{4,})/i);
+  // Acepta varias formas de "Número de Factura:":
+  //   "1FEV-1361593" (prefijo con digito inicial)
+  //   "IT08-1898792" (letras + digitos)
+  //   "FCRC2579"     (sin separador)
+  //   "6525"         (solo folio, sin prefijo)
+  let pf=t.match(/N[uú]mero de Factura:?\s*([A-Za-z0-9]{2,6})\s*-?\s*(\d{3,})/i);
   // Sin prefijo: "Número de Factura: 12345" o "Número Factura  12345"
   if(!pf){
-    const m2=t.match(/N[uú]mero de Factura:?\s*(\d{4,})/i);
+    const m2=t.match(/N[uú]mero de Factura:?\s*(\d{3,})/i);
     if(m2) pf=[null,null,m2[1],m2[1]];
   }
+  // Si el prefijo es solo digitos, no es prefijo: es el folio completo
+  if(pf && pf[1] && /^\d+$/.test(pf[1])) { pf[2]=pf[1]; pf[1]=null; }
   const fe=g(/Fecha de Emisi[oó]n:?\s*(\d{2}\/\d{2}\/\d{4})/i);
   let iso=null; if(fe){const [d1,m1,a1]=fe.split("/"); iso=a1+"-"+m1+"-"+d1;}
   let prefijo=pf? (pf[1]||"").toUpperCase()||null : null;
