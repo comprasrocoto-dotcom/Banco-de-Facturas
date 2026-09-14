@@ -1606,14 +1606,39 @@ async function subirPdfs(){
 }
 pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
 SB.auth.onAuthStateChange((_e,s)=>{if(!s){$("login").style.display="block";$("app").style.display="none";}});
+// El MÁXIMO cambia por SEDE: en la base los máximos están por ALMACEN
+// (ROCOTO AMSTERDAM, MALANGA, PLANTA PRODUCCION ROCOTO...). Acá se busca el
+// almacén que corresponde a la sede elegida y se usa ESE máximo.
+function _norm(s){ return String(s||"").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim(); }
+function _almacenDeSede(){
+  const sel=$("np_sede").selectedOptions[0];
+  const nomSede=_norm(sel? sel.textContent.split("·").pop() : "");
+  const marca=_norm((sel? sel.textContent.split("·")[0] : ""));
+  const todos=[...new Set(Object.values(MM).flat().map(f=>f.almacen).filter(Boolean))];
+  const palabras=nomSede.split(/\s+/).filter(w=>w.length>=4);
+  let cand=todos.filter(a=>palabras.some(w=>_norm(a).includes(w)));
+  if(cand.length>1){ const conMarca=cand.filter(a=>_norm(a).includes(marca)); if(conMarca.length) cand=conMarca; }
+  return cand[0]||null;
+}
+function _maxSede(articuloHiopos){
+  const k=_norm(articuloHiopos); const filas=MM[k];
+  if(!filas||!filas.length) return null;
+  const alm=_almacenDeSede();
+  const r=(alm&&filas.find(f=>_norm(f.almacen)===_norm(alm))) || filas[0];
+  const max=Number(r.maximo)||0, min=Number(r.minimo)||0;
+  return max>0? {max:max, min:min, almacen:r.almacen} : null;
+}
+
 // ── ALERTA EN EL RENGLÓN (en vivo) ───────────────────────────────────────
 // Lee el MÁX y el ARTÍCULO de la propia fila de la tabla, así no depende de
 // cómo se guarde la cantidad. Pinta la cantidad en rojo y avisa si pasa el máximo.
 function _avisoFila(tr, inp){
   if(!tr||!tr.cells||tr.cells.length<4) return null;
   const cs=tr.cells, txt=c=>String(c.textContent||"").replace(/\s+/g," ").trim();
-  const max=numEs(txt(cs[cs.length-2]));      // MÁX es la penúltima columna
+  let max=numEs(txt(cs[cs.length-2]));      // MÁX de la tabla
   const nom=txt(cs[1])||txt(cs[0]);           // ARTÍCULO
+  const mx=_maxSede(nom);                     // si la base tiene MÁXIMO de ESTA sede, manda ese
+  if(mx) max=mx.max;
   const c=numEs(inp.value||0);
   return c>0 && max>0 ? {nom:nom, max:max, cant:c} : (max>0?{nom:nom,max:max,cant:0}:null);
 }
