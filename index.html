@@ -1200,7 +1200,7 @@ function pintar(){
     return `<div class="card">
       <div class="row">
         <div><div class="emisor">${f.emisor||"—"}</div>
-          <div class="mut">${f.prefijo||""}${f.folio||""} · ${fch(f.fecha_emision)} · NIT ${f.nit_emisor||"—"}</div></div>
+          <div class="mut">${(()=>{const n=f.documento||((f.prefijo||"")+(f.folio||""));return n? "<b style='color:#0f766e'>N° "+n+"</b>" : "<span style='color:#b45309;font-weight:700'>⚠️ sin número en el PDF</span>";})()} · ${fch(f.fecha_emision)} · NIT ${f.nit_emisor||"—"}</div></div>
         <div class="total">${money(f.total)}</div>
       </div>
       <div class="row" style="margin-top:12px">
@@ -1326,6 +1326,9 @@ async function pedirIngreso(cufe){
   const {error}=await SB.from("facturas").update({num_ingreso:num||null}).eq("cufe",cufe);
   if(error){alert("No se pudo guardar: "+error.message);return;}
   await SB.from("historial").insert({cufe,accion:"numero de ingreso ERP",detalle:num,usuario:usuario.id});
+  // OJO: NO se cambia el estado a mano. "Proceso terminado" se DERIVA: una factura esta
+  // terminada cuando esta sellada/aprobada Y tiene N° de ingreso ERP. Asi los botones,
+  // el ZIP y el PDF de ciclo completo siguen funcionando igual.
   if(f.estado==="sellada"||f.estado==="pagada"){ await generarSellado(cufe, f.recibido_por, f.archivo_recibo); }
   await cargar();
 }
