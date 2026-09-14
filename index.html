@@ -349,7 +349,66 @@ function calcularTotal(){
   });
   $("np_total").textContent="Total: "+money(tot);
 }
+// ── ALERTA DE MÁXIMO/MÍNIMO ──────────────────────────────────────────────
+// La tabla maximos_minimos guarda el ALMACEN y el ARTICULO por NOMBRE (texto),
+// no por id. Se carga una vez y se compara contra lo que la sede va a pedir.
+let MM = {};
+async function cargarMaximos(){
+  try{
+    const {data}=await SB.from("maximos_minimos").select("almacen,articulo,minimo,maximo");
+    MM={};
+    (data||[]).forEach(r=>{
+      const k=String(r.articulo||"").trim().toUpperCase();
+      if(!k) return;
+      if(!MM[k]) MM[k]=[];
+      MM[k].push(r);
+    });
+  }catch(e){ MM={}; }
+}
+
+// Si la sede pide MÁS que el MÁXIMO (o menos del MÍNIMO), sale una confirmación
+// antes de guardar. Sirve para no llenarse de producto y para cazar el error
+// clásico de unidad: 500 kilos en vez de 0.5.
+async function revisarMaximos(){
+  try{
+    const sedeId=$("np_sede").value;
+    const ids=Object.keys(npCant).map(Number).filter(Boolean);
+    if(!sedeId||!ids.length) return true;
+    if(!Object.keys(MM).length) await cargarMaximos();
+
+    const {data:as}=await SB.from("articulos").select("id,articulo_hiopos,minimo,maximo").in("id",ids);
+    const nom={}; (as||[]).forEach(a=>nom[a.id]=a);
+    const nomSede=($("np_sede").selectedOptions[0]?.textContent||"").split("·").pop().trim().toUpperCase();
+
+    const avisos=[];
+    for(const id of ids){
+      const c=numEs(npCant[id]); if(!c) continue;
+      const a=nom[id]||{};
+      const et=(a.articulo_hiopos||("artículo "+id));
+      const k=String(a.articulo_hiopos||"").trim().toUpperCase();
+      const filas=MM[k];
+      let max=Number(a.maximo)||0, min=Number(a.minimo)||0, de="ficha del artículo";
+      if(filas&&filas.length){
+        // si hay una fila del almacén de esta sede, se usa esa; si no, la primera
+        const r=filas.find(f=>String(f.almacen||"").trim().toUpperCase().includes(nomSede)) || filas[0];
+        max=Number(r.maximo)||max; min=Number(r.minimo)||min; de="máximos y mínimos";
+      }
+      if(max>0 && c>max){
+        const grave = c > max*3;   // sospecha de error de unidad
+        avisos.push(`• ${et}: vas a pedir ${c} y el MÁXIMO es ${max} (${de})` +
+                    (grave ? "   ← ¡REVISÁ LA UNIDAD! (¿kilos o gramos?)" : ""));
+      } else if(min>0 && c<min){
+        avisos.push(`• ${et}: vas a pedir ${c} y el MÍNIMO es ${min} (${de})`);
+      }
+    }
+    if(!avisos.length) return true;
+    return confirm("⚠️  REVISÁ ESTAS CANTIDADES\n\n"+avisos.join("\n")+
+                   "\n\n¿Guardar de todas formas?");
+  }catch(e){ return true; }
+}
+
 async function guardarPedido(){
+  if(!(await revisarMaximos())) return;
   const prov=Number($("np_prov").value||0);
   if(!prov){$("np_err").textContent="Elegí el proveedor.";return;}
   const L=listaArticulos();
