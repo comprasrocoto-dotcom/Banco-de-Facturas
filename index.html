@@ -706,7 +706,10 @@ function setPedVista(v){ pedVista=v;
   pintarPedidos();
 }
 async function cargarPedidos(){
-  const {data,error}=await SB.from("pedidos").select("*").order("id",{ascending:false}).limit(1200);
+  // Las sedes solo ven SUS pedidos; admin/pagos ven todos
+  let query=SB.from("pedidos").select("*").order("id",{ascending:false}).limit(1200);
+  if(perfil.rol==="sede") query=query.eq("sede_id",perfil.sede_id);
+  const {data,error}=await query;
   if(error){$("listaped").innerHTML='<div class="vacio">No pude cargar los pedidos: '+error.message+'</div>';return;}
   pedidos=data||[]; pedidosCargados=true; pintarPedidos();
   await cargarOrdenes();   // estado del bot local (ordenes)
