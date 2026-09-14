@@ -1606,6 +1606,63 @@ async function subirPdfs(){
 }
 pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
 SB.auth.onAuthStateChange((_e,s)=>{if(!s){$("login").style.display="block";$("app").style.display="none";}});
+// ── ALERTA EN EL RENGLÓN (en vivo) ───────────────────────────────────────
+// Lee el MÁX y el ARTÍCULO de la propia fila de la tabla, así no depende de
+// cómo se guarde la cantidad. Pinta la cantidad en rojo y avisa si pasa el máximo.
+function _avisoFila(tr, inp){
+  if(!tr||!tr.cells||tr.cells.length<4) return null;
+  const cs=tr.cells, txt=c=>String(c.textContent||"").replace(/\s+/g," ").trim();
+  const max=numEs(txt(cs[cs.length-2]));      // MÁX es la penúltima columna
+  const nom=txt(cs[1])||txt(cs[0]);           // ARTÍCULO
+  const c=numEs(inp.value||0);
+  return c>0 && max>0 ? {nom:nom, max:max, cant:c} : (max>0?{nom:nom,max:max,cant:0}:null);
+}
+function _pintarAviso(tr, inp, r){
+  if(!r||!r.cant||r.cant<=r.max){
+    inp.style.background=""; inp.style.borderColor=""; inp.style.color=""; inp.style.fontWeight="";
+    const d=tr.querySelector(".aviso-max"); if(d) d.remove();
+    return;
+  }
+  const grave = r.cant > r.max*3;
+  inp.style.background= grave ? "#fee2e2" : "#fff1f2";
+  inp.style.borderColor= grave ? "#b91c1c" : "#dc2626";
+  inp.style.color="#b91c1c"; inp.style.fontWeight="700";
+  inp.title=`⚠️ Vas a pedir ${r.cant} y el MÁXIMO es ${r.max}`+(grave?"  ← ¿kilos o gramos?":"");
+  if(!tr.querySelector(".aviso-max")){
+    const d=document.createElement("div");
+    d.className="aviso-max";
+    d.style.cssText="grid-column:1/-1;color:#b91c1c;font-size:11.5px;font-weight:600;padding:2px 4px";
+    d.textContent=`⚠️ ${r.nom}: pides ${r.cant} y el MÁXIMO es ${r.max}`+(grave?"  ← ¡REVISÁ LA UNIDAD! (¿kilos o gramos?)":"");
+    tr.appendChild(d);
+  } else {
+    tr.querySelector(".aviso-max").textContent=
+      `⚠️ ${r.nom}: pides ${r.cant} y el MÁXIMO es ${r.max}`+(grave?"  ← ¡REVISÁ LA UNIDAD! (¿kilos o gramos?)":"");
+  }
+}
+document.addEventListener("input", e=>{
+  const t=e.target;
+  if(!t||!t.closest||t.tagName!=="INPUT") return;
+  const tr=t.closest("tr"); if(!tr) return;
+  _pintarAviso(tr, t, _avisoFila(tr, t));
+});
+
+// La revisión al guardar ahora sale de las MISMAS filas (nombres y máximos reales).
+revisarMaximos = async function(){
+  const avisos=[]; let graves=false;
+  document.querySelectorAll("tr").forEach(tr=>{
+    if(!tr.cells||tr.cells.length<4) return;
+    const inp=tr.querySelector("input"); if(!inp) return;
+    const r=_avisoFila(tr, inp);
+    if(r&&r.cant>0&&r.max>0&&r.cant>r.max){
+      const grave=r.cant>r.max*3; if(grave) graves=true;
+      avisos.push(`• ${r.nom}: vas a pedir ${r.cant} y el MÁXIMO es ${r.max}`+
+                  (grave? "   ← ¡REVISÁ LA UNIDAD! (¿kilos o gramos?)" : ""));
+    }
+  });
+  if(!avisos.length) return true;
+  return confirm("⚠️  REVISÁ ESTAS CANTIDADES\n\n"+avisos.join("\n")+
+                 "\n\n¿Guardar de todas formas?");
+};
 init();
 </script>
 <footer style="text-align:center;padding:30px 16px 34px;color:#64748b;font-size:12px;letter-spacing:.4px">
