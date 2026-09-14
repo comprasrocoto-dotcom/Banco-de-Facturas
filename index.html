@@ -216,7 +216,11 @@ async function nuevoPedido(){
     $("np_sede").disabled=true;
   }else{
     $("np_sede").disabled=false;
-    $("np_sede").innerHTML=sedes.map(s=>`<option value="${s.id}">${s.nombre}</option>`).join("");
+    $("np_sede").innerHTML=sedes.map(s=>{
+      const m=((typeof marcas!=="undefined"&&marcas)?marcas:[]).find(x=>x.id===s.marca_id)||{};
+      const et=(m.nombre||"").toUpperCase();
+      return `<option value="${s.id}">${et? et+" · " : ""}${s.nombre}</option>`;
+    }).join("");
   }
   npCant={}; $("np_q").value=""; $("np_sub").innerHTML='<option value="">Todas las subfamilias</option>';
   pintarProductos();
