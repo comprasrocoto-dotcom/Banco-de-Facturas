@@ -99,6 +99,7 @@ tr:hover td{background:#f1f5f9}
       <span class="mut">al</span>
       <input type="date" id="d2" style="width:auto;margin:0">
       <button class="p" onclick="descargarSelladas()">⬇ Descargar ZIP</button>
+      <button class="p" onclick="descargarCicloCompleto()" title="Pedido + recibido + sellado + aprobado + facturado, todo en un solo PDF">📄 PDF ciclo completo</button>
       <span class="mut" id="resdesc"></span>
     </div>
     <div class="row" style="margin-bottom:16px">
@@ -1328,6 +1329,43 @@ async function pedirIngreso(cufe){
   if(f.estado==="sellada"||f.estado==="pagada"){ await generarSellado(cufe, f.recibido_por, f.archivo_recibo); }
   await cargar();
 }
+// ── UN SOLO PDF con TODOS los documentos que ya cerraron el ciclo completo ──
+// Ciclo completo = pedido + recibido + sellado + aprobado + FACTURADO (tiene N° de ingreso ERP).
+async function descargarCicloCompleto(){
+  const res=$("resdesc"); res.textContent="";
+  const l=facturas.filter(f=>(f.estado==="sellada"||f.estado==="pagada") && f.num_ingreso && f.archivo_pdf);
+  if(!l.length){ res.textContent="Todavía no hay documentos con el ciclo completo (sellados + facturados)."; return; }
+  res.textContent="Cargando lib PDF...";
+  try{
+    if(!window.PDFLib){
+      await new Promise((ok,mal)=>{ const s=document.createElement("script");
+        s.src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js";
+        s.onload=ok; s.onerror=mal; document.head.appendChild(s); });
+    }
+    const out=await PDFLib.PDFDocument.create();
+    let ok=0;
+    for(const f of l){
+      res.textContent="Uniendo "+ok+"/"+l.length+"...";
+      const {data:sig}=await SB.storage.from("facturas").createSignedUrl(f.archivo_pdf_sellado||f.archivo_pdf,120);
+      if(!sig) continue;
+      const r=await fetch(sig.signedUrl); if(!r.ok) continue;
+      const bytes=await r.arrayBuffer();
+      let src; try{ src=await PDFLib.PDFDocument.load(bytes,{ignoreEncryption:true}); }catch(e){ continue; }
+      const paginas=await out.copyPages(src, src.getPageIndices());
+      paginas.forEach(p=>out.addPage(p));
+      ok++;
+    }
+    if(!ok){ res.textContent="No pude leer los PDFs."; return; }
+    res.textContent="Guardando...";
+    const bytes=await out.save();
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob([bytes],{type:"application/pdf"}));
+    a.download="ciclo_completo_"+new Date().toISOString().slice(0,10)+".pdf";
+    a.click();
+    res.textContent="✅ "+ok+" documento(s) en un solo PDF (ciclo completo).";
+  }catch(e){ res.textContent="Error: "+e.message; }
+}
+
 async function descargarSelladas(){
   const d1=$("d1").value, d2=$("d2").value;
   const res=$("resdesc"); res.textContent="";
