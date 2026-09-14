@@ -218,8 +218,8 @@ async function nuevoPedido(){
     $("np_sede").disabled=false;
     $("np_sede").innerHTML=sedes.map(s=>{
       const m=((typeof marcas!=="undefined"&&marcas)?marcas:[]).find(x=>x.id===s.marca_id)||{};
-      const et=(m.nombre||"").toUpperCase();
-      return `<option value="${s.id}">${et? et+" · " : ""}${s.nombre}</option>`;
+      const et=(m.nombre||"").trim();
+      return `<option value="${s.id}">${et? et+" " : ""}${s.nombre}</option>`;
     }).join("");
   }
   npCant={}; $("np_q").value=""; $("np_sub").innerHTML='<option value="">Todas las subfamilias</option>';
@@ -1611,9 +1611,11 @@ SB.auth.onAuthStateChange((_e,s)=>{if(!s){$("login").style.display="block";$("ap
 // almacén que corresponde a la sede elegida y se usa ESE máximo.
 function _norm(s){ return String(s||"").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim(); }
 function _almacenDeSede(){
-  const sel=$("np_sede").selectedOptions[0];
-  const nomSede=_norm(sel? sel.textContent.split("·").pop() : "");
-  const marca=_norm((sel? sel.textContent.split("·")[0] : ""));
+  const id=Number(($("np_sede")||{}).value||0);
+  const s=((typeof sedes!=="undefined"&&sedes)?sedes:[]).find(x=>x.id===id)||{};
+  const m=((typeof marcas!=="undefined"&&marcas)?marcas:[]).find(x=>x.id===s.marca_id)||{};
+  const nomSede=_norm(s.nombre||"");
+  const marca=_norm(m.nombre||"");
   const todos=[...new Set(Object.values(MM).flat().map(f=>f.almacen).filter(Boolean))];
   const palabras=nomSede.split(/\s+/).filter(w=>w.length>=4);
   let cand=todos.filter(a=>palabras.some(w=>_norm(a).includes(w)));
