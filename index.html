@@ -1598,12 +1598,17 @@ async function subirPdfs(){
       const up=await SB.storage.from("facturas").upload(path,f,{upsert:true});
       if(up.error) throw new Error(up.error.message);
       if(Object.keys(d).length===0) d=await datosDePdf(f);
-      const ins=await SB.from("facturas").insert({
+      // upsert: si esa factura YA estaba subida, la ACTUALIZA en vez de reventar
+      // con "duplicate key". (Antes eran insert y fallaba al resubir la misma factura.)
+      // Y si el PDF no trae prefijo, el numero de factura queda SOLO con el folio.
+      if(!d.documento) d.documento = String(d.prefijo||"").replace(/[^A-Za-z0-9]/g,"") + String(d.folio||"").replace(/[^A-Za-z0-9]/g,"");
+      const ins=await SB.from("facturas").upsert({
         cufe:cufe, marca_id:marca, tipo:tipo, categoria:categoria,
         prefijo:d.prefijo, folio:d.folio, documento:d.documento, emisor:d.emisor,
         nit_emisor:d.nit, fecha_emision:d.fecha, total:d.total,
-        estado:"pool", archivo_pdf:path});
+        estado:"pool", archivo_pdf:path}, {onConflict:"cufe"});
       if(ins.error) throw new Error(ins.error.message);
+      if(!d.folio) console.log("⚠️ sin folio leido del PDF:", f.name, d);
       ok++;
     }catch(e){ errs.push(f.name+": "+e.message); }
   }
