@@ -1515,7 +1515,7 @@ async function descargarPendientes(){
   const res=$("resdesc"); res.textContent="";
   const fSedeVal=$("fSede").value;
   const fd=$("fdesde").value, fh=$("fhasta").value;
-  let l=facturas.filter(f=>!f.num_ingreso||novDe(f.cufe));
+  let l=facturas.filter(f=>(!f.num_ingreso||novDe(f.cufe))&&(f.estado==="asignada"||f.estado==="sellada"));
   if(fSedeVal) l=l.filter(f=>f.sede_id===Number(fSedeVal));
   if(fd) l=l.filter(f=>(f.fecha_emision||"")>=fd);
   if(fh) l=l.filter(f=>(f.fecha_emision||"")<=fh);
