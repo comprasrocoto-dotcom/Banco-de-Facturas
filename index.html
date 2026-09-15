@@ -75,6 +75,9 @@ tr:hover td{background:#f1f5f9}
     <button class="chip"    id="m-pedidos" onclick="setModulo('pedidos')">📋 Pedidos</button>
     <button class="chip"  id="m-admin" style="display:none" onclick="setModulo('admin')">⚙️ Admin</button>
     <span id="sede" class="badge"></span>
+    <select id="fSede" style="width:auto;margin:0;display:none" onchange="cambiarFiltroSede()">
+      <option value="">Todas las sedes</option>
+    </select>
     <span class="sp"></span>
     <button onclick="salir()">Salir</button>
   </header>
@@ -195,6 +198,16 @@ async function sesion(u){
   if(perfil.rol==="admin"){ $("m-admin").style.display="inline-block"; $("btnIngresos").style.display="inline-block"; }
   const {data:ss}=await SB.from("sedes").select("id,nombre,marca_id,marcas(nombre)").order("nombre");
   sedes=ss||[];
+  if(perfil.rol==="admin"||perfil.rol==="pagos"){
+    $("fSede").style.display="inline-block";
+    const porMarca={};
+    sedes.forEach(s=>{
+      const marca=(s.marcas&&s.marcas.nombre)||"Sin marca";
+      (porMarca[marca]=porMarca[marca]||[]).push(s);
+    });
+    $("fSede").innerHTML='<option value="">Todas las sedes</option>'+
+      Object.keys(porMarca).map(m=>`<optgroup label="${m}">${porMarca[m].map(s=>`<option value="${s.id}">${s.nombre}</option>`).join("")}</optgroup>`).join("");
+  }
   const {data:ms}=await SB.from("marcas").select("id,nombre").order("nombre");
   $("mar").innerHTML=(ms||[]).map(m=>`<option value="${m.id}">${m.nombre}</option>`).join("");
   $("sede").textContent=(s?s.nombre:"—")+(s&&s.marcas?" · "+s.marcas.nombre:"");
@@ -709,6 +722,7 @@ async function cargarPedidos(){
   // Las sedes solo ven SUS pedidos; admin/pagos ven todos
   let query=SB.from("pedidos").select("*").order("id",{ascending:false}).limit(1200);
   if(perfil.rol==="sede") query=query.eq("sede_id",perfil.sede_id);
+  else{ const fSedeVal=$("fSede").value; if(fSedeVal) query=query.eq("sede_id",Number(fSedeVal)); }
   const {data,error}=await query;
   if(error){$("listaped").innerHTML='<div class="vacio">No pude cargar los pedidos: '+error.message+'</div>';return;}
   pedidos=data||[]; pedidosCargados=true; pintarPedidos();
@@ -1206,13 +1220,19 @@ async function cargar(){
   novedades=n||[];
   pintar();
 }
+async function cambiarFiltroSede(){
+  await cargar();
+  await cargarPedidos();
+  pintar();
+}
 function setTipo(t){tipo=t;$("t-fac").classList.toggle("on",t=="factura");$("t-nc").classList.toggle("on",t=="nota_credito");pintar();}
 function setVista(v){vista=v;["pool","mias","selladas","hecho","nov"].forEach(x=>$("v-"+x).classList.toggle("on",x==v));pintar();}
 function novDe(c){return novedades.find(n=>n.cufe===c);}
 
 function pintar(){
   const cat=$("fcat").value;
-  let l=facturas.filter(f=>f.tipo===tipo&&(!cat||f.categoria===cat));
+  const fSedeVal=$("fSede").value;
+  let l=facturas.filter(f=>f.tipo===tipo&&(!cat||f.categoria===cat)&&(!fSedeVal||f.sede_id===Number(fSedeVal)));
   if(vista=="pool")     l=l.filter(f=>f.estado=="pool"||f.estado=="asignada");
   if(vista=="mias")     l=l.filter(f=>f.estado=="asignada");
   if(vista=="selladas") l=l.filter(f=>f.estado=="sellada"||f.estado=="pagada");
@@ -1375,7 +1395,8 @@ async function pedirIngreso(cufe){
 // Ciclo completo = pedido + recibido + sellado + aprobado + FACTURADO (tiene N° de ingreso ERP).
 async function descargarCicloCompleto(){
   const res=$("resdesc"); res.textContent="";
-  const l=facturas.filter(f=>(f.estado==="sellada"||f.estado==="pagada") && f.num_ingreso && f.archivo_pdf);
+  const fSedeVal=$("fSede").value;
+  const l=facturas.filter(f=>(f.estado==="sellada"||f.estado==="pagada") && f.num_ingreso && f.archivo_pdf && (!fSedeVal||f.sede_id===Number(fSedeVal)));
   if(!l.length){ res.textContent="Todavía no hay documentos con el ciclo completo (sellados + facturados)."; return; }
   res.textContent="Cargando lib PDF...";
   try{
@@ -1411,7 +1432,9 @@ async function descargarCicloCompleto(){
 async function descargarSelladas(){
   const d1=$("d1").value, d2=$("d2").value;
   const res=$("resdesc"); res.textContent="";
+  const fSedeVal=$("fSede").value;
   let l=facturas.filter(f=>f.estado==="sellada"||f.estado==="pagada");
+  if(fSedeVal) l=l.filter(f=>f.sede_id===Number(fSedeVal));
   if(d1) l=l.filter(f=>(f.fecha_emision||"")>=d1);
   if(d2) l=l.filter(f=>(f.fecha_emision||"")<=d2);
   l=l.filter(f=>f.archivo_pdf);
