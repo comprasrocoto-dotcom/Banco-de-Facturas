@@ -1319,7 +1319,7 @@ function pintar(){
         <span class="badge ${st[1]}">${st[0]}</span>
         <span class="badge">${(f.categoria||"otro").replace("_"," ")}</span>
         ${nv?`<span class="badge st-pool">CON NOVEDAD: ${nv.motivo}</span>`:""}
-        ${f.num_ingreso?`<span class="badge st-sellada">Ingreso ERP: ${f.num_ingreso}</span>`:""}
+        ${f.num_ingreso?`<span class="badge st-sellada" style="font-size:13px;padding:5px 12px;font-weight:700">Ingreso ERP: ${f.num_ingreso}</span>`:""}
         ${(f.pedido_erp||f.pedido_num)?`<span class="badge st-asignada">🔗 Pedido ${f.pedido_erp||f.pedido_num}</span>`:""}
         <span class="sp"></span>
         ${(perfil.rol==="sede"&&f.estado=="pool")?`<button class="s" onclick="tomar('${f.cufe}')">Es mía</button>`:""}
@@ -1329,7 +1329,7 @@ function pintar(){
         ${f.archivo_pdf?`<button onclick="verPdf('${f.cufe}')">📄 Ver PDF</button>`:""}
         ${(f.archivo_pdf_sellado&&(f.estado==="sellada"||f.estado==="pagada"))?`<button class="p" onclick="verPdfArchivo('${f.archivo_pdf_sellado}')">✅ Ver sellada</button>`:""}
         ${f.archivo_recibo?`<button onclick="verPdfArchivo('${f.archivo_recibo}')">📸 Ver recibo</button>`:""}
-        ${`<button onclick="pedirIngreso('${f.cufe}')">✎ ${f.num_ingreso?"Nº ingreso: "+f.num_ingreso:"Poner Nº de ingreso ERP"}</button>`}
+        ${`<button onclick="pedirIngreso('${f.cufe}')" style="${f.num_ingreso?"background:#15803d;border-color:#15803d":"background:#1e3a8a;border-color:#1e3a8a"};color:#fff;font-weight:700">${f.num_ingreso?"✅ Ingreso ERP: "+f.num_ingreso:"📝 Poner ingreso ERP"}</button>`}
         ${(f.tipo=="factura")?`<button class="s" onclick="abrirAmarre('factura','${f.cufe}')">🔗 Buscar pedido</button>`:""}
         ${(perfil.rol==="admin")?`<button class="d" title="Borrar factura" onclick="borrarFactura('${f.cufe}')">🗑</button>`:""}
         ${(f.estado!="pagada")?`<button onclick="abrirNov('${f.cufe}')">Novedad</button>`:""}
@@ -1432,7 +1432,7 @@ async function verPdf(cufe){
 }
 async function pedirIngreso(cufe){
   const f=facturas.find(x=>x.cufe===cufe)||{};
-  const v=prompt("Número de ingreso del ERP (ej: FC.COCINA5103)\nFacura "+(((f.prefijo||"")+(f.folio||""))||"")+" · "+(f.emisor||""), f.num_ingreso||"");
+  const v=prompt("Ingreso ERP (N° de factura de compra que generó el ERP al facturar)\nEj: FCRC3265\n\nFactura: "+(((f.prefijo||"")+(f.folio||""))||"")+" · "+(f.emisor||""), f.num_ingreso||"");
   if(v===null) return;
   const num=v.trim();
   const {error}=await SB.from("facturas").update({num_ingreso:num||null}).eq("cufe",cufe);
