@@ -1315,6 +1315,9 @@ function pintar(){
           <div class="mut">${(()=>{const n=f.documento||((f.prefijo||"")+(f.folio||""));return n? "<b style='color:#0f766e'>N° "+n+"</b>" : "<span style='color:#b45309;font-weight:700'>⚠️ sin número en el PDF</span>";})()} · ${fch(f.fecha_emision)} · NIT ${f.nit_emisor||"—"}</div></div>
         <div class="total">${money(f.total)}</div>
       </div>
+      <div class="row" style="margin-top:10px;gap:8px">
+        ${`<button onclick="pedirIngreso('${f.cufe}')" style="${f.num_ingreso?'background:#15803d;border-color:#15803d':'background:#1e3a8a;border-color:#1e3a8a'};color:#fff;font-weight:700;padding:10px 18px;font-size:14px;border-radius:8px">${f.num_ingreso?'✅ Ingreso ERP: '+f.num_ingreso:'📝 Poner ingreso ERP (FCRC)'}</button>`}
+      </div>
       <div class="row" style="margin-top:12px">
         <span class="badge ${st[1]}">${st[0]}</span>
         <span class="badge">${(f.categoria||"otro").replace("_"," ")}</span>
@@ -1329,7 +1332,6 @@ function pintar(){
         ${f.archivo_pdf?`<button onclick="verPdf('${f.cufe}')">📄 Ver PDF</button>`:""}
         ${(f.archivo_pdf_sellado&&(f.estado==="sellada"||f.estado==="pagada"))?`<button class="p" onclick="verPdfArchivo('${f.archivo_pdf_sellado}')">✅ Ver sellada</button>`:""}
         ${f.archivo_recibo?`<button onclick="verPdfArchivo('${f.archivo_recibo}')">📸 Ver recibo</button>`:""}
-        ${`<button onclick="pedirIngreso('${f.cufe}')" style="${f.num_ingreso?"background:#15803d;border-color:#15803d":"background:#1e3a8a;border-color:#1e3a8a"};color:#fff;font-weight:700">${f.num_ingreso?"✅ Ingreso ERP: "+f.num_ingreso:"📝 Poner ingreso ERP"}</button>`}
         ${(f.tipo=="factura")?`<button class="s" onclick="abrirAmarre('factura','${f.cufe}')">🔗 Buscar pedido</button>`:""}
         ${(perfil.rol==="admin")?`<button class="d" title="Borrar factura" onclick="borrarFactura('${f.cufe}')">🗑</button>`:""}
         ${(f.estado!="pagada")?`<button onclick="abrirNov('${f.cufe}')">Novedad</button>`:""}
