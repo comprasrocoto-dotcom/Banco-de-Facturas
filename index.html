@@ -55,6 +55,8 @@ tr:hover td{background:#f1f5f9}
 .err{color:var(--bad);font-size:13px;min-height:18px}
 .vacio{text-align:center;color:var(--mut);padding:44px;background:#fff;border:1px dashed var(--line);border-radius:14px}
 .login-tag{display:inline-block;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
+.filtros-panel{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:14px}
+#fSede{background:#d1fae5;border:2px solid #059669;color:#064e3b;font-weight:700;padding:8px 16px;font-size:14px;border-radius:8px}
 </style>
 </head>
 <body>
@@ -76,47 +78,49 @@ tr:hover td{background:#f1f5f9}
     <button class="chip"  id="m-admin" style="display:none" onclick="setModulo('admin')">⚙️ Admin</button>
     <span id="sede" class="badge"></span>
     <select id="fSede" style="width:auto;margin:0;display:none" onchange="cambiarFiltroSede()">
-      <option value="">Todas las sedes</option>
+      <option value="">📍 Todas las sedes</option>
     </select>
     <span class="sp"></span>
     <button onclick="salir()">Salir</button>
   </header>
   <div class="wrap">
-    <div class="row" style="margin-bottom:14px">
-      <button class="chip on" id="t-fac"  onclick="setTipo('factura')">Facturas</button>
-      <button class="chip"    id="t-nc"   onclick="setTipo('nota_credito')">Notas crédito</button>
-      <span class="sp"></span>
-      <select id="fcat" style="width:auto" onchange="pintar()">
-        <option value="">Todas las categorías</option>
-        <option value="insumos">Insumos</option>
-        <option value="empaque">Material de empaque</option>
-        <option value="aseo">Aseo</option>
-        <option value="loza_utensilios">Loza y utensilios</option>
-      </select>
-      <input id="q" placeholder="🔎 Nº factura, proveedor o CUFE" style="width:300px;margin:0" oninput="pintar()">
-      <button class="s" id="btnsubir" style="display:none" onclick="abrirSubir()">⬆ Subir PDFs</button>
-    </div>
-    <div class="row" id="barraDescarga" style="margin-bottom:16px;display:none">
-      <span class="mut">Descargar selladas del</span>
-      <input type="date" id="d1" style="width:auto;margin:0">
-      <span class="mut">al</span>
-      <input type="date" id="d2" style="width:auto;margin:0">
-      <button class="p" onclick="descargarSelladas()">⬇ Descargar ZIP</button>
-      <button class="p" onclick="descargarCicloCompleto()" title="Pedido + recibido + sellado + aprobado + facturado, todo en un solo PDF">📄 PDF ciclo completo</button>
-      <span class="mut" id="resdesc"></span>
-    </div>
-    <div class="row" style="margin-bottom:16px">
-      <button class="chip on" id="v-pool"     onclick="setVista('pool')">Sin asignar</button>
-      <button class="chip"    id="v-mias"     onclick="setVista('mias')">Mías</button>
-      <button class="chip"    id="v-selladas" onclick="setVista('selladas')">Selladas</button>
-      <button class="chip"    id="v-hecho"    onclick="setVista('hecho')">✅ Proceso terminado</button>
-      <button class="chip"    id="v-nov"      onclick="setVista('nov')">Con novedad</button>
-      <span class="sp"></span>
-      <span class="mut">Fecha:</span>
-      <input type="date" id="fdesde" style="width:auto;margin:0" onchange="pintar()">
-      <span class="mut">→</span>
-      <input type="date" id="fhasta" style="width:auto;margin:0" onchange="pintar()">
-      <button class="mut" style="padding:4px 10px" onclick="$('fdesde').value='';$('fhasta').value='';pintar()">limpiar</button>
+    <div id="filtrosFacturas">
+      <div class="row" style="margin-bottom:10px">
+        <button class="chip on" id="t-fac"  onclick="setTipo('factura')">Facturas</button>
+        <button class="chip"    id="t-nc"   onclick="setTipo('nota_credito')">Notas crédito</button>
+        <button class="chip on" id="v-pool"     onclick="setVista('pool')">Sin asignar</button>
+        <button class="chip"    id="v-mias"     onclick="setVista('mias')">Mías</button>
+        <button class="chip"    id="v-selladas" onclick="setVista('selladas')">Selladas</button>
+        <button class="chip"    id="v-hecho"    onclick="setVista('hecho')">✅ Proceso terminado</button>
+        <button class="chip"    id="v-nov"      onclick="setVista('nov')">Con novedad</button>
+        <span class="sp"></span>
+        <button class="chip" id="btnFiltrosFac" onclick="toggleFiltros('Fac')">Filtros ▾</button>
+        <button class="s" id="btnsubir" style="display:none" onclick="abrirSubir()">⬆ Subir PDFs</button>
+      </div>
+      <div id="panelFiltrosFac" class="row filtros-panel" style="display:none">
+        <select id="fcat" style="width:auto" onchange="pintar()">
+          <option value="">Todas las categorías</option>
+          <option value="insumos">Insumos</option>
+          <option value="empaque">Material de empaque</option>
+          <option value="aseo">Aseo</option>
+          <option value="loza_utensilios">Loza y utensilios</option>
+        </select>
+        <input id="q" placeholder="🔎 Nº factura, proveedor o CUFE" style="width:260px;margin:0" oninput="pintar()">
+        <span class="mut">Fecha:</span>
+        <input type="date" id="fdesde" style="width:auto;margin:0" onchange="pintar()">
+        <span class="mut">→</span>
+        <input type="date" id="fhasta" style="width:auto;margin:0" onchange="pintar()">
+        <button class="mut" style="padding:4px 10px" onclick="$('fdesde').value='';$('fhasta').value='';pintar()">limpiar</button>
+      </div>
+      <div class="row" id="barraDescarga" style="margin-bottom:16px;display:none">
+        <span class="mut">Descargar selladas del</span>
+        <input type="date" id="d1" style="width:auto;margin:0">
+        <span class="mut">al</span>
+        <input type="date" id="d2" style="width:auto;margin:0">
+        <button class="p" onclick="descargarSelladas()">⬇ Descargar ZIP</button>
+        <button class="p" onclick="descargarCicloCompleto()" title="Pedido + recibido + sellado + aprobado + facturado, todo en un solo PDF">📄 PDF ciclo completo</button>
+        <span class="mut" id="resdesc"></span>
+      </div>
     </div>
     <div id="lista"></div>
 
@@ -137,19 +141,22 @@ tr:hover td{background:#f1f5f9}
     </div>
 
     <div id="vistaPedidos" style="display:none">
-      <div class="row" style="margin-bottom:14px">
+      <div class="row" style="margin-bottom:10px">
         <button class="chip on" id="pe-pend" onclick="setPedVista('pendiente')">Pendientes</button>
         <button class="chip"    id="pe-fact" onclick="setPedVista('facturado')">Facturados</button>
         <button class="chip"    id="pe-todos" onclick="setPedVista('todos')">Todos</button>
         <button class="p" onclick="nuevoPedido()">➕ Nuevo pedido</button>
         <button class="p" id="btnIngresos" style="display:none;background:#1e3a8a;border-color:#1e3a8a" onclick="pedirIngresos()">🚀 Iniciar ingresos al ERP</button>
         <span class="sp"></span>
+        <button class="chip" id="btnFiltrosPed" onclick="toggleFiltros('Ped')">Filtros ▾</button>
+      </div>
+      <div id="panelFiltrosPed" class="row filtros-panel" style="display:none">
         <span class="mut">Fecha:</span>
         <input type="date" id="fped_desde" style="width:auto;margin:0" onchange="pintarPedidos()">
         <span class="mut">→</span>
         <input type="date" id="fped_hasta" style="width:auto;margin:0" onchange="pintarPedidos()">
         <button class="mut" style="padding:4px 10px" onclick="$('fped_desde').value='';$('fped_hasta').value='';pintarPedidos()">limpiar</button>
-        <input id="qp" placeholder="🔎 N° de orden, proveedor o factura" style="width:300px;margin:0" oninput="pintarPedidos()">
+        <input id="qp" placeholder="🔎 N° de orden, proveedor o factura" style="width:260px;margin:0" oninput="pintarPedidos()">
       </div>
       <div id="estadoOrden" style="display:none;margin-bottom:10px"></div>
       <div id="listaped"></div>
@@ -205,7 +212,7 @@ async function sesion(u){
       const marca=(s.marcas&&s.marcas.nombre)||"Sin marca";
       (porMarca[marca]=porMarca[marca]||[]).push(s);
     });
-    $("fSede").innerHTML='<option value="">Todas las sedes</option>'+
+    $("fSede").innerHTML='<option value="">📍 Todas las sedes</option>'+
       Object.keys(porMarca).map(m=>`<optgroup label="${m}">${porMarca[m].map(s=>`<option value="${s.id}">${s.nombre}</option>`).join("")}</optgroup>`).join("");
   }
   const {data:ms}=await SB.from("marcas").select("id,nombre").order("nombre");
@@ -705,14 +712,20 @@ function setModulo(m){
   modulo=m;
   $("m-banco").classList.toggle("on",m=="banco");
   $("m-pedidos").classList.toggle("on",m=="pedidos");
-  document.querySelector(".wrap > .row").style.display = (m=="banco")?"flex":"none";
-  document.querySelectorAll(".wrap > .row")[1] && (document.querySelectorAll(".wrap > .row")[1].style.display=(m=="banco")?"flex":"none");
+  $("filtrosFacturas").style.display = (m=="banco")?"block":"none";
   $("barraDescarga").style.display = (m=="banco" && (perfil.rol==="admin"||perfil.rol==="pagos"))?"flex":"none";
   $("lista").style.display = (m=="banco")?"block":"none";
   $("vistaPedidos").style.display = (m=="pedidos")?"block":"none";
   if(m=="pedidos" && !pedidosCargados) cargarPedidos();
   $("vistaAdmin").style.display = (m=="admin")?"block":"none";
   if(m=="admin" && !adminCargado) cargarAdmin();
+}
+function toggleFiltros(which){
+  const panel=$("panelFiltros"+which), btn=$("btnFiltros"+which);
+  const abierto=panel.style.display!=="none";
+  panel.style.display=abierto?"none":"flex";
+  btn.textContent=abierto?"Filtros ▾":"Filtros ▴";
+  btn.classList.toggle("on",!abierto);
 }
 function setPedVista(v){ pedVista=v;
   ["pend","fact","todos"].forEach(x=>$("pe-"+x).classList.toggle("on", x==(v=="pendiente"?"pend":v=="facturado"?"fact":"todos")));
