@@ -931,7 +931,25 @@ function pintarAmarre(){
     }
   }).join("") + (l.length>=200?'<div class="vacio">Escribí para afinar la búsqueda.</div>':"");
 }
+function confirmarSiYaAmarrado(p){
+  // Avisa si el pedido YA tiene una factura amarrada: amarrar otra encima la
+  // reemplaza (el pedido puede llegar a tener DOS facturas en la vida real).
+  if(!p || !p.factura_cufe) return true;
+  return confirm("⚠️ El pedido "+(p.numero||"")+" YA está amarrado a la factura "+(p.numero_factura||p.factura_cufe)+".\n\n¿Seguro que querés amarrarlo a OTRA factura? La anterior quedará sin pedido.");
+}
+function bloquearSiYaAmarrado(p){
+  // TAREA (14/09): dos facturas por pedido requieren validacion humana, asi que
+  // desde estos flujos NO se deja amarrar una segunda factura encima de la que
+  // ya tiene el pedido (a diferencia de confirmarSiYaAmarrado, aca no se pregunta).
+  if(p && p.factura_cufe){
+    alert("Este pedido ya tiene una factura amarrada. Si necesitas cambiarla, consultá con administración.");
+    return true;
+  }
+  return false;
+}
 async function amarrarConFactura(cufe){
+  const pAntes=pedidos.find(x=>x.id===amId);
+  if(bloquearSiYaAmarrado(pAntes)) return;
   const up=await SB.from("pedidos").update({factura_cufe:cufe}).eq("id",amId);
   if(up.error){$("amErr").textContent="No se pudo: "+up.error.message;return;}
   const f=facturas.find(x=>x.cufe===cufe)||{};
@@ -941,6 +959,8 @@ async function amarrarConFactura(cufe){
   alert("¡Amarrado! "+(f.prefijo||"")+(f.folio||"")+" ↔ "+((pedidos.find(x=>x.id===amId)||{}).numero||""));
 }
 async function amarrarConPedido(pid){
+  const pAntes=pedidos.find(x=>x.id===pid);
+  if(bloquearSiYaAmarrado(pAntes)) return;
   const up=await SB.from("pedidos").update({factura_cufe:amId}).eq("id",pid);
   if(up.error){$("amErr").textContent="No se pudo: "+up.error.message;return;}
   await SB.from("historial").insert({cufe:amId,accion:"pedido amarrado",detalle:"pedido "+(pedidos.find(x=>x.id===pid)||{}).numero,usuario:usuario.id}).then(()=>{},()=>{});
@@ -1197,6 +1217,7 @@ async function verLineas(id,btn){
 }
 async function amarrarPedido(id){
   const p=pedidos.find(x=>x.id===id); if(!p) return;
+  if(!confirmarSiYaAmarrado(p)) return;
   const libres=facturas.filter(f=>f.categoria&&f.tipo==="factura");
   if(!libres.length){alert("No hay facturas en el banco para amarrar.");return;}
   const lista=libres.slice(0,40).map(f=>((f.prefijo||"")+(f.folio||""))+" | "+(f.emisor||"")+" | "+money(f.total)).join("\n");
