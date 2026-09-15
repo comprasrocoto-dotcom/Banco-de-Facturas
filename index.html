@@ -119,6 +119,7 @@ tr:hover td{background:#f1f5f9}
         <input type="date" id="d2" style="width:auto;margin:0">
         <button class="p" onclick="descargarSelladas()">⬇ Descargar ZIP</button>
         <button class="p" onclick="descargarCicloCompleto()" title="Pedido + recibido + sellado + aprobado + facturado, todo en un solo PDF">📄 PDF ciclo completo</button>
+        <button class="p" onclick="descargarPendientes()" title="Sin Nº de ingreso ERP o con novedad registrada">📥 Pendientes y novedades</button>
         <span class="mut" id="resdesc"></span>
       </div>
     </div>
@@ -1507,6 +1508,35 @@ async function descargarSelladas(){
   const a=document.createElement("a");
   a.href=URL.createObjectURL(out);
   a.download="facturas_selladas_"+(d1||"inicio")+"_a_"+(d2||"hoy")+".zip";
+  document.body.appendChild(a); a.click(); a.remove();
+  res.textContent="✅ "+ok+" PDF(s) en el ZIP.";
+}
+async function descargarPendientes(){
+  const res=$("resdesc"); res.textContent="";
+  const fSedeVal=$("fSede").value;
+  const fd=$("fdesde").value, fh=$("fhasta").value;
+  let l=facturas.filter(f=>!f.num_ingreso||novDe(f.cufe));
+  if(fSedeVal) l=l.filter(f=>f.sede_id===Number(fSedeVal));
+  if(fd) l=l.filter(f=>(f.fecha_emision||"")>=fd);
+  if(fh) l=l.filter(f=>(f.fecha_emision||"")<=fh);
+  l=l.filter(f=>f.archivo_pdf);
+  if(!l.length){res.textContent="No hay pendientes ni novedades para descargar.";return;}
+  res.textContent="Preparando "+l.length+" PDF(s)...";
+  const zip=new JSZip(); let ok=0;
+  for(const f of l){
+    const {data:sig}=await SB.storage.from("facturas").createSignedUrl(f.archivo_pdf_sellado||f.archivo_pdf,120);
+    if(!sig){continue;}
+    const r=await fetch(sig.signedUrl); if(!r.ok) continue;
+    const blob=await r.blob();
+    const num=((f.prefijo||"")+(f.folio||""))||f.cufe.slice(0,12);
+    const em=(f.emisor||"proveedor").replace(/[^\w\s\-]/g,"").trim().split("\s+").slice(0,3).join("_");
+    zip.file(num+"_"+em+".pdf", blob); ok++;
+  }
+  if(!ok){res.textContent="No pude descargar los PDFs.";return;}
+  const out=await zip.generateAsync({type:"blob"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(out);
+  a.download="pendientes_y_novedades_"+new Date().toISOString().slice(0,10)+".zip";
   document.body.appendChild(a); a.click(); a.remove();
   res.textContent="✅ "+ok+" PDF(s) en el ZIP.";
 }
