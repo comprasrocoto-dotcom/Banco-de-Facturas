@@ -1550,21 +1550,25 @@ async function descargarSelladas(){
   res.textContent="✅ "+ok+" PDF(s) en el ZIP.";
 }
 async function descargarPendientes(){
+  console.log("DEBUG descargarPendientes: facturas totales=",facturas.length,
+    "con num_ingreso=",facturas.filter(f=>f.num_ingreso).length);
   const res=$("resdesc"); res.textContent="";
   const fSedeVal=$("fSede").value;
   const fd=$("fdesde").value, fh=$("fhasta").value;
-  // Sin N° de ingreso ERP, O con novedad sin resolver. Si tiene ingreso Y no tiene
-  // novedad, jamás debe entrar acá (esa es justamente la diferencia con el ZIP de selladas).
-  let l=facturas.filter(f=>{
-    const sinIngreso=!f.num_ingreso;
-    const conNovedad=!!novDe(f.cufe);
-    return (sinIngreso||conNovedad)&&(f.estado==="asignada"||f.estado==="sellada");
-  });
+  // Pendiente = todavía NO tiene N° de ingreso ERP. La tabla "novedades" no tiene
+  // forma de marcarse como resuelta (no hay columna "resuelta" ni política de delete),
+  // así que una novedad NUNCA debe usarse como criterio acá: si se usara, una factura
+  // que alguna vez tuvo una novedad quedaría "pendiente" para siempre, aunque el
+  // usuario ya le haya puesto el ingreso ERP a mano. num_ingreso es la única señal
+  // confiable de que la factura ya se cerró.
+  let l=facturas.filter(f=>!f.num_ingreso&&(f.estado==="asignada"||f.estado==="sellada"));
+  console.log("DEBUG descargarPendientes: pasan el filtro de num_ingreso/estado ->",
+    l.map(f=>({cufe:f.cufe,num:(f.prefijo||"")+(f.folio||""),num_ingreso:f.num_ingreso||null,tiene_novedad:!!novDe(f.cufe),estado:f.estado})));
   if(fSedeVal) l=l.filter(f=>f.sede_id===Number(fSedeVal));
   if(fd) l=l.filter(f=>(f.fecha_emision||"")>=fd);
   if(fh) l=l.filter(f=>(f.fecha_emision||"")<=fh);
   l=l.filter(f=>f.archivo_pdf);
-  console.log("[descargarPendientes] "+l.length+" factura(s):",
+  console.log("[descargarPendientes] "+l.length+" factura(s) final(es):",
     l.map(f=>({cufe:f.cufe,num:(f.prefijo||"")+(f.folio||""),num_ingreso:f.num_ingreso||null,tiene_novedad:!!novDe(f.cufe),estado:f.estado})));
   if(!l.length){res.textContent="No hay pendientes ni novedades para descargar.";return;}
   res.textContent="Preparando "+l.length+" PDF(s)...";
