@@ -94,10 +94,10 @@ tr:hover td{background:#f1f5f9}
         <button class="chip"    id="v-hecho"    onclick="setVista('hecho')">✅ Proceso terminado</button>
         <button class="chip"    id="v-nov"      onclick="setVista('nov')">Con novedad</button>
         <span class="sp"></span>
-        <button class="chip" id="btnFiltrosFac" onclick="toggleFiltros('Fac')">Filtros ▾</button>
+        <button class="chip" id="btnFiltrosFac" style="display:none" onclick="toggleFiltros('Fac')">Filtros ▾</button>
         <button class="s" id="btnsubir" style="display:none" onclick="abrirSubir()">⬆ Subir PDFs</button>
       </div>
-      <div id="panelFiltrosFac" class="row filtros-panel" style="display:none">
+      <div id="panelFiltrosFac" class="row filtros-panel" style="display:flex">
         <select id="fcat" style="width:auto" onchange="pintar()">
           <option value="">Todas las categorías</option>
           <option value="insumos">Insumos</option>
@@ -131,7 +131,15 @@ tr:hover td{background:#f1f5f9}
         <button class="chip"    id="ad-cat"  onclick="setAdmin('cat')">Qué le compro a cada proveedor</button>
         <span class="sp"></span>
         <input id="qa" placeholder="🔎 buscar..." style="width:240px;margin:0" oninput="pintarAdmin()">
+        <button class="chip" id="btnFiltrosAdm" style="display:none" onclick="toggleFiltros('Adm')">Filtros ▾</button>
         <button class="p" onclick="adminNuevo()">➕ Nuevo</button>
+      </div>
+      <div id="panelFiltrosAdm" class="row filtros-panel" style="display:flex;margin-bottom:12px">
+        <span class="mut">Fecha:</span>
+        <input type="date" id="fadm_desde" style="width:auto;margin:0" onchange="pintarAdmin()">
+        <span class="mut">→</span>
+        <input type="date" id="fadm_hasta" style="width:auto;margin:0" onchange="pintarAdmin()">
+        <button class="mut" style="padding:4px 10px" onclick="$('fadm_desde').value='';$('fadm_hasta').value='';pintarAdmin()">limpiar</button>
       </div>
       <div id="filtroCat" class="row" style="display:none;margin-bottom:12px">
         <span class="mut">Proveedor:</span>
@@ -148,9 +156,9 @@ tr:hover td{background:#f1f5f9}
         <button class="p" onclick="nuevoPedido()">➕ Nuevo pedido</button>
         <button class="p" id="btnIngresos" style="display:none;background:#1e3a8a;border-color:#1e3a8a" onclick="pedirIngresos()">🚀 Iniciar ingresos al ERP</button>
         <span class="sp"></span>
-        <button class="chip" id="btnFiltrosPed" onclick="toggleFiltros('Ped')">Filtros ▾</button>
+        <button class="chip" id="btnFiltrosPed" style="display:none" onclick="toggleFiltros('Ped')">Filtros ▾</button>
       </div>
-      <div id="panelFiltrosPed" class="row filtros-panel" style="display:none">
+      <div id="panelFiltrosPed" class="row filtros-panel" style="display:flex">
         <span class="mut">Fecha:</span>
         <input type="date" id="fped_desde" style="width:auto;margin:0" onchange="pintarPedidos()">
         <span class="mut">→</span>
@@ -527,11 +535,20 @@ async function cargarAdmin(){
   $("catProv").innerHTML='<option value="">— elegí proveedor —</option>'+adminProv.map(x=>`<option value="${x.id}">${x.razon_social||x.nombre_comercial||""}</option>`).join("");
   adminCargado=true; pintarAdmin();
 }
+function filtraFechaAdmin(x){
+  const fd=$("fadm_desde").value, fh=$("fadm_hasta").value;
+  if(!fd&&!fh) return true;
+  const fe=((x.created_at||x.fecha_creacion||"")+"").slice(0,10);
+  if(!fe) return true; // sin fecha registrada, no se excluye
+  if(fd&&fe<fd) return false;
+  if(fh&&fe>fh) return false;
+  return true;
+}
 function pintarAdmin(){
   const q=($("qa").value||"").trim().toLowerCase();
   const c=$("listaAdmin");
   if(adminVista==="prov"){
-    let l=adminProv.filter(x=>!q||((x.razon_social||"")+" "+(x.nit||"")+" "+(x.nombre_comercial||"")).toLowerCase().includes(q));
+    let l=adminProv.filter(x=>!q||((x.razon_social||"")+" "+(x.nit||"")+" "+(x.nombre_comercial||"")).toLowerCase().includes(q)).filter(filtraFechaAdmin);
     c.innerHTML = l.slice(0,400).map(x=>`<div class="card" style="margin:6px 0"><div class="row">
         <div><div class="emisor">${x.razon_social||x.nombre_comercial||"—"}</div>
         <div class="mut">NIT ${x.nit||"—"} · Tel ${x.telefono1||"—"} · ${x.correo||"—"}${x.asesor?" · "+x.asesor:""}</div></div>
@@ -540,7 +557,7 @@ function pintarAdmin(){
         <button class="p" onclick="asignarA(${x.id})">＋ Asignar producto</button>
         <button onclick="verCatalogo(${x.id})">Ver catálogo</button></div></div>`).join("") || '<div class="vacio">Sin resultados.</div>';
   } else if(adminVista==="art"){
-    let l=adminArt.filter(x=>!q||((x.codigo_barras||"")+" "+(x.articulo_hiopos||"")+" "+(x.subfamilia||"")).toLowerCase().includes(q));
+    let l=adminArt.filter(x=>!q||((x.codigo_barras||"")+" "+(x.articulo_hiopos||"")+" "+(x.subfamilia||"")).toLowerCase().includes(q)).filter(filtraFechaAdmin);
     c.innerHTML = l.slice(0,400).map(x=>{
       const delArt=adminCat.filter(k=>k.codigo_barras===x.codigo_barras);
       const precios=delArt.filter(k=>k.precio_negociado!=null).map(k=>Number(k.precio_negociado));
@@ -567,6 +584,7 @@ function pintarAdmin(){
       lista.push({codigo:k.codigo_barras, nombre:art.articulo_hiopos||art.articulo_comercial||k.codigo_barras, veces:null, k}); });
     let l=lista;
     if(q) l=l.filter(x=>((x.nombre||"")+" "+(x.codigo||"")).toLowerCase().includes(q));
+    l=l.filter(x=>filtraFechaAdmin(x.k||{}));
     const nomDe=cd=>(adminArt.find(a=>a.codigo_barras===cd)||{}).articulo_hiopos||cd;
     c.innerHTML = '<div class="card">'+( l.length? l.map(x=>{
         const k=x.k||{}, precio=k.precio_negociado, iid="pp_"+pid+"_"+x.codigo;
