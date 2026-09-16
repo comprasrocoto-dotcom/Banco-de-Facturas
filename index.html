@@ -293,6 +293,16 @@ async function filtrarArticulos(){
       const alt=await SB.from("proveedor_articulos").select("codigo,insumo,veces").ilike("proveedor",nom.split(" ")[0]+"%").order("veces",{ascending:false}).limit(500);
       provArts=alt.data||[];
     }
+    const cc=await SB.from("catalogo_compras").select("codigo_barras").eq("id_proveedor",id);
+    const existentes=new Set(provArts.map(a=>a.codigo||a.insumo));
+    for(const c of (cc.data||[])){
+      const cod=c.codigo_barras;
+      if(cod && !existentes.has(cod)){
+        const art=arts.find(a=>a.codigo_barras===cod)||{};
+        provArts.push({codigo:cod, insumo:(art.articulo_hiopos||art.articulo_comercial||cod), veces:0});
+        existentes.add(cod);
+      }
+    }
     $("np_arts_info").textContent = provArts.length
       ? "✅ "+provArts.length+" artículos que le comprás a este proveedor (los más frecuentes primero)"
       : "⚠️ Este proveedor no tiene compras en el histórico — te muestro todos los artículos";
