@@ -1182,43 +1182,47 @@ async function cruzarDian(ev){
     }
     if(rows.length<2){res.textContent="El archivo no tiene datos.";return;}
     console.log("[cruzarDian] filas leidas del excel/csv (sin encabezado):", rows.length-1);
-    // Buscar que columna es N. factura, NIT y estado
+    // Detectar columnas del Excel de la DIAN por nombre
     const headers=rows[0].map(h=>String(h||"").trim().toLowerCase());
-    const iEstado=headers.findIndex(h=>/estado|acept|rechaz|aprob/i.test(h));
-    // Detectar que columna tiene CUFE (strings de 80+ chars alfanumericos)
-    let iCufe=-1, iFact=-1, iNit=-1;
-    if(rows.length>1){
+    // La DIAN trae: col[1]=CUFE/CUDE, col[2]=Folio, col[3]=Prefijo, col[9]=NIT Emisor, col[30]=Estado
+    let iCufe=headers.findIndex(h=>/cufe|cude/i.test(h));
+    let iFolio=headers.findIndex(h=>/^folio$/i.test(h));
+    let iPrefijo=headers.findIndex(h=>/^prefijo$/i.test(h));
+    let iNit=headers.findIndex(h=>/nit.*emisor|^nit$/i.test(h));
+    let iEstado=headers.findIndex(h=>/^estado$/i.test(h));
+    let iEmisor=headers.findIndex(h=>/nombre.*emisor|^emisor$/i.test(h));
+    let iTotal=headers.findIndex(h=>/^total$/i.test(h));
+    // Fallbacks por deteccion de contenido si no encontro por nombre
+    if(iCufe<0 && rows.length>1){
       for(let c=0;c<(rows[0]||[]).length;c++){
         const val=String((rows[1]||[])[c]||"").replace(/[^A-Za-z0-9]/g,"");
-        if(val.length>=80 && iCufe<0){iCufe=c;}
-        else if(val.length>0 && val.length<40 && iFact<0 && /^([A-Z]{0,4}\d{3,}|\d{3,})$/i.test(val)){iFact=c;}
-        else if(/^\d{6,}$/.test(val.replace(/[^0-9]/g,"")) && iNit<0 && c!==iCufe){iNit=c;}
+        if(val.length>=80){iCufe=c;break;}
       }
     }
-    // Fallback por nombre de columna
-    if(iCufe<0) iCufe=headers.findIndex(h=>/cufe|codigo.*unico/i.test(h));
-    if(iFact<0) iFact=headers.findIndex((h,idx)=>idx!==iCufe && /factura|numero|prefijo|folio|consecutivo|doc/i.test(h));
-    if(iNit<0) iNit=headers.findIndex((h,idx)=>idx!==iCufe && idx!==iFact && /nit|documento|identific/i.test(h));
-    if(iEstado<0) iEstado=headers.findIndex((h,idx)=>idx!==iCufe && idx!==iFact && idx!==iNit && /estado|acept|rechaz|aprob/i.test(h));
-    const cFact=iFact>=0?iFact:0;
-    const cNit=iNit>=0?iNit:1;
-    const cEstado=iEstado>=0?iEstado:2;
-    console.log("[cruzarDian] columnas: factura=",cFact,"nit=",cNit,"estado=",cEstado,"cufe=",iCufe);
-    console.log("[cruzarDian] primeras 3 filas:",rows.slice(1,4).map(r=>r.slice(0,3).map(c=>String(c||"").slice(0,30))));
+    const cCufe=iCufe>=0?iCufe:-1;
+    const cFolio=iFolio>=0?iFolio:-1;
+    const cPrefijo=iPrefijo>=0?iPrefijo:-1;
+    const cNit=iNit>=0?iNit:-1;
+    const cEstado=iEstado>=0?iEstado:-1;
+    const cEmisor=iEmisor>=0?iEmisor:-1;
+    const cTotal=iTotal>=0?iTotal:-1;
+    console.log("[cruzarDian] columnas: cufe=",cCufe,"folio=",cFolio,"prefijo=",cPrefijo,"nit=",cNit,"estado=",cEstado);
     // Leer las filas de la DIAN
     const dianRows=[];
     let numDian=0;
     for(let i=1;i<rows.length;i++){
       const cols=rows[i]||[];
-      const valFact=String(cols[cFact]||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
-      const valCufe=iCufe>=0?String(cols[iCufe]||"").toUpperCase().replace(/[^A-Z0-9]/g,""):"";
-      // Si no hay col CUFE pero la col factura tiene 80+ chars, es CUFE
-      const cufe=valCufe||(valFact.length>=80?valFact:"");
-      const numFact=valFact.length<80?valFact:"";
-      const nit=String(cols[cNit]||"").replace(/[^0-9]/g,"");
-      const estado=String(cols[cEstado]||"").toUpperCase();
+      const cufe=cCufe>=0?String(cols[cCufe]||"").toUpperCase().replace(/[^A-Z0-9]/g,""):"";
+      const folio=cFolio>=0?String(cols[cFolio]||"").toUpperCase().replace(/[^A-Z0-9]/g,""):"";
+      const prefijo=cPrefijo>=0?String(cols[cPrefijo]||"").toUpperCase().replace(/[^A-Z0-9]/g,""):"";
+      // Armar el N. factura = prefijo + folio (ej: MF + 445672 = MF445672)
+      const numFact=(prefijo||"")+(folio||"");
+      const nit=cNit>=0?String(cols[cNit]||"").replace(/[^0-9]/g,""):"";
+      const estado=cEstado>=0?String(cols[cEstado]||"").toUpperCase():"";
+      const emisor=cEmisor>=0?String(cols[cEmisor]||""):"";
+      const total=cTotal>=0?String(cols[cTotal]||""):"";
       if(cufe||numFact){
-        dianRows.push({numFact:String(cols[cFact]||""), nit:String(cols[cNit]||""), estado:String(cols[cEstado]||""), cufe, cols});
+        dianRows.push({numFact, folio, prefijo, nit, estado, cufe, emisor, total, cols});
         numDian++;
       }
     }
@@ -1261,9 +1265,9 @@ async function cruzarDian(ev){
       return;
     }
     const BOM="\uFEFF";
-    let csv=BOM+"CUFE;N. Factura;NIT;Estado DIAN\n";
+    let csv=BOM+"CUFE;Prefijo;Folio;N. Factura;NIT Emisor;Nombre Emisor;Total;Estado DIAN\n";
     for(const d of faltanSubir){
-      csv+=[d.cufe||"",d.numFact||"",d.nit||"",d.estado||""].join(";")+"\n";
+      csv+=[d.cufe||"",d.prefijo||"",d.folio||"",d.numFact||"",d.nit||"",d.emisor||"",d.total||"",d.estado||""].join(";")+"\n";
     }
     const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
     const a=document.createElement("a");
