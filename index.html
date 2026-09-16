@@ -1144,13 +1144,13 @@ async function exportarPendientesDian(){
   const sedeNombre=(id)=>{const s=sedes.find(x=>x.id===id);return s?s.nombre:"";};
   // CSV con BOM UTF-8, separador ; (punto y coma para Excel colombiano)
   const BOM="\uFEFF";
-  let csv=BOM+"N. Factura;Proveedor;NIT;Fecha Emision;Total;CUFE (40 chars);Estado;Sede\n";
+  let csv=BOM+"N. Factura;Proveedor;NIT Emisor;NIT Receptor;Fecha Emision;Total;CUFE (40 chars);Estado;Sede\n";
   for(const f of l){
-    const num=f.documento||((f.prefijo||"")+(f.folio||""))||"";
-    const cufe=(f.cufe||"").slice(0,40);
-    const total=(f.total||0).toLocaleString("es-CO",{minimumFractionDigits:0,maximumFractionDigits:0});
-    const fecha=f.fecha_emision||"";
-    csv+=[num,f.emisor||"",f.nit_emisor||"",fecha,total,cufe,f.estado||"",sedeNombre(f.sede_id)].join(";")+"\n";
+  const num=f.documento||((f.prefijo||"")+(f.folio||""))||"";
+  const cufe=(f.cufe||"").slice(0,40);
+  const total=(f.total||0).toLocaleString("es-CO",{minimumFractionDigits:0,maximumFractionDigits:0});
+  const fecha=f.fecha_emision||"";
+  csv+=[num,f.emisor||"",f.nit_emisor||"",f.nit_receptor||"",fecha,total,cufe,f.estado||"",sedeNombre(f.sede_id)].join(";")+"\n";
   }
   const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
   const a=document.createElement("a");
@@ -1219,7 +1219,7 @@ async function cruzarDian(ev){
     }
     const BOM="\uFEFF";
     const sedeNombre=(id)=>{const s=sedes.find(x=>x.id===id);return s?s.nombre:"";};
-    let csv=BOM+"N. Factura;Proveedor;NIT;Fecha Emision;Total;CUFE (40 chars);Estado;Sede;Estado DIAN\n";
+    let csv=BOM+"N. Factura;Proveedor;NIT Emisor;NIT Receptor;Fecha Emision;Total;CUFE (40 chars);Estado;Sede;Estado DIAN\n";
     for(const f of faltan){
       const num=f.documento||((f.prefijo||"")+(f.folio||""))||"";
       const cufe=(f.cufe||"").slice(0,40);
@@ -1227,7 +1227,7 @@ async function cruzarDian(ev){
       const numFact=(f.documento||((f.prefijo||"")+(f.folio||""))||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
       const nit=(f.nit_emisor||"").replace(/[^0-9]/g,"");
       const estadoDian=dianMap[numFact+nit]||"NO ENCONTRADA";
-      csv+=[num,f.emisor||"",f.nit_emisor||"",f.fecha_emision||"",total,cufe,f.estado||"",sedeNombre(f.sede_id),estadoDian].join(";")+"\n";
+      csv+=[num,f.emisor||"",f.nit_emisor||"",f.nit_receptor||"",f.fecha_emision||"",total,cufe,f.estado||"",sedeNombre(f.sede_id),estadoDian].join(";")+"\n";
     }
     const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
     const a=document.createElement("a");
