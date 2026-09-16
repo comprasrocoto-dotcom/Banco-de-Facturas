@@ -1206,15 +1206,19 @@ async function cruzarDian(ev){
       }
     }
     res.textContent="Cruzando "+numDian+" factura(s) de la DIAN con "+facturas.length+" facturas de la web...";
-    // Indexar TODAS las facturas de la web por N. factura normalizado (solo letras+digitos)
-    // y tambien por N. factura + NIT. Sin importar estado ni num_ingreso.
-    const webPorNum={}, webPorNumNit={};
+    // Indexar TODAS las facturas de la web de varias formas para cruce robusto
+    const webPorDoc={}, webPorDocNit={}, webPorFolio={}, webPorFolioNit={};
     for(const f of facturas){
       const numFact=(f.documento||((f.prefijo||"")+(f.folio||""))||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+      const folio=(f.folio||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
       const nit=(f.nit_emisor||"").replace(/[^0-9]/g,"");
       if(numFact){
-        webPorNum[numFact]=f;
-        webPorNumNit[numFact+nit]=f;
+        webPorDoc[numFact]=f;
+        webPorDocNit[numFact+nit]=f;
+      }
+      if(folio){
+        webPorFolio[folio]=f;
+        webPorFolioNit[folio+nit]=f;
       }
     }
     // Las que estan en la DIAN pero NO en la web -> faltan por subir al banco
@@ -1222,8 +1226,15 @@ async function cruzarDian(ev){
     for(const d of dianRows){
       const numNorm=d.numFact.toUpperCase().replace(/[^A-Z0-9]/g,"");
       const nitNorm=d.nit.replace(/[^0-9]/g,"");
-      // Cruzar: primero por N° factura + NIT, si no coincide, solo por N° factura
-      if(webPorNumNit[numNorm+nitNorm] || webPorNum[numNorm]){
+      // Extraer solo digitos del N. factura (el folio)
+      const soloDigitos=numNorm.replace(/[^0-9]/g,"");
+      // Cruzar de varias formas: por documento completo, por folio, con o sin NIT
+      const encontrada = webPorDocNit[numNorm+nitNorm]
+                      || webPorDoc[numNorm]
+                      || webPorFolioNit[soloDigitos+nitNorm]
+                      || webPorFolio[soloDigitos]
+                      || (soloDigitos.length>=4 && Object.values(webPorFolio).some(f=>String(f.folio||"").replace(/[^0-9]/g,"")===soloDigitos));
+      if(encontrada){
         yaEnWeb.push(d);
       } else {
         faltanSubir.push(d);
