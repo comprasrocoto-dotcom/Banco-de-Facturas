@@ -1182,6 +1182,7 @@ async function cruzarDian(ev){
     const cEstado=iEstado>=0?iEstado:2;
     // Leer las filas de la DIAN
     const dianMap={};  // clave: numFactura+NIT -> estado
+    const dianRows=[]; // filas originales {numFact, nit, estado, filaCompleta}
     let numDian=0;
     for(let i=1;i<lines.length;i++){
       const cols=lines[i].split(sep).map(c=>c.trim().replace(/['"]/g,""));
@@ -1190,6 +1191,7 @@ async function cruzarDian(ev){
       const estado=(cols[cEstado]||"").toUpperCase();
       if(numFact){
         dianMap[numFact+nit]=estado;
+        dianRows.push({numFact:cols[cFact]||"", nit:cols[cNit]||"", estado:cols[cEstado]||"", cols});
         numDian++;
       }
     }
@@ -1203,13 +1205,12 @@ async function cruzarDian(ev){
     }
     // Las que estan en la DIAN pero NO en la web -> faltan por subir al banco
     const faltanSubir=[], yaEnWeb=[];
-    for(const [clave,estadoDian] of Object.entries(dianMap)){
+    for(const d of dianRows){
+      const clave=d.numFact.toUpperCase().replace(/[^A-Z0-9]/g,"")+d.nit.replace(/[^0-9]/g,"");
       if(webMap[clave]){
-        yaEnWeb.push({clave, estadoDian, f:webMap[clave]});
+        yaEnWeb.push(d);
       } else {
-        // Separar la clave en numFactura y NIT
-        // La clave es numFactura+NIT concatenados. Extraer del dianMap original
-        faltanSubir.push({clave, estadoDian});
+        faltanSubir.push(d);
       }
     }
     // Descargar CSV con las que NO estan en la web
@@ -1218,9 +1219,9 @@ async function cruzarDian(ev){
       return;
     }
     const BOM="\uFEFF";
-    let csv=BOM+"N. Factura DIAN;NIT Emisor DIAN;Estado DIAN\n";
+    let csv=BOM+"N. Factura;NIT Emisor;Estado DIAN\n";
     for(const d of faltanSubir){
-      csv+=[d.clave,d.clave,d.estadoDian].join(";")+"\n";
+      csv+=[d.numFact,d.nit,d.estado].join(";")+"\n";
     }
     const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
     const a=document.createElement("a");
