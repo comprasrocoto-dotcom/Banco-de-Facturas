@@ -1193,48 +1193,41 @@ async function cruzarDian(ev){
         numDian++;
       }
     }
-    res.textContent="Cruzando "+numDian+" factura(s) de la DIAN con "+facturas.length+" de la web...";
-    // Filtrar facturas pendientes de la web (sin num_ingreso, asignada o sellada)
-    const fSedeVal=$("fSede").value;
-    let pendientes=facturas.filter(f=>!f.num_ingreso && (f.estado==="asignada"||f.estado==="sellada"));
-    if(fSedeVal) pendientes=pendientes.filter(f=>f.sede_id===Number(fSedeVal));
-    // Cruzar: las que la DIAN ya acepto (estado contiene ACEPTADO o PROCESADO) -> ya estan
-    // Las que NO estan en la DIAN o estan RECHAZADAS -> faltan por subir
-    const faltan=[], aceptadas=[];
-    for(const f of pendientes){
+    res.textContent="Cruzando "+numDian+" factura(s) de la DIAN con "+facturas.length+" facturas de la web...";
+    // Indexar TODAS las facturas de la web por N. factura + NIT emisor (sin importar estado ni num_ingreso)
+    const webMap={};
+    for(const f of facturas){
       const numFact=(f.documento||((f.prefijo||"")+(f.folio||""))||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
       const nit=(f.nit_emisor||"").replace(/[^0-9]/g,"");
-      const clave=numFact+nit;
-      const estadoDian=dianMap[clave];
-      if(estadoDian && /ACEPT|PROCES|VALID/i.test(estadoDian)){
-        aceptadas.push(f);
+      if(numFact) webMap[numFact+nit]=f;
+    }
+    // Las que estan en la DIAN pero NO en la web -> faltan por subir al banco
+    const faltanSubir=[], yaEnWeb=[];
+    for(const [clave,estadoDian] of Object.entries(dianMap)){
+      if(webMap[clave]){
+        yaEnWeb.push({clave, estadoDian, f:webMap[clave]});
       } else {
-        faltan.push(f);
+        // Separar la clave en numFactura y NIT
+        // La clave es numFactura+NIT concatenados. Extraer del dianMap original
+        faltanSubir.push({clave, estadoDian});
       }
     }
-    // Descargar CSV con los que faltan
-    if(!faltan.length){
-      res.textContent="\u2705 Todas las pendientes ya estan aceptadas en la DIAN ("+aceptadas.length+"). No faltan por subir.";
+    // Descargar CSV con las que NO estan en la web
+    if(!faltanSubir.length){
+      res.textContent="\u2705 Todas las facturas de la DIAN ya estan en la web ("+yaEnWeb.length+"). No faltan por subir.";
       return;
     }
     const BOM="\uFEFF";
-    const sedeNombre=(id)=>{const s=sedes.find(x=>x.id===id);return s?s.nombre:"";};
-    let csv=BOM+"N. Factura;Proveedor;NIT Emisor;NIT Receptor;Fecha Emision;Total;CUFE (40 chars);Estado;Sede;Estado DIAN\n";
-    for(const f of faltan){
-      const num=f.documento||((f.prefijo||"")+(f.folio||""))||"";
-      const cufe=(f.cufe||"").slice(0,40);
-      const total=(f.total||0).toLocaleString("es-CO",{minimumFractionDigits:0,maximumFractionDigits:0});
-      const numFact=(f.documento||((f.prefijo||"")+(f.folio||""))||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
-      const nit=(f.nit_emisor||"").replace(/[^0-9]/g,"");
-      const estadoDian=dianMap[numFact+nit]||"NO ENCONTRADA";
-      csv+=[num,f.emisor||"",f.nit_emisor||"",f.nit_receptor||"",f.fecha_emision||"",total,cufe,f.estado||"",sedeNombre(f.sede_id),estadoDian].join(";")+"\n";
+    let csv=BOM+"N. Factura DIAN;NIT Emisor DIAN;Estado DIAN\n";
+    for(const d of faltanSubir){
+      csv+=[d.clave,d.clave,d.estadoDian].join(";")+"\n";
     }
     const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
     const a=document.createElement("a");
     a.href=URL.createObjectURL(blob);
-    a.download="faltan_dian_"+new Date().toISOString().slice(0,10)+".csv";
+    a.download="faltan_subir_web_"+new Date().toISOString().slice(0,10)+".csv";
     a.click(); a.remove();
-    res.textContent="\u2705 "+aceptadas.length+" aceptadas en DIAN, "+faltan.length+" faltan por subir. CSV descargado.";
+    res.textContent="\u2705 "+yaEnWeb.length+" ya en la web, "+faltanSubir.length+" faltan por subir. CSV descargado.";
   }catch(e){
     res.textContent="Error: "+e.message;
   }
