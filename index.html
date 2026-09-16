@@ -1651,7 +1651,10 @@ async function pedirIngreso(cufe){
 async function descargarCicloCompleto(){
   const res=$("resdesc"); res.textContent="";
   const fSedeVal=$("fSede").value;
-  const l=facturas.filter(f=>(f.estado==="sellada"||f.estado==="pagada") && f.num_ingreso && f.archivo_pdf && (!fSedeVal||f.sede_id===Number(fSedeVal)));
+  const fd=$("fdesde").value, fh=$("fhasta").value;
+  let l=facturas.filter(f=>(f.estado==="sellada"||f.estado==="pagada") && f.num_ingreso && f.archivo_pdf && (!fSedeVal||f.sede_id===Number(fSedeVal)));
+  if(fd) l=l.filter(f=>(f.fecha_emision||"")>=fd);
+  if(fh) l=l.filter(f=>(f.fecha_emision||"")<=fh);
   if(!l.length){ res.textContent="Todavía no hay documentos con el ciclo completo (sellados + facturados)."; return; }
   res.textContent="Cargando lib PDF...";
   try{
@@ -1685,13 +1688,13 @@ async function descargarCicloCompleto(){
 }
 
 async function descargarSelladas(){
-  const d1=$("d1").value, d2=$("d2").value;
   const res=$("resdesc"); res.textContent="";
   const fSedeVal=$("fSede").value;
+  const fd=$("fdesde").value, fh=$("fhasta").value;
   let l=facturas.filter(f=>f.estado==="sellada"||f.estado==="pagada");
   if(fSedeVal) l=l.filter(f=>f.sede_id===Number(fSedeVal));
-  if(d1) l=l.filter(f=>(f.fecha_emision||"")>=d1);
-  if(d2) l=l.filter(f=>(f.fecha_emision||"")<=d2);
+  if(fd) l=l.filter(f=>(f.fecha_emision||"")>=fd);
+  if(fh) l=l.filter(f=>(f.fecha_emision||"")<=fh);
   l=l.filter(f=>f.archivo_pdf);
   if(!l.length){res.textContent="No hay selladas en ese rango.";return;}
   res.textContent="Preparando "+l.length+" PDF(s)...";
