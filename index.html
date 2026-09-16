@@ -123,6 +123,7 @@ tr:hover td{background:#f1f5f9}
         <button class="p" onclick="descargarSelladas()">⬇ Descargar ZIP</button>
         <button class="p" onclick="descargarCicloCompleto()" title="Pedido + recibido + sellado + aprobado + facturado, todo en un solo PDF">📄 PDF ciclo completo</button>
         <button class="p" onclick="descargarPendientes()" title="Sin Nº de ingreso ERP o con novedad registrada">📥 Pendientes y novedades</button>
+        <button class="p" onclick="exportarPendientesDian()" title="Exporta CSV con las facturas pendientes para buscarlas en el portal DIAN" style="background:#7c2d12;border-color:#7c2d12">🔐 DIAN: Exportar pendientes</button>
         <span class="mut" id="resdesc"></span>
       </div>
     </div>
@@ -1125,7 +1126,36 @@ async function pedirIngresoPedido(id){
   pintarPedidos();
   alert(num?"✅ Ingreso ERP guardado: "+num+"\nEl pedido quedó como facturado.":"Ingreso ERP quitado.");
 }
-// N° de factura: documento o prefijo+folio, SIEMPRE sin separadores (IT081898792). Nunca el CUFE.
+// Exporta CSV con las facturas pendientes de ingreso para buscar en el portal DIAN
+async function exportarPendientesDian(){
+  const res=$("resdesc"); res.textContent="";
+  const fSedeVal=$("fSede").value;
+  const fd=$("fdesde").value, fh=$("fhasta").value;
+  let l=facturas.filter(f=>!f.num_ingreso && (f.estado==="asignada"||f.estado==="sellada"));
+  if(fSedeVal) l=l.filter(f=>f.sede_id===Number(fSedeVal));
+  if(fd) l=l.filter(f=>(f.fecha_emision||"")>=fd);
+  if(fh) l=l.filter(f=>(f.fecha_emision||"")<=fh);
+  if(!l.length){res.textContent="No hay pendientes para exportar.";return;}
+  // Buscar nombre de sede para cada factura
+  const sedeNombre=(id)=>{const s=sedes.find(x=>x.id===id);return s?s.nombre:"";};
+  // CSV con BOM UTF-8, separador ; (punto y coma para Excel colombiano)
+  const BOM="\uFEFF";
+  let csv=BOM+"N. Factura;Proveedor;NIT;Fecha Emision;Total;CUFE (40 chars);Estado;Sede\n";
+  for(const f of l){
+    const num=f.documento||((f.prefijo||"")+(f.folio||""))||"";
+    const cufe=(f.cufe||"").slice(0,40);
+    const total=(f.total||0).toLocaleString("es-CO",{minimumFractionDigits:0,maximumFractionDigits:0});
+    const fecha=f.fecha_emision||"";
+    csv+=[num,f.emisor||"",f.nit_emisor||"",fecha,total,cufe,f.estado||"",sedeNombre(f.sede_id)].join(";")+"\n";
+  }
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="pendientes_dian_"+new Date().toISOString().slice(0,10)+".csv";
+  a.click(); a.remove();
+  res.textContent="\u2705 "+l.length+" factura(s) exportadas para la DIAN.";
+}
+// Número de factura: documento o prefijo+folio, SIEMPRE sin separadores (IT081898792). Nunca el CUFE.
 function numeroFactura(f){
   if(!f) return "";
   const brut=(f.documento||"") || ((f.prefijo||"")+(f.folio||""));
