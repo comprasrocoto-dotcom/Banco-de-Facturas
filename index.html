@@ -1522,13 +1522,15 @@ function pintar(){
   // Filtro por fecha (usa fecha_ingreso si tiene, sino fecha_emision)
   const fd=$("fdesde").value, fh=$("fhasta").value;
   if(fd||fh){
+    const antes=l.length;
     l=l.filter(f=>{
-      const fe=f.fecha_ingreso||f.fecha_emision||""; // formato ISO yyyy-mm-dd
+      const fe=(f.fecha_ingreso && f.fecha_ingreso!=="null") ? f.fecha_ingreso : (f.fecha_emision||"");
       if(!fe) return false;
       if(fd&&fe<fd) return false;
       if(fh&&fe>fh) return false;
       return true;
     });
+    console.log("[pintar] filtro fecha: desde="+fd+" hasta="+fh+" | antes="+antes+" despues="+l.length);
   }
   const q=($("q").value||"").trim().toLowerCase();
   if(q) l=l.filter(f=>((f.numero||"")+" "+(f.prefijo||"")+(f.folio||"")+" "+(f.documento||"")+" "+(f.emisor||"")+" "+(f.cufe||"")+" "+(f.num_ingreso||"")).toLowerCase().includes(q));
