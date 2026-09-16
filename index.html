@@ -1181,14 +1181,31 @@ async function cruzarDian(ev){
       rows=txt.split(/\r?\n/).filter(l=>l.trim()).map(l=>l.split(sep).map(c=>c.trim().replace(/['"]/g,"")));
     }
     if(rows.length<2){res.textContent="El archivo no tiene datos.";return;}
-    // Buscar que columna es N. factura, NIT y estado
+    console.log("[cruzarDian] filas leidas del excel/csv (sin encabezado):", rows.length-1);
+    // Buscar que columna es N. factura, NIT, estado y CUFE.
+    // Se detecta primero el NIT (patron mas especifico) para que la columna de
+    // N. factura no se la robe cuando ambas contienen la palabra "documento".
     const headers=rows[0].map(h=>String(h||"").trim().toLowerCase());
-    const iFact=headers.findIndex(h=>/factura|numero|n.?fact/i.test(h));
-    const iNit=headers.findIndex(h=>/^nit|documento|identific/i.test(h));
+    const iNit=headers.findIndex(h=>/\bnit\b|documento|identific|\brut\b|c[eé]dula/i.test(h));
+    const iFact=headers.findIndex((h,idx)=>idx!==iNit && /factura|numero|n\.?\s*fact|prefijo|folio|consecutivo|\bdoc\b|documento|referencia|cufe|\bnum\b|\bno\b/i.test(h));
+    const iCufe=headers.findIndex(h=>/cufe|clave.*(acceso|confirmaci[oó]n)/i.test(h));
     const iEstado=headers.findIndex(h=>/estado|estado.*doc|acept|rechaz/i.test(h));
     const cFact=iFact>=0?iFact:0;
     const cNit=iNit>=0?iNit:1;
     const cEstado=iEstado>=0?iEstado:2;
+    const cCufe=iCufe;
+    console.log("[cruzarDian] encabezados:", headers);
+    console.log("[cruzarDian] columnas detectadas -> factura:",cFact,"("+(headers[cFact]||"?")+")",
+      "| nit:",cNit,"("+(headers[cNit]||"?")+")",
+      "| estado:",cEstado,"("+(headers[cEstado]||"?")+")",
+      "| cufe:",cCufe>=0?cCufe+" ("+headers[cCufe]+")":"no detectada (se buscara dentro de la col. factura)");
+    console.log("[cruzarDian] primeras 3 filas leidas:", rows.slice(1,4));
+    // Indexar los CUFE de la web (por si la DIAN trae el CUFE en vez del N. factura)
+    const webCufes=new Set();
+    for(const f of facturas){
+      const cufeNorm=(f.cufe||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+      if(cufeNorm) webCufes.add(cufeNorm);
+    }
     // Leer las filas de la DIAN
     const dianMap={};
     const dianRows=[];
@@ -1198,9 +1215,13 @@ async function cruzarDian(ev){
       const numFact=String(cols[cFact]||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
       const nit=String(cols[cNit]||"").replace(/[^0-9]/g,"");
       const estado=String(cols[cEstado]||"").toUpperCase();
-      if(numFact){
+      // CUFE: de su propia columna si se detecto, o el mismo valor de N. factura
+      // si resulta ser un CUFE (96 caracteres alfanumericos) en vez de un N. factura
+      let cufe=cCufe>=0?String(cols[cCufe]||"").toUpperCase().replace(/[^A-Z0-9]/g,""):"";
+      if(!cufe && numFact.length>=90) cufe=numFact;
+      if(numFact||cufe){
         dianMap[numFact+nit]=estado;
-        dianRows.push({numFact:String(cols[cFact]||""), nit:String(cols[cNit]||""), estado:String(cols[cEstado]||""), cols});
+        dianRows.push({numFact:String(cols[cFact]||""), nit:String(cols[cNit]||""), estado:String(cols[cEstado]||""), cufe, cols});
         numDian++;
       }
     }
@@ -1221,11 +1242,13 @@ async function cruzarDian(ev){
       const numNorm=d.numFact.toUpperCase().replace(/[^A-Z0-9]/g,"");
       const nitNorm=d.nit.replace(/[^0-9]/g,"");
       const soloDigitos=numNorm.replace(/[^0-9]/g,"");
-      // Buscar de TODAS las formas: doc completo, folio, con/sin NIT
+      const cufeNorm=(d.cufe||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+      // Buscar de TODAS las formas: doc completo, folio, con/sin NIT, CUFE
       let encontrada = webDocsNit.has(numNorm+nitNorm)
                     || webDocs.has(numNorm)
                     || webFoliosNit.has(soloDigitos+nitNorm)
-                    || webFolios.has(soloDigitos);
+                    || webFolios.has(soloDigitos)
+                    || (cufeNorm.length>=20 && webCufes.has(cufeNorm));
       // Si aun no encontro, buscar si el N. factura de la DIAN contiene algun doc de la web
       // (la DIAN puede traer el N. con prefijo+numero, la web puede tenerlo distinto)
       if(!encontrada && soloDigitos.length>=4){
@@ -1243,6 +1266,8 @@ async function cruzarDian(ev){
         faltanSubir.push(d);
       }
     }
+    console.log("[cruzarDian] resultado del cruce -> ya en la web:",yaEnWeb.length,"| faltan por subir:",faltanSubir.length);
+    console.log("[cruzarDian] ejemplo de faltantes (primeras 5):", faltanSubir.slice(0,5).map(d=>({numFact:d.numFact,nit:d.nit,cufe:d.cufe})));
     // Descargar CSV con las que NO estan en la web
     if(!faltanSubir.length){
       res.textContent="\u2705 Todas las facturas de la DIAN ya estan en la web ("+yaEnWeb.length+"). No faltan por subir.";
