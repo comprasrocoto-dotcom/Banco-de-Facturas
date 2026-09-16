@@ -1167,8 +1167,8 @@ async function exportarPendientesDian(){
   // Exportar TODAS las facturas de la web (no solo pendientes) para que el cruce sea completo
   let l=facturas;
   if(fSedeVal) l=l.filter(f=>f.sede_id===Number(fSedeVal));
-  if(fd) l=l.filter(f=>(f.fecha_ingreso||f.fecha_emision||"")>=fd);
-  if(fh) l=l.filter(f=>(f.fecha_ingreso||f.fecha_emision||"")<=fh);
+  if(fd) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe>=fd;});
+  if(fh) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe<=fh;});
   if(!l.length){res.textContent="No hay facturas para exportar.";return;}
   const sedeNombre=(id)=>{const s=sedes.find(x=>x.id===id);return s?s.nombre:"";};
   const BOM="\uFEFF";
@@ -1683,8 +1683,8 @@ async function descargarCicloCompleto(){
   const fSedeVal=$("fSede").value;
   const fd=$("fdesde").value, fh=$("fhasta").value;
   let l=facturas.filter(f=>(f.estado==="sellada"||f.estado==="pagada") && f.num_ingreso && f.archivo_pdf && (!fSedeVal||f.sede_id===Number(fSedeVal)));
-  if(fd) l=l.filter(f=>(f.fecha_ingreso||f.fecha_emision||"")>=fd);
-  if(fh) l=l.filter(f=>(f.fecha_ingreso||f.fecha_emision||"")<=fh);
+  if(fd) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe>=fd;});
+  if(fh) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe<=fh;});
   if(!l.length){ res.textContent="Todavía no hay documentos con el ciclo completo (sellados + facturados)."; return; }
   res.textContent="Cargando lib PDF...";
   try{
@@ -1723,8 +1723,8 @@ async function descargarSelladas(){
   const fd=$("fdesde").value, fh=$("fhasta").value;
   let l=facturas.filter(f=>f.estado==="sellada"||f.estado==="pagada");
   if(fSedeVal) l=l.filter(f=>f.sede_id===Number(fSedeVal));
-  if(fd) l=l.filter(f=>(f.fecha_ingreso||f.fecha_emision||"")>=fd);
-  if(fh) l=l.filter(f=>(f.fecha_ingreso||f.fecha_emision||"")<=fh);
+  if(fd) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe>=fd;});
+  if(fh) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe<=fh;});
   l=l.filter(f=>f.archivo_pdf);
   if(!l.length){res.textContent="No hay selladas en ese rango.";return;}
   res.textContent="Preparando "+l.length+" PDF(s)...";
@@ -1762,8 +1762,8 @@ async function descargarPendientes(){
   console.log("DEBUG descargarPendientes: pasan el filtro de num_ingreso/estado ->",
     l.map(f=>({cufe:f.cufe,num:(f.prefijo||"")+(f.folio||""),num_ingreso:f.num_ingreso||null,tiene_novedad:!!novDe(f.cufe),estado:f.estado})));
   if(fSedeVal) l=l.filter(f=>f.sede_id===Number(fSedeVal));
-  if(fd) l=l.filter(f=>(f.fecha_ingreso||f.fecha_emision||"")>=fd);
-  if(fh) l=l.filter(f=>(f.fecha_ingreso||f.fecha_emision||"")<=fh);
+  if(fd) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe>=fd;});
+  if(fh) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe<=fh;});
   l=l.filter(f=>f.archivo_pdf);
   console.log("[descargarPendientes] "+l.length+" factura(s) final(es):",
     l.map(f=>({cufe:f.cufe,num:(f.prefijo||"")+(f.folio||""),num_ingreso:f.num_ingreso||null,tiene_novedad:!!novDe(f.cufe),estado:f.estado})));
