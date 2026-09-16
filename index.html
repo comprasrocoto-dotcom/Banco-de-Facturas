@@ -973,14 +973,42 @@ function pintarAmarre(){
           <div class="mut">${(x.prefijo||"")+(x.folio||"")} · ${fch(x.fecha_emision)} · NIT ${x.nit_emisor||"—"}</div></div>
         <div class="total">${money(x.total)}</div></div></div>`;
     }else{
-      return `<div class="card" style="margin:6px 0;cursor:pointer" onclick="amarrarConPedido(${x.id})">
+      return `<div class="card" style="margin:6px 0;cursor:pointer" onclick="verResumenPedido(${x.id})">
         <div class="row"><div><div class="emisor">${x.proveedor_texto||"—"}</div>
           <div class="mut">${x.sede_texto||""} · ${fch(x.fecha)} · Orden #${x.numero||""}</div></div>
         <div class="row" style="gap:6px">
           ${x.pedido_erp?`<span class="badge st-sellada">ERP ${x.pedido_erp}</span>`:""}
-          ${x.factura_cufe?`<span class="badge">ya amarrado</span>`:`<span class="badge st-pool">sin factura</span>`}</div></div></div>`;
+          ${x.factura_cufe?`<span class="badge">ya amarrado</span>`:`<span class="badge st-pool">sin factura</span>`}</div></div>
+        <div id="resumen_${x.id}" class="mut" style="margin-top:8px;font-size:12px"></div></div>`;
     }
   }).join("") + (l.length>=200?'<div class="vacio">Escribí para afinar la búsqueda.</div>':"");
+}
+// Muestra un resumen de los articulos del pedido antes de amarrar
+// para que la sede pueda confirmar que es el pedido correcto
+async function verResumenPedido(id){
+  const div=$("resumen_"+id);
+  if(div.dataset.cargado){
+    // Si ya cargo, mostrar/ocultar
+    div.style.display = div.style.display==="none" ? "block" : "none";
+    return;
+  }
+  div.textContent="Cargando articulos...";
+  try{
+    const {data}=await SB.from("pedido_lineas").select("insumo,cantidad,unidad").eq("pedido_id",id);
+    if(!data || !data.length){
+      div.textContent="Sin articulos en el pedido.";
+      div.dataset.cargado="1";
+      return;
+    }
+    const lineas=data.slice(0,8).map(l=>`• ${l.insumo||"?"} (${l.cantidad||0} ${l.unidad||""})`).join("<br>");
+    const extra=data.length>8 ? `<br><i>...y ${data.length-8} articulo(s) mas</i>`:"";
+    const totalArts=data.reduce((t,l)=>t+Number(l.cantidad||0),0);
+    div.innerHTML=`<b>Articulos del pedido (${data.length}):</b><br>${lineas}${extra}<br><b>Total: ${totalArts} unidades</b><br><br><button class="p" onclick="event.stopPropagation();amarrarConPedido(${id})">✅ Confirmar amarrado</button>`;
+    div.dataset.cargado="1";
+  }catch(e){
+    div.textContent="Error: "+e.message;
+    div.dataset.cargado="1";
+  }
 }
 function confirmarSiYaAmarrado(p){
   // Avisa si el pedido YA tiene una factura amarrada: amarrar otra encima la
