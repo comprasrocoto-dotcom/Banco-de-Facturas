@@ -1196,18 +1196,24 @@ async function cruzarDian(ev){
       }
     }
     res.textContent="Cruzando "+numDian+" factura(s) de la DIAN con "+facturas.length+" facturas de la web...";
-    // Indexar TODAS las facturas de la web por N. factura + NIT emisor (sin importar estado ni num_ingreso)
-    const webMap={};
+    // Indexar TODAS las facturas de la web por N. factura normalizado (solo letras+digitos)
+    // y tambien por N. factura + NIT. Sin importar estado ni num_ingreso.
+    const webPorNum={}, webPorNumNit={};
     for(const f of facturas){
       const numFact=(f.documento||((f.prefijo||"")+(f.folio||""))||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
       const nit=(f.nit_emisor||"").replace(/[^0-9]/g,"");
-      if(numFact) webMap[numFact+nit]=f;
+      if(numFact){
+        webPorNum[numFact]=f;
+        webPorNumNit[numFact+nit]=f;
+      }
     }
     // Las que estan en la DIAN pero NO en la web -> faltan por subir al banco
     const faltanSubir=[], yaEnWeb=[];
     for(const d of dianRows){
-      const clave=d.numFact.toUpperCase().replace(/[^A-Z0-9]/g,"")+d.nit.replace(/[^0-9]/g,"");
-      if(webMap[clave]){
+      const numNorm=d.numFact.toUpperCase().replace(/[^A-Z0-9]/g,"");
+      const nitNorm=d.nit.replace(/[^0-9]/g,"");
+      // Cruzar: primero por N° factura + NIT, si no coincide, solo por N° factura
+      if(webPorNumNit[numNorm+nitNorm] || webPorNum[numNorm]){
         yaEnWeb.push(d);
       } else {
         faltanSubir.push(d);
