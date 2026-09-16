@@ -1136,29 +1136,28 @@ async function exportarPendientesDian(){
   const res=$("resdesc"); res.textContent="";
   const fSedeVal=$("fSede").value;
   const fd=$("fdesde").value, fh=$("fhasta").value;
-  let l=facturas.filter(f=>!f.num_ingreso && (f.estado==="asignada"||f.estado==="sellada"));
+  // Exportar TODAS las facturas de la web (no solo pendientes) para que el cruce sea completo
+  let l=facturas;
   if(fSedeVal) l=l.filter(f=>f.sede_id===Number(fSedeVal));
   if(fd) l=l.filter(f=>(f.fecha_emision||"")>=fd);
   if(fh) l=l.filter(f=>(f.fecha_emision||"")<=fh);
-  if(!l.length){res.textContent="No hay pendientes para exportar.";return;}
-  // Buscar nombre de sede para cada factura
+  if(!l.length){res.textContent="No hay facturas para exportar.";return;}
   const sedeNombre=(id)=>{const s=sedes.find(x=>x.id===id);return s?s.nombre:"";};
-  // CSV con BOM UTF-8, separador ; (punto y coma para Excel colombiano)
   const BOM="\uFEFF";
-  let csv=BOM+"N. Factura;Proveedor;NIT Emisor;NIT Receptor;Fecha Emision;Total;CUFE (40 chars);Estado;Sede\n";
+  let csv=BOM+"N. Factura;Proveedor;NIT Emisor;NIT Receptor;Fecha Emision;Total;CUFE;Estado;Sede\n";
   for(const f of l){
-  const num=f.documento||((f.prefijo||"")+(f.folio||""))||"";
-  const cufe=(f.cufe||"").slice(0,40);
-  const total=(f.total||0).toLocaleString("es-CO",{minimumFractionDigits:0,maximumFractionDigits:0});
-  const fecha=f.fecha_emision||"";
-  csv+=[num,f.emisor||"",f.nit_emisor||"",f.nit_receptor||"",fecha,total,cufe,f.estado||"",sedeNombre(f.sede_id)].join(";")+"\n";
+    const num=f.documento||((f.prefijo||"")+(f.folio||""))||"";
+    const cufe=f.cufe||"";
+    const total=(f.total||0).toLocaleString("es-CO",{minimumFractionDigits:0,maximumFractionDigits:0});
+    const fecha=f.fecha_emision||"";
+    csv+=[num,f.emisor||"",f.nit_emisor||"",f.nit_receptor||"",fecha,total,cufe,f.estado||"",sedeNombre(f.sede_id)].join(";")+"\n";
   }
   const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
   const a=document.createElement("a");
   a.href=URL.createObjectURL(blob);
-  a.download="pendientes_dian_"+new Date().toISOString().slice(0,10)+".csv";
+  a.download="facturas_web_"+new Date().toISOString().slice(0,10)+".csv";
   a.click(); a.remove();
-  res.textContent="\u2705 "+l.length+" factura(s) exportadas para la DIAN.";
+  res.textContent="\u2705 "+l.length+" factura(s) exportadas (TODAS las de la web).";
 }
 // Subir el Excel/CSV de la DIAN, cruzar por N. factura + NIT, y descargar los que faltan por subir
 async function cruzarDian(ev){
