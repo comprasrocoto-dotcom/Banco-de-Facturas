@@ -1519,11 +1519,11 @@ function pintar(){
   if(vista=="selladas") l=l.filter(f=>f.estado=="sellada"||f.estado=="pagada");
   if(vista=="hecho")    l=l.filter(f=>(f.estado=="sellada"||f.estado=="pagada")&&f.num_ingreso);
   if(vista=="nov")      l=l.filter(f=>novDe(f.cufe));
-  // Filtro por fecha (fecha_emision)
+  // Filtro por fecha (usa fecha_ingreso si tiene, sino fecha_emision)
   const fd=$("fdesde").value, fh=$("fhasta").value;
   if(fd||fh){
     l=l.filter(f=>{
-      const fe=f.fecha_emision||""; // formato ISO yyyy-mm-dd
+      const fe=f.fecha_ingreso||f.fecha_emision||""; // formato ISO yyyy-mm-dd
       if(!fe) return false;
       if(fd&&fe<fd) return false;
       if(fh&&fe>fh) return false;
