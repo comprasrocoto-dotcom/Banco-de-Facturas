@@ -1206,34 +1206,38 @@ async function cruzarDian(ev){
       }
     }
     res.textContent="Cruzando "+numDian+" factura(s) de la DIAN con "+facturas.length+" facturas de la web...";
-    // Indexar TODAS las facturas de la web de varias formas para cruce robusto
-    const webPorDoc={}, webPorDocNit={}, webPorFolio={}, webPorFolioNit={};
+    // Indexar TODAS las facturas de la web de TODAS las formas posibles
+    // para que el cruce funcione sin importar el formato que traiga la DIAN
+    const webDocs=new Set(), webFolios=new Set(), webDocsNit=new Set(), webFoliosNit=new Set();
     for(const f of facturas){
-      const numFact=(f.documento||((f.prefijo||"")+(f.folio||""))||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+      const doc=(f.documento||((f.prefijo||"")+(f.folio||""))||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
       const folio=(f.folio||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
       const nit=(f.nit_emisor||"").replace(/[^0-9]/g,"");
-      if(numFact){
-        webPorDoc[numFact]=f;
-        webPorDocNit[numFact+nit]=f;
-      }
-      if(folio){
-        webPorFolio[folio]=f;
-        webPorFolioNit[folio+nit]=f;
-      }
+      if(doc){webDocs.add(doc); webDocsNit.add(doc+nit);}
+      if(folio){webFolios.add(folio); webFoliosNit.add(folio+nit);}
     }
     // Las que estan en la DIAN pero NO en la web -> faltan por subir al banco
     const faltanSubir=[], yaEnWeb=[];
     for(const d of dianRows){
       const numNorm=d.numFact.toUpperCase().replace(/[^A-Z0-9]/g,"");
       const nitNorm=d.nit.replace(/[^0-9]/g,"");
-      // Extraer solo digitos del N. factura (el folio)
       const soloDigitos=numNorm.replace(/[^0-9]/g,"");
-      // Cruzar de varias formas: por documento completo, por folio, con o sin NIT
-      const encontrada = webPorDocNit[numNorm+nitNorm]
-                      || webPorDoc[numNorm]
-                      || webPorFolioNit[soloDigitos+nitNorm]
-                      || webPorFolio[soloDigitos]
-                      || (soloDigitos.length>=4 && Object.values(webPorFolio).some(f=>String(f.folio||"").replace(/[^0-9]/g,"")===soloDigitos));
+      // Buscar de TODAS las formas: doc completo, folio, con/sin NIT
+      let encontrada = webDocsNit.has(numNorm+nitNorm)
+                    || webDocs.has(numNorm)
+                    || webFoliosNit.has(soloDigitos+nitNorm)
+                    || webFolios.has(soloDigitos);
+      // Si aun no encontro, buscar si el N. factura de la DIAN contiene algun doc de la web
+      // (la DIAN puede traer el N. con prefijo+numero, la web puede tenerlo distinto)
+      if(!encontrada && soloDigitos.length>=4){
+        for(const f of facturas){
+          const fDoc=(f.documento||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+          const fFolio=(f.folio||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+          if((fDoc && numNorm.endsWith(fDoc)) || (fFolio && soloDigitos===fFolio.replace(/[^0-9]/g,""))){
+            encontrada=true; break;
+          }
+        }
+      }
       if(encontrada){
         yaEnWeb.push(d);
       } else {
