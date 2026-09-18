@@ -122,7 +122,7 @@ tr:hover td{background:#f1f5f9}
         <span class="mut">al</span>
         <input type="date" id="d2" style="width:auto;margin:0">
         <button class="p" onclick="descargarSelladas()">⬇ Descargar ZIP</button>
-        <button class="p" onclick="descargarCicloCompleto()" title="Pedido + recibido + sellado + aprobado + facturado, todo en un solo PDF">📄 PDF ciclo completo</button>
+        <button class="p" onclick="descargarCicloCompleto()" title="Sellada + aprobada + facturada (con N° de ingreso ERP): un PDF por factura, dentro de un ZIP. Usa las fechas de Descargar selladas del/al (fecha de sellado, hora Colombia)">📄 PDF ciclo completo</button>
         <button class="p" onclick="descargarPendientes()" title="Sin Nº de ingreso ERP o con novedad registrada">📥 Pendientes y novedades</button>
         <button class="p" onclick="exportarPendientesDian()" title="Exporta CSV con las facturas pendientes para buscarlas en el portal DIAN" style="background:#7c2d12;border-color:#7c2d12">🔐 DIAN: Exportar pendientes</button>
         <label style="background:#7c2d12;color:#fff;font-weight:700;padding:8px 14px;border-radius:9px;cursor:pointer;font-size:13px;border:1px solid #7c2d12" title="Subir el Excel de la DIAN para cruzar y descargar los que faltan">📤 DIAN: Subir cruce
@@ -202,6 +202,7 @@ tr:hover td{background:#f1f5f9}
   </div>
 </div></div>
 
+<script src="js/banco-utils.js"></script>
 <script>
 const SB = supabase.createClient("https://egzggxwfyqeihzgpjgmp.supabase.co", "sb_publishable_3rzP6pCef1S5nRzFkG-eHw_-BF73n91");
 let usuario=null, perfil=null, facturas=[], novedades=[], sedes=[], pedidos=[], pedidosCargados=false, pedVista="pendiente", modulo="banco";
@@ -1291,7 +1292,22 @@ async function exportarPendientesDian(){
   a.click(); a.remove();
   res.textContent="\u2705 "+l.length+" factura(s) exportadas (TODAS las de la web).";
 }
-// Subir el Excel/CSV de la DIAN, cruzar por N. factura + NIT, y descargar los que faltan por subir
+// ── CRUCE DIAN (18/09/2026): SOLO lo que está en la DIAN y NO está en el sistema ──
+// Compara por CUFE y, si no, por NIT + prefijo + número (nunca solo el número). Notas crédito/débito,
+// anuladas/rechazadas y otros documentos se muestran aparte y NO se piden para subir.
+// La lógica vive en js/banco-utils.js (probada con node).
+// Se leen TODAS las facturas de la tabla (paginado): la vista de la pantalla corta en 1000 filas y solo trae 4 categorías.
+async function traerTodasLasFacturas(){
+  const out=[]; const paso=1000;
+  for(let desde=0;;desde+=paso){
+    const {data,error}=await SB.from("facturas").select("cufe,nit_emisor,prefijo,folio,documento,tipo,estado").order("cufe").range(desde,desde+paso-1);
+    if(error) throw new Error(error.message);
+    out.push(...(data||[]));
+    if(!data||data.length<paso) break;
+  }
+  return out;
+}
+let ultimoCruce=null;
 async function cruzarDian(ev){
   const res=$("resDian");
   const file=ev.target.files[0];
@@ -1301,115 +1317,53 @@ async function cruzarDian(ev){
     let rows=[]; // array de arrays: [[col1, col2, ...], ...]
     const nombre=file.name.toLowerCase();
     if(nombre.endsWith(".xlsx")||nombre.endsWith(".xls")){
-      // Leer Excel con SheetJS
       const buf=await file.arrayBuffer();
       const wb=XLSX.read(buf,{type:"array"});
       const ws=wb.Sheets[wb.SheetNames[0]];
       rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false});
     } else {
-      // Leer CSV
       const txt=await file.text();
       const sep=txt.includes(";")?";":(txt.includes("\t")?"\t":",");
       rows=txt.split(/\r?\n/).filter(l=>l.trim()).map(l=>l.split(sep).map(c=>c.trim().replace(/['"]/g,"")));
     }
-    if(rows.length<2){res.textContent="El archivo no tiene datos.";return;}
-    console.log("[cruzarDian] filas leidas del excel/csv (sin encabezado):", rows.length-1);
-    // Detectar columnas del Excel de la DIAN por nombre
-    const headers=rows[0].map(h=>String(h||"").trim().toLowerCase());
-    // La DIAN trae: col[1]=CUFE/CUDE, col[2]=Folio, col[3]=Prefijo, col[9]=NIT Emisor, col[30]=Estado
-    let iCufe=headers.findIndex(h=>/cufe|cude/i.test(h));
-    let iFolio=headers.findIndex(h=>/^folio$/i.test(h));
-    let iPrefijo=headers.findIndex(h=>/^prefijo$/i.test(h));
-    let iNit=headers.findIndex(h=>/nit.*emisor|^nit$/i.test(h));
-    let iEstado=headers.findIndex(h=>/^estado$/i.test(h));
-    let iEmisor=headers.findIndex(h=>/nombre.*emisor|^emisor$/i.test(h));
-    let iTotal=headers.findIndex(h=>/^total$/i.test(h));
-    // Fallbacks por deteccion de contenido si no encontro por nombre
-    if(iCufe<0 && rows.length>1){
-      for(let c=0;c<(rows[0]||[]).length;c++){
-        const val=String((rows[1]||[])[c]||"").replace(/[^A-Za-z0-9]/g,"");
-        if(val.length>=80){iCufe=c;break;}
-      }
-    }
-    const cCufe=iCufe>=0?iCufe:-1;
-    const cFolio=iFolio>=0?iFolio:-1;
-    const cPrefijo=iPrefijo>=0?iPrefijo:-1;
-    const cNit=iNit>=0?iNit:-1;
-    const cEstado=iEstado>=0?iEstado:-1;
-    const cEmisor=iEmisor>=0?iEmisor:-1;
-    const cTotal=iTotal>=0?iTotal:-1;
-    console.log("[cruzarDian] columnas: cufe=",cCufe,"folio=",cFolio,"prefijo=",cPrefijo,"nit=",cNit,"estado=",cEstado);
-    // Leer las filas de la DIAN
-    const dianRows=[];
-    let numDian=0;
-    for(let i=1;i<rows.length;i++){
-      const cols=rows[i]||[];
-      const cufe=cCufe>=0?String(cols[cCufe]||"").toUpperCase().replace(/[^A-Z0-9]/g,""):"";
-      const folio=cFolio>=0?String(cols[cFolio]||"").toUpperCase().replace(/[^A-Z0-9]/g,""):"";
-      const prefijo=cPrefijo>=0?String(cols[cPrefijo]||"").toUpperCase().replace(/[^A-Z0-9]/g,""):"";
-      // Armar el N. factura = prefijo + folio (ej: MF + 445672 = MF445672)
-      const numFact=(prefijo||"")+(folio||"");
-      const nit=cNit>=0?String(cols[cNit]||"").replace(/[^0-9]/g,""):"";
-      const estado=cEstado>=0?String(cols[cEstado]||"").toUpperCase():"";
-      const emisor=cEmisor>=0?String(cols[cEmisor]||""):"";
-      const total=cTotal>=0?String(cols[cTotal]||""):"";
-      if(cufe||numFact){
-        dianRows.push({numFact, folio, prefijo, nit, estado, cufe, emisor, total, cols});
-        numDian++;
-      }
-    }
-    res.textContent="Cruzando "+numDian+" factura(s) de la DIAN con "+facturas.length+" facturas de la web...";
-    // Indexar TODAS las facturas de la web: por CUFE, por documento, por folio
-    const webCufes=new Set(), webDocs=new Set(), webFolios=new Set();
-    for(const f of facturas){
-      const cufe=(f.cufe||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
-      const doc=(f.documento||((f.prefijo||"")+(f.folio||""))||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
-      const folio=(f.folio||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
-      if(cufe) webCufes.add(cufe);
-      if(doc) webDocs.add(doc);
-      if(folio) webFolios.add(folio);
-    }
-    // Las que estan en la DIAN pero NO en la web -> faltan por subir al banco
-    const faltanSubir=[], yaEnWeb=[];
-    for(const d of dianRows){
-      const cufeNorm=(d.cufe||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
-      const numNorm=d.numFact.toUpperCase().replace(/[^A-Z0-9]/g,"");
-      // PRIORIDAD 1: cruce por CUFE (mas exacto)
-      let encontrada = cufeNorm.length>=20 && webCufes.has(cufeNorm);
-      // PRIORIDAD 2: cruce por N. factura
-      if(!encontrada && numNorm) encontrada = webDocs.has(numNorm);
-      // PRIORIDAD 3: cruce por folio (solo digitos)
-      if(!encontrada){
-        const soloDigitos=numNorm.replace(/[^0-9]/g,"");
-        if(soloDigitos.length>=4) encontrada = webFolios.has(soloDigitos);
-      }
-      if(encontrada){
-        yaEnWeb.push(d);
-      } else {
-        faltanSubir.push(d);
-      }
-    }
-    console.log("[cruzarDian] resultado del cruce -> ya en la web:",yaEnWeb.length,"| faltan por subir:",faltanSubir.length);
-    console.log("[cruzarDian] ejemplo de faltantes (primeras 5):", faltanSubir.slice(0,5).map(d=>({numFact:d.numFact,nit:d.nit,cufe:d.cufe})));
-    // Descargar CSV con las que NO estan en la web
-    if(!faltanSubir.length){
-      res.textContent="\u2705 Todas las facturas de la DIAN ya estan en la web ("+yaEnWeb.length+"). No faltan por subir.";
-      return;
-    }
-    const BOM="\uFEFF";
-    let csv=BOM+"CUFE;Prefijo;Folio;N. Factura;NIT Emisor;Nombre Emisor;Total;Estado DIAN\n";
-    for(const d of faltanSubir){
-      csv+=[d.cufe||"",d.prefijo||"",d.folio||"",d.numFact||"",d.nit||"",d.emisor||"",d.total||"",d.estado||""].join(";")+"\n";
-    }
-    const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
-    const a=document.createElement("a");
-    a.href=URL.createObjectURL(blob);
-    a.download="faltan_subir_web_"+new Date().toISOString().slice(0,10)+".csv";
-    a.click(); a.remove();
-    res.textContent="\u2705 "+yaEnWeb.length+" ya en la web, "+faltanSubir.length+" faltan por subir. CSV descargado.";
+    const tabla=BancoUtils.interpretarTablaDian(rows);
+    if(tabla.error){ res.textContent=tabla.error; return; }
+    res.textContent="Leyendo TODAS las facturas del sistema...";
+    const sistema=await traerTodasLasFacturas();
+    const r=BancoUtils.cruzarConSistema(tabla.registros,sistema);
+    ultimoCruce=r;
+    pintarCruce(r,tabla,sistema.length);
+    res.textContent=r.resumen.pendientes?("Cruce listo: "+r.resumen.pendientes+" factura(s) de la DIAN NO están en el sistema."):"Cruce listo: no falta ninguna factura por subir ✅";
   }catch(e){
     res.textContent="Error: "+e.message;
-  }
+  }finally{ ev.target.value=""; }   // permite volver a subir el mismo archivo
+}
+function cerrarCruce(){ const p=$("panelCruce"); if(p) p.remove(); }
+function descargarCruceCsv(){
+  if(!ultimoCruce||!ultimoCruce.pendientes.length) return;
+  const blob=new Blob([BancoUtils.csvPendientes(ultimoCruce.pendientes)],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+  a.download="faltan_subir_web_"+BancoUtils.hoyColombia()+".csv";
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function pintarCruce(r,tabla,totalSistema){
+  let p=$("panelCruce");
+  if(!p){ p=document.createElement("div"); p.id="panelCruce"; p.className="card"; p.style.margin="0 0 16px"; $("barraDescarga").insertAdjacentElement("afterend",p); }
+  const s=r.resumen, fila=(x,extra)=>`<tr><td><b>${escAg(x.r.numero||"—")}</b></td><td>${escAg(x.r.emisor||"—")}</td><td>${escAg(x.r.nit||"—")}</td><td>${escAg(x.r.fecha||"")}</td><td class="num">${escAg(x.r.total||"")}</td><td class="mut">${escAg(extra||"")}</td></tr>`;
+  const tabla_=(lista,extraFn,max)=>`<table><thead><tr><th>N° factura</th><th>Proveedor</th><th>NIT</th><th>Fecha</th><th class="num">Total</th><th></th></tr></thead><tbody>${lista.slice(0,max||300).map(x=>fila(x,extraFn(x))).join("")}</tbody></table>${lista.length>(max||300)?`<div class="mut">… y ${lista.length-(max||300)} más (todas están en el CSV).</div>`:""}`;
+  let h=`<div class="row"><b>Cruce DIAN ↔ sistema</b><span class="sp"></span><button onclick="cerrarCruce()">Cerrar</button></div>
+    <div class="mut" style="margin:6px 0">DIAN: ${s.enArchivo} documento(s) leídos · sistema: ${totalSistema} facturas (todas) · ya están en el sistema: <b>${s.yaEnSistema}</b>${s.repetidasEnArchivo?` · repetidas en el archivo: ${s.repetidasEnArchivo}`:""}</div>`;
+  if(tabla.sinColumnaTipo) h+=`<div class="mut" style="color:#b45309">⚠️ El archivo no trae “Tipo de documento”: se asumió que todo son facturas.</div>`;
+  if(tabla.sinColumnaNit) h+=`<div class="mut" style="color:#b45309">⚠️ El archivo no trae “NIT Emisor”: solo se pudo comparar por CUFE.</div>`;
+  h+=`<h3 style="margin:10px 0 6px">Pendientes por subir <span class="badge ${s.pendientes?"st-pool":"st-sellada"}">${s.pendientes}</span></h3>`;
+  h+=s.pendientes?`<div class="row" style="margin-bottom:6px"><button class="p" onclick="descargarCruceCsv()">⬇ CSV de pendientes (${s.pendientes})</button><span class="mut">Solo las que están en la DIAN y NO en el sistema.</span></div>`+tabla_(r.pendientes,x=>"comparada por "+x.comparadaPor)
+    :`<div class="vacio">No falta ninguna factura por subir. ✅</div>`;
+  if(s.posiblesDuplicados) h+=`<h3 style="margin:14px 0 6px">Posibles duplicados — revisar a mano <span class="badge st-pool">${s.posiblesDuplicados}</span></h3><div class="mut">Mismo NIT y número que una factura del sistema pero con otro CUFE. No se piden para subir.</div>`+tabla_(r.posiblesDuplicados,x=>"en el sistema: "+((x.f&&x.f.cufe)||"").slice(0,10)+"…");
+  if(s.sinDatos) h+=`<h3 style="margin:14px 0 6px">Sin datos para comparar <span class="badge">${s.sinDatos}</span></h3><div class="mut">No traen CUFE ni NIT + número: no se puede decidir si existen.</div>`+tabla_(r.sinDatos,()=>"");
+  if(s.excluidasEstado) h+=`<h3 style="margin:14px 0 6px">No aptas por estado DIAN <span class="badge">${s.excluidasEstado}</span></h3><div class="mut">Anuladas o rechazadas: no se piden para subir.</div>`+tabla_(r.excluidasEstado,x=>x.r.estado);
+  if(s.notas) h+=`<h3 style="margin:14px 0 6px">Notas crédito / débito (aparte) <span class="badge">${s.notas}</span></h3><div class="mut">${r.notas.filter(x=>!x.enSistema).length} no están en el sistema. No se mezclan con las facturas pendientes.</div>`+tabla_(r.notas,x=>(x.r.tipo==="nota_debito"?"nota débito · ":"nota crédito · ")+(x.enSistema?"ya está en el sistema":"NO está en el sistema"),100);
+  if(s.otrosDocumentos) h+=`<div class="mut" style="margin-top:10px">Otros documentos ignorados (eventos, documento soporte, etc.): ${s.otrosDocumentos}.</div>`;
+  p.innerHTML=h;
 }
 // Número de factura: documento o prefijo+folio, SIEMPRE sin separadores (IT081898792). Nunca el CUFE.
 function numeroFactura(f){
@@ -1780,75 +1734,64 @@ async function pedirIngreso(cufe){
   if(f.estado==="sellada"||f.estado==="pagada"){ await generarSellado(cufe, f.recibido_por, f.archivo_recibo); }
   await cargar();
 }
-// ── UN SOLO PDF con TODOS los documentos que ya cerraron el ciclo completo ──
-// Ciclo completo = pedido + recibido + sellado + aprobado + FACTURADO (tiene N° de ingreso ERP).
+// ── CICLO COMPLETO y SELLADAS: un PDF INDIVIDUAL por factura, dentro de un ZIP (18/09/2026) ──
+// Antes el ciclo completo unia TODO en un solo PDF. Ahora cada factura va en su propio PDF,
+// llamado "PREFIJO_NUMERO NOMBRE DEL PROVEEDOR.pdf" (si el nombre se repite: "(2)", "(3)": nunca se pisa).
+// Las fechas son las de "Descargar selladas del ... al ..." (d1/d2) y cuentan por la fecha de
+// SELLADO en hora Colombia. Antes se leian los filtros de arriba y este rango se ignoraba.
+// La logica de fechas y nombres vive en js/banco-utils.js (probada con node).
+function rangoDescarga(){
+  const d1v=$("d1").value, d2v=$("d2").value;
+  return {desde:d1v, hasta:d2v, error:BancoUtils.validarRango(d1v,d2v)};
+}
+async function bajarPdfsEnZip(lista, nombreFn, nombreZip, res){
+  const zip=new JSZip(); const usados=new Set(); let ok=0; const fallidas=[];
+  for(const f of lista){
+    res.textContent="Preparando "+(ok+fallidas.length+1)+" de "+lista.length+"...";
+    let blob=null;
+    try{
+      const {data:sig}=await SB.storage.from("facturas").createSignedUrl(f.archivo_pdf_sellado||f.archivo_pdf,120);
+      if(sig){ const r=await fetch(sig.signedUrl); if(r.ok) blob=await r.blob(); }
+    }catch(e){ console.warn("descarga PDF:",e); }
+    if(!blob){ fallidas.push(nombreFn(f)); continue; }
+    zip.file(BancoUtils.nombreUnico(nombreFn(f),usados), blob); ok++;
+  }
+  if(ok){
+    const out=await zip.generateAsync({type:"blob"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(out); a.download=nombreZip;
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  return {ok,fallidas};
+}
+const etiquetaRango=(desde,hasta)=>(desde||"inicio")+"_a_"+(hasta||BancoUtils.hoyColombia());
+const textoRango=(desde,hasta)=>desde||hasta?(" del "+(desde||"inicio")+" al "+(hasta||"hoy")):"";
+function msgZip(r,extra){
+  return (r.ok?"✅ "+r.ok+" PDF(s) en el ZIP.":"No pude descargar los PDFs.")
+    +(r.fallidas.length?" ⚠️ No se pudieron bajar "+r.fallidas.length+": "+r.fallidas.slice(0,3).join(", ")+(r.fallidas.length>3?"…":""):"")+(extra||"");
+}
 async function descargarCicloCompleto(){
   const res=$("resdesc"); res.textContent="";
-  const fSedeVal=$("fSede").value;
-  const fd=$("fdesde").value, fh=$("fhasta").value;
-  let l=facturas.filter(f=>(f.estado==="sellada"||f.estado==="pagada") && f.num_ingreso && f.archivo_pdf && (!fSedeVal||f.sede_id===Number(fSedeVal)));
-  if(fd) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe>=fd;});
-  if(fh) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe<=fh;});
-  if(!l.length){ res.textContent="Todavía no hay documentos con el ciclo completo (sellados + facturados)."; return; }
-  res.textContent="Cargando lib PDF...";
-  try{
-    if(!window.PDFLib){
-      await new Promise((ok,mal)=>{ const s=document.createElement("script");
-        s.src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js";
-        s.onload=ok; s.onerror=mal; document.head.appendChild(s); });
-    }
-    const out=await PDFLib.PDFDocument.create();
-    let ok=0;
-    for(const f of l){
-      res.textContent="Uniendo "+ok+"/"+l.length+"...";
-      const {data:sig}=await SB.storage.from("facturas").createSignedUrl(f.archivo_pdf_sellado||f.archivo_pdf,120);
-      if(!sig) continue;
-      const r=await fetch(sig.signedUrl); if(!r.ok) continue;
-      const bytes=await r.arrayBuffer();
-      let src; try{ src=await PDFLib.PDFDocument.load(bytes,{ignoreEncryption:true}); }catch(e){ continue; }
-      const paginas=await out.copyPages(src, src.getPageIndices());
-      paginas.forEach(p=>out.addPage(p));
-      ok++;
-    }
-    if(!ok){ res.textContent="No pude leer los PDFs."; return; }
-    res.textContent="Guardando...";
-    const bytes=await out.save();
-    const a=document.createElement("a");
-    a.href=URL.createObjectURL(new Blob([bytes],{type:"application/pdf"}));
-    a.download="ciclo_completo_"+new Date().toISOString().slice(0,10)+".pdf";
-    a.click();
-    res.textContent="✅ "+ok+" documento(s) en un solo PDF (ciclo completo).";
-  }catch(e){ res.textContent="Error: "+e.message; }
+  const g=rangoDescarga(); if(g.error){ res.textContent=g.error; return; }
+  // Ciclo completo = sellada/aprobada + FACTURADA (tiene N° de ingreso ERP) + con PDF
+  const {lista}=BancoUtils.filtrarSelladas(facturas,{desde:g.desde,hasta:g.hasta,sedeId:$("fSede").value,conIngreso:true});
+  if(!lista.length){ res.textContent="No hay documentos con el ciclo completo (sellados y facturados)"+textoRango(g.desde,g.hasta)+"."; return; }
+  const r=await bajarPdfsEnZip(lista,BancoUtils.nombreArchivoCiclo,"ciclo_completo_"+etiquetaRango(g.desde,g.hasta)+".zip",res);
+  res.textContent=msgZip(r," Un PDF por factura.");
 }
 
 async function descargarSelladas(){
   const res=$("resdesc"); res.textContent="";
-  const fSedeVal=$("fSede").value;
-  const fd=$("fdesde").value, fh=$("fhasta").value;
-  let l=facturas.filter(f=>f.estado==="sellada"||f.estado==="pagada");
-  if(fSedeVal) l=l.filter(f=>f.sede_id===Number(fSedeVal));
-  if(fd) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe>=fd;});
-  if(fh) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe<=fh;});
-  l=l.filter(f=>f.archivo_pdf);
-  if(!l.length){res.textContent="No hay selladas en ese rango.";return;}
-  res.textContent="Preparando "+l.length+" PDF(s)...";
-  const zip=new JSZip(); let ok=0;
-  for(const f of l){
-    const {data:sig}=await SB.storage.from("facturas").createSignedUrl(f.archivo_pdf_sellado||f.archivo_pdf,120);
-    if(!sig){continue;}
-    const r=await fetch(sig.signedUrl); if(!r.ok) continue;
-    const blob=await r.blob();
+  const g=rangoDescarga(); if(g.error){ res.textContent=g.error; return; }
+  const {lista,sinFechaSello}=BancoUtils.filtrarSelladas(facturas,{desde:g.desde,hasta:g.hasta,sedeId:$("fSede").value});
+  if(!lista.length){ res.textContent="No hay selladas"+textoRango(g.desde,g.hasta)+"."+(sinFechaSello?" ("+sinFechaSello+" sin fecha de sello)":""); return; }
+  const nombreSellada=f=>{
     const num=((f.prefijo||"")+(f.folio||""))||f.cufe.slice(0,12);
-    const em=(f.emisor||"proveedor").replace(/[^\w\s\-]/g,"").trim().split("\s+").slice(0,3).join("_");
-    zip.file(num+"_"+em+".pdf", blob); ok++;
-  }
-  if(!ok){res.textContent="No pude descargar los PDFs.";return;}
-  const out=await zip.generateAsync({type:"blob"});
-  const a=document.createElement("a");
-  a.href=URL.createObjectURL(out);
-  a.download="facturas_selladas_"+(d1||"inicio")+"_a_"+(d2||"hoy")+".zip";
-  document.body.appendChild(a); a.click(); a.remove();
-  res.textContent="✅ "+ok+" PDF(s) en el ZIP.";
+    const em=(f.emisor||"proveedor").replace(/[^\w\s\-]/g,"").trim().split(/\s+/).slice(0,3).join("_");
+    return num+"_"+em;
+  };
+  const r=await bajarPdfsEnZip(lista,nombreSellada,"facturas_selladas_"+etiquetaRango(g.desde,g.hasta)+".zip",res);
+  res.textContent=msgZip(r);
 }
 async function descargarPendientes(){
   console.log("DEBUG descargarPendientes: facturas totales=",facturas.length,
