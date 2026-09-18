@@ -1409,7 +1409,7 @@ async function enviarADian(){
   const elegidas=c.visible.filter(x=>c.sel.has(x.r.cufe));
   if(!elegidas.length){ alert("Marca al menos una factura con la casilla de la izquierda."); return; }
   const marca=(c.marcas.find(m=>m.id===marcaId)||{}).nombre||marcaId;
-  if(!confirm("Se le pedirá al robot bajar "+elegidas.length+" factura(s) de la DIAN y subirlas al banco de la marca "+marca+".\n\n• El robot abre Chrome en el computador donde corre el vigilante (INICIAR-VIGILANTE.bat debe estar encendido).\n• Tarda unos 40 segundos por factura y trabaja en lotes chicos con pausas para que la DIAN no lo bloquee.\n• Las que ya están en el banco se omiten.\n\n¿Continuar?")) return;
+  if(!confirm("Se le pedirá al robot bajar "+elegidas.length+" factura(s) de la DIAN y subirlas al banco de la marca "+marca+".\n\n• El robot abre Chrome en el computador donde corre el vigilante (INICIAR-VIGILANTE.bat debe estar encendido).\n• Si Chrome muestra la casilla “Verifique que es un ser humano”, MÁRCALA tú (el robot espera hasta 3 minutos; si nadie la marca, la factura vuelve a la cola sin gastar intento).\n• Tarda unos 40 segundos por factura y trabaja en lotes chicos con pausas para que la DIAN no lo bloquee.\n• Las que ya están en el banco se omiten.\n\n¿Continuar?")) return;
   c.enviando=true; const b=$("btnCruceDian"); if(b) b.disabled=true;
   try{
     const items=BancoUtils.itemsParaDescarga(elegidas), tot={encolados:0,ya_en_sistema:0,ya_en_cola:0,invalidos:0};

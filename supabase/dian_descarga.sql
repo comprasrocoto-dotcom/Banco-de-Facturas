@@ -121,3 +121,17 @@ grant execute on function dian_encolar(jsonb,int,text) to authenticated, service
 grant execute on function dian_tomar(int) to service_role;
 grant execute on function dian_resultado(bigint,boolean,text,text) to service_role;
 grant execute on function dian_reintentar(bigint) to authenticated, service_role;
+
+-- Devolver a la cola SIN gastar intento (la DIAN pidio verificacion humana y nadie la marco)  [18/09/2026]
+create or replace function dian_devolver(p_id bigint, p_motivo text default null, p_espera_min int default 30)
+returns void language plpgsql security definer set search_path = public as $fn$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'solo el agente puede devolver descargas'; end if;
+  update dian_descarga
+     set estado = 'pendiente', intentos = greatest(intentos - 1, 0),
+         ultimo_error = left(coalesce(p_motivo, 'devuelta a la cola'), 1500),
+         proximo_intento_en = now() + make_interval(mins => greatest(coalesce(p_espera_min, 30), 0))
+   where id = p_id and estado = 'bajando';
+end $fn$;
+revoke all on function dian_devolver(bigint,text,int) from public, anon, authenticated;
+grant execute on function dian_devolver(bigint,text,int) to service_role;
