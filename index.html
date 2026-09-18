@@ -1330,7 +1330,11 @@ async function cruzarDian(ev){
     if(tabla.error){ res.textContent=tabla.error; return; }
     res.textContent="Leyendo TODAS las facturas del sistema...";
     const sistema=await traerTodasLasFacturas();
-    const r=BancoUtils.cruzarConSistema(tabla.registros,sistema);
+    // Solo cuentan las facturas cuyo RECEPTOR es una de nuestras empresas (NIT base + marcas.nit)
+    let marcasNit=[]; try{ const m=await SB.from("marcas").select("nit"); marcasNit=m.data||[]; }catch(e){}
+    const propios=BancoUtils.nitsPropios(marcasNit);
+    const r=BancoUtils.cruzarConSistema(tabla.registros,sistema,{nitsPropios:propios});
+    r.nitsPropios=propios;
     ultimoCruce=r;
     pintarCruce(r,tabla,sistema.length);
     res.textContent=r.resumen.pendientes?("Cruce listo: "+r.resumen.pendientes+" factura(s) de la DIAN NO están en el sistema."):"Cruce listo: no falta ninguna factura por subir ✅";
@@ -1355,6 +1359,8 @@ function pintarCruce(r,tabla,totalSistema){
     <div class="mut" style="margin:6px 0">DIAN: ${s.enArchivo} documento(s) leídos · sistema: ${totalSistema} facturas (todas) · ya están en el sistema: <b>${s.yaEnSistema}</b>${s.repetidasEnArchivo?` · repetidas en el archivo: ${s.repetidasEnArchivo}`:""}</div>`;
   if(tabla.sinColumnaTipo) h+=`<div class="mut" style="color:#b45309">⚠️ El archivo no trae “Tipo de documento”: se asumió que todo son facturas.</div>`;
   if(tabla.sinColumnaNit) h+=`<div class="mut" style="color:#b45309">⚠️ El archivo no trae “NIT Emisor”: solo se pudo comparar por CUFE.</div>`;
+  if(tabla.sinColumnaReceptor) h+=`<div class="mut" style="color:#b45309">⚠️ El archivo no trae “NIT Receptor”: solo se pudieron apartar las que emite nuestra propia empresa.</div>`;
+  h+=`<div class="mut">Solo cuentan las facturas cuyo <b>receptor</b> es una de nuestras empresas (NIT ${escAg((r.nitsPropios||[]).join(", "))}).</div>`;
   h+=`<h3 style="margin:10px 0 6px">Pendientes por subir <span class="badge ${s.pendientes?"st-pool":"st-sellada"}">${s.pendientes}</span></h3>`;
   h+=s.pendientes?`<div class="row" style="margin-bottom:6px"><button class="p" onclick="descargarCruceCsv()">⬇ CSV de pendientes (${s.pendientes})</button><span class="mut">Solo las que están en la DIAN y NO en el sistema.</span></div>`+tabla_(r.pendientes,x=>"comparada por "+x.comparadaPor)
     :`<div class="vacio">No falta ninguna factura por subir. ✅</div>`;
@@ -1362,6 +1368,9 @@ function pintarCruce(r,tabla,totalSistema){
   if(s.sinDatos) h+=`<h3 style="margin:14px 0 6px">Sin datos para comparar <span class="badge">${s.sinDatos}</span></h3><div class="mut">No traen CUFE ni NIT + número: no se puede decidir si existen.</div>`+tabla_(r.sinDatos,()=>"");
   if(s.excluidasEstado) h+=`<h3 style="margin:14px 0 6px">No aptas por estado DIAN <span class="badge">${s.excluidasEstado}</span></h3><div class="mut">Anuladas o rechazadas: no se piden para subir.</div>`+tabla_(r.excluidasEstado,x=>x.r.estado);
   if(s.notas) h+=`<h3 style="margin:14px 0 6px">Notas crédito / débito (aparte) <span class="badge">${s.notas}</span></h3><div class="mut">${r.notas.filter(x=>!x.enSistema).length} no están en el sistema. No se mezclan con las facturas pendientes.</div>`+tabla_(r.notas,x=>(x.r.tipo==="nota_debito"?"nota débito · ":"nota crédito · ")+(x.enSistema?"ya está en el sistema":"NO está en el sistema"),100);
+  if(s.emitidasPropias) h+=`<div class="mut" style="margin-top:10px">Emitidas por nuestra propia empresa (ventas, no son compras): <b>${s.emitidasPropias}</b>. Se apartaron y no se piden para subir.</div>`;
+  if(s.otraEmpresa){ const porNit={}; r.otraEmpresa.forEach(x=>{const k=x.r.nitReceptor+" "+(x.r.receptor||""); porNit[k]=(porNit[k]||0)+1;});
+    h+=`<div class="mut" style="margin-top:6px;color:#b45309">⚠️ Dirigidas a otro receptor que no es una de nuestras empresas: <b>${s.otraEmpresa}</b> (${escAg(Object.keys(porNit).slice(0,5).map(k=>k.trim()+" ×"+porNit[k]).join(" · "))}). Si alguno de esos NIT es una empresa tuya, dime cuál y lo agrego.</div>`; }
   if(s.otrosDocumentos) h+=`<div class="mut" style="margin-top:10px">Otros documentos ignorados (eventos, documento soporte, etc.): ${s.otrosDocumentos}.</div>`;
   p.innerHTML=h;
 }

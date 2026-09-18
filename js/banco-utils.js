@@ -95,6 +95,15 @@
   const soloDigitos = (s) => String(s == null ? '' : s).replace(/\D/g, '');
   const normAlnum = (s) => String(s == null ? '' : s).toUpperCase().replace(/[^A-Z0-9]/g, '');
   const sinCeros = (s) => { const t = normAlnum(s); return /^\d+$/.test(t) ? t.replace(/^0+(?=\d)/, '') : t; };
+  // NIT de NUESTRAS empresas (los que aparecen como RECEPTOR en las facturas de compra).
+  // facturas.nit_receptor esta vacio en la base, asi que la lista sale de aqui + marcas.nit.
+  const NITS_PROPIOS_BASE = ['900838083' /* Inversiones Rocoto */, '901363438' /* Arrebatao */];
+  function nitsPropios(marcas, extra) {
+    const s = new Set(NITS_PROPIOS_BASE);
+    for (const m of marcas || []) { const n = soloDigitos(m && m.nit); if (n) s.add(n); }
+    for (const n of extra || []) { const d = soloDigitos(n); if (d) s.add(d); }
+    return [...s];
+  }
   const CUFE_MIN = 64;   // un CUFE/CUDE real tiene 96 caracteres; menos de 64 no es confiable
   const cufeValido = (c) => normAlnum(c).length >= CUFE_MIN;
 
@@ -141,6 +150,7 @@
       cufe: idx(/cufe|cude/), folio: idx(/^folio$/), prefijo: idx(/^prefijo$/),
       nit: idx(/nit.*emisor|^nit$/), estado: idx(/^estado$/), emisor: idx(/nombre.*emisor|^emisor$/),
       total: idx(/^total$/), tipo: idx(/^tipo( de)? documento$|^tipo$/), fecha: idx(/fecha.*emisi/),
+      nitReceptor: idx(/nit.*receptor/), receptor: idx(/nombre.*receptor|^receptor$/),
     };
     if (col.cufe < 0 && (col.folio < 0 || col.nit < 0)) {
       return { error: 'No encontre columnas para identificar las facturas (CUFE, o NIT Emisor + Folio) en el archivo de la DIAN.' };
@@ -153,24 +163,28 @@
         cufe: normAlnum(v(cols, col.cufe)), prefijo: normAlnum(v(cols, col.prefijo)), folio: normAlnum(v(cols, col.folio)),
         nit: soloDigitos(v(cols, col.nit)), estado: String(v(cols, col.estado) || '').trim(), emisor: String(v(cols, col.emisor) || '').trim(),
         total: String(v(cols, col.total) || '').trim(), fecha: String(v(cols, col.fecha) || '').trim(), tipoTexto: String(v(cols, col.tipo) || '').trim(),
+        nitReceptor: soloDigitos(v(cols, col.nitReceptor)), receptor: String(v(cols, col.receptor) || '').trim(),
       };
       if (!reg.cufe && !reg.folio) continue;
       reg.tipo = tipoDian(reg.tipoTexto);
       reg.numero = reg.prefijo + reg.folio;
       registros.push(reg);
     }
-    return { registros, columnas: col, sinColumnaTipo: col.tipo < 0, sinColumnaNit: col.nit < 0 };
+    return { registros, columnas: col, sinColumnaTipo: col.tipo < 0, sinColumnaNit: col.nit < 0, sinColumnaReceptor: col.nitReceptor < 0 };
   }
 
   // DIAN vs sistema. facturasSistema: TODAS las filas de la tabla facturas (cufe, nit_emisor, prefijo, folio, documento, tipo).
-  function cruzarConSistema(registros, facturasSistema) {
+  // opciones.nitsPropios: NIT de nuestras empresas. Si viene, SOLO cuentan las filas cuyo RECEPTOR es uno de
+  // ellos (compras). Si nuestra empresa es el EMISOR y el receptor es un cliente = venta nuestra: se aparta.
+  function cruzarConSistema(registros, facturasSistema, opciones) {
+    const propios = new Set(((opciones && opciones.nitsPropios) || []).map(soloDigitos).filter(Boolean));
     const porCufe = new Map(), porClave = new Map();
     for (const f of facturasSistema || []) {
       const c = normAlnum(f.cufe);
       if (c) porCufe.set(c, f);
       for (const k of clavesSistema(f)) { if (!porClave.has(k)) porClave.set(k, []); porClave.get(k).push(f); }
     }
-    const out = { pendientes: [], yaEnSistema: [], posiblesDuplicados: [], notas: [], excluidasEstado: [], otrosDocumentos: [], sinDatos: [], repetidasEnArchivo: 0 };
+    const out = { pendientes: [], yaEnSistema: [], posiblesDuplicados: [], notas: [], excluidasEstado: [], otrosDocumentos: [], sinDatos: [], repetidasEnArchivo: 0, emitidasPropias: [], otraEmpresa: [] };
     const vistos = new Set();
     for (const r0 of registros) {
       // el CUFE se normaliza aqui (mayusculas, solo letras/numeros): no depende de quien lea el archivo
@@ -179,6 +193,13 @@
       const idUnico = cufeValido(r.cufe) ? 'C:' + r.cufe : `N:${r.nit}|${r.prefijo}|${sinCeros(r.folio)}`;
       if (vistos.has(idUnico)) { out.repetidasEnArchivo++; continue; }
       vistos.add(idUnico);
+
+      // ¿es una compra nuestra? Manda el RECEPTOR (no el emisor).
+      if (propios.size && !(r.nitReceptor && propios.has(r.nitReceptor))) {
+        if (propios.has(r.nit)) { out.emitidasPropias.push({ r }); continue; }      // la emitimos nosotros (venta)
+        if (r.nitReceptor) { out.otraEmpresa.push({ r }); continue; }                // va dirigida a otra empresa
+        // sin columna de receptor y el emisor no es nuestro: no hay como saberlo, se sigue con el cruce normal
+      }
 
       const encontrado = () => {
         if (cufeValido(r.cufe) && porCufe.has(r.cufe)) return { f: porCufe.get(r.cufe), via: 'cufe' };
@@ -208,6 +229,7 @@
       enArchivo: registros.length, pendientes: out.pendientes.length, yaEnSistema: out.yaEnSistema.length,
       posiblesDuplicados: out.posiblesDuplicados.length, notas: out.notas.length, excluidasEstado: out.excluidasEstado.length,
       otrosDocumentos: out.otrosDocumentos.length, sinDatos: out.sinDatos.length, repetidasEnArchivo: out.repetidasEnArchivo,
+      emitidasPropias: out.emitidasPropias.length, otraEmpresa: out.otraEmpresa.length,
     };
     return out;
   }
@@ -215,8 +237,8 @@
   // CSV (separado por ; con BOM, como los que ya exporta la pagina)
   function csvPendientes(pendientes) {
     const q = (s) => `"${String(s == null ? '' : s).replace(/"/g, '""')}"`;
-    const filas = ['CUFE;Prefijo;Folio;N. Factura;NIT Emisor;Nombre Emisor;Total;Estado DIAN;Fecha Emision'];   // mismo orden de siempre; la fecha va al final
-    for (const { r } of pendientes) filas.push([r.cufe, r.prefijo, r.folio, r.numero, r.nit, q(r.emisor), q(r.total), q(r.estado), r.fecha].join(';'));
+    const filas = ['CUFE;Prefijo;Folio;N. Factura;NIT Emisor;Nombre Emisor;Total;Estado DIAN;Fecha Emision;NIT Receptor'];   // mismo orden de siempre; la fecha va al final
+    for (const { r } of pendientes) filas.push([r.cufe, r.prefijo, r.folio, r.numero, r.nit, q(r.emisor), q(r.total), q(r.estado), r.fecha, r.nitReceptor || ''].join(';'));
     return '\ufeff' + filas.join('\n') + '\n';
   }
 
@@ -224,6 +246,6 @@
     TZ, fechaColombia, hoyColombia, enRangoFecha, esSellada, filtrarSelladas, validarRango,
     limpiarNombre, partesNumero, nombreArchivoCiclo, nombreUnico,
     normAlnum, soloDigitos, sinCeros, cufeValido, clavesSistema, tipoDian, estadoNoApto,
-    interpretarTablaDian, cruzarConSistema, csvPendientes,
+    interpretarTablaDian, cruzarConSistema, csvPendientes, NITS_PROPIOS_BASE, nitsPropios,
   };
 });
