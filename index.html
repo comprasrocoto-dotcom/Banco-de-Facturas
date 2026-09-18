@@ -139,10 +139,11 @@ tr:hover td{background:#f1f5f9}
         <button class="chip on" id="ad-prov" onclick="setAdmin('prov')">Proveedores</button>
         <button class="chip"    id="ad-art"  onclick="setAdmin('art')">Artículos</button>
         <button class="chip"    id="ad-cat"  onclick="setAdmin('cat')">Qué le compro a cada proveedor</button>
+        <button class="chip"    id="ad-agente" onclick="setAdmin('agente')">🤖 Agente</button>
         <span class="sp"></span>
         <input id="qa" placeholder="🔎 buscar..." style="width:240px;margin:0" oninput="pintarAdmin()">
         <button class="chip" id="btnFiltrosAdm" style="display:none" onclick="toggleFiltros('Adm')">Filtros ▾</button>
-        <button class="p" onclick="adminNuevo()">➕ Nuevo</button>
+        <button class="p" id="btnAdmNuevo" onclick="adminNuevo()">➕ Nuevo</button>
       </div>
       <div id="panelFiltrosAdm" class="row filtros-panel" style="display:flex;margin-bottom:12px">
         <span class="mut">Fecha:</span>
@@ -541,8 +542,9 @@ async function guardarPedido(){
 }
 let adminCargado=false, adminVista="prov", adminProv=[], adminArt=[], adminCat=[];
 function setAdmin(v){ adminVista=v;
-  ["prov","art","cat"].forEach(x=>$("ad-"+x).classList.toggle("on", x==v));
+  ["prov","art","cat","agente"].forEach(x=>$("ad-"+x).classList.toggle("on", x==v));
   $("filtroCat").style.display = (v=="cat")?"flex":"none";
+  $("btnAdmNuevo").style.display = (v=="agente")?"none":"";
   pintarAdmin();
 }
 async function cargarAdmin(){
@@ -558,7 +560,7 @@ async function cargarAdmin(){
 function filtraFechaAdmin(x){
   const fd=$("fadm_desde").value, fh=$("fadm_hasta").value;
   if(!fd&&!fh) return true;
-  const fe=((x.created_at||x.fecha_creacion||"")+"").slice(0,10);
+  const fe=((x.created_at||x.fecha_creacion||x.creado_en||x.ultima_en||"")+"").slice(0,10);
   if(!fe) return true; // sin fecha registrada, no se excluye
   if(fd&&fe<fd) return false;
   if(fh&&fe>fh) return false;
@@ -591,6 +593,8 @@ function pintarAdmin(){
         <span class="sp"></span>
         <button class="s" onclick="amarrarA('${(x.codigo_barras||"").replace(/'/g,"")}')">＋ Amarrar / poner precio</button></div></div>`;
       }).join("") || '<div class="vacio">Sin resultados.</div>';
+  } else if(adminVista==="agente"){
+    pintarAgente(c,q);
   } else {
     const pid=Number($("catProv").value||0);
     if(!pid){ c.innerHTML='<div class="vacio">Elegí un proveedor para ver qué se le compra.</div>'; return; }
@@ -618,6 +622,88 @@ function pintarAdmin(){
         ${k.id?`<button class="d" onclick="quitarDelCatalogo(${k.id})">✕</button>`:""}</div>`;}).join("")
       : '<div class="mut">Este proveedor no tiene compras en el histórico ni artículos en el catálogo todavía.</div>') + '</div>';
   }
+}
+// ══ AGENTE (18/09/2026): unidades por decidir, decisiones del agente y reglas aprendidas ══
+// El agente NO inventa la unidad: si no está seguro pide decisión aquí. Cada corrección se
+// cuenta en la base (función unidad_registrar_correccion) y sube la confianza de la regla.
+const escAg=s=>String(s==null?"":s).replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+const fhAg=d=>d?new Date(d).toLocaleString("es-CO",{timeZone:"America/Bogota",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"";
+const UNIDADES_DECISION=[["KG","Kilo (KG)"],["UND","Unidad / presentación (UND)"],["LB","Libra (LB)"]];
+let ag={cargado:false,cargando:false,rev:[],eventos:[],reglas:[],error:""};
+async function cargarAgente(forzar){
+  if(ag.cargando||(ag.cargado&&!forzar)) return;
+  ag.cargando=true;
+  try{
+    const [r1,r2,r3]=await Promise.all([
+      SB.from("unidad_revision").select("*").eq("estado","pendiente").order("creado_en",{ascending:false}).limit(200),
+      SB.from("unidad_evento").select("*").eq("tipo","decision_agente").order("creado_en",{ascending:false}).limit(60),
+      SB.from("regla_unidad_resumen").select("*").order("ultima_en",{ascending:false}).limit(300)]);
+    const e=r1.error||r2.error||r3.error; ag.error=e?e.message:"";
+    ag.rev=r1.data||[]; ag.eventos=r2.data||[]; ag.reglas=r3.data||[]; ag.cargado=true;
+  }catch(e){ ag.error=e.message; }
+  ag.cargando=false; if(adminVista==="agente") pintarAdmin();
+}
+const optsUnidadAg=sel=>'<option value="">— unidad —</option>'+UNIDADES_DECISION.map(([v,t])=>`<option value="${v}"${v===sel?" selected":""}>${t}</option>`).join("");
+function partesClaveAg(k){ const p=String(k||"").split("|"); return {prov:p[0]||"",producto:p[1]||"",pres:(p[2]&&p[2]!=="-")?p[2]:null}; }
+async function registrarUnidadAg(o){   // o: {clave, desc, provNombre, unidadAgente, unidad, admin, revId}
+  if(!o.unidad){ alert("Elegí la unidad."); return; }
+  const k=partesClaveAg(o.clave);
+  const {error}=await SB.rpc("unidad_registrar_correccion",{
+    p_clave:o.clave, p_prov_nit:/^\d{6,}$/.test(k.prov)?k.prov:null, p_prov_nombre:o.provNombre||null,
+    p_producto_norm:k.producto, p_descripcion:o.desc||null, p_presentacion:k.pres,
+    p_unidad_agente:o.unidadAgente||null, p_unidad_usuario:o.unidad,
+    p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||"admin", p_admin:!!o.admin, p_revision_id:o.revId||null});
+  if(error){ alert("No se pudo guardar: "+error.message); return; }
+  await cargarAgente(true);
+}
+function agDecidirRev(i,admin){ const r=ag.rev[i]; if(!r) return;
+  registrarUnidadAg({clave:r.clave,desc:r.descripcion_original,provNombre:r.proveedor_nombre,unidadAgente:null,unidad:$("agrev_"+i).value,admin,revId:r.id}); }
+function agCorregirEv(i){ const e=ag.eventos[i]; if(!e) return; const d=e.detalle||{};
+  const u=$("agev_"+i).value;
+  if(u&&u===e.unidad_agente&&!confirm("Es la misma unidad que decidió el agente. ¿Registrar como CONFIRMACIÓN?")) return;
+  registrarUnidadAg({clave:e.clave,desc:d.descripcion,provNombre:d.proveedor,unidadAgente:e.unidad_agente,unidad:u,admin:false}); }
+function agConfirmarRegla(i){ const r=ag.reglas[i]; if(!r) return;
+  if(!confirm("Confirmar como regla firme: "+r.producto_norm+" → "+r.unidad+"\n(queda con confianza ALTA)")) return;
+  registrarUnidadAg({clave:r.clave,desc:r.descripcion_original,provNombre:r.proveedor_nombre,unidadAgente:r.unidad,unidad:r.unidad,admin:true}); }
+const badgeNivelAg=n=>`<span class="badge ${n==="alta"?"st-sellada":(n==="media"?"st-asignada":"st-pool")}">confianza ${escAg(n)}</span>`;
+function pintarAgente(c,q){
+  if(!ag.cargado){ c.innerHTML='<div class="vacio">⏳ Cargando lo que aprendió el agente...</div>'; cargarAgente(); return; }
+  const ok=t=>!q||String(t||"").toLowerCase().includes(q);
+  const esAdmin=perfil&&perfil.rol==="admin";
+  let h="";
+  if(ag.error) h+=`<div class="card" style="border-color:#b45309">⚠️ No pude leer todo: ${escAg(ag.error)} <button onclick="cargarAgente(true)">Reintentar</button></div>`;
+  // 1) Pendientes: el agente NO inventó la unidad y espera que una persona decida
+  const rev=ag.rev.map((r,i)=>({r,i})).filter(({r})=>ok(r.descripcion_original+" "+r.proveedor_nombre)&&filtraFechaAdmin(r));
+  h+=`<h3 style="margin:8px 0">Unidades por decidir <span class="badge st-pool">${rev.length}</span></h3><div class="mut" style="margin-bottom:6px">El agente no inventa la unidad: si no está seguro, la línea NO se anexa y queda aquí.</div>`;
+  h+=rev.length?rev.map(({r,i})=>`<div class="card" style="margin:6px 0"><div class="row">
+      <div style="flex:3"><div class="emisor">${escAg(r.descripcion_original)}</div>
+      <div class="mut">${escAg(r.proveedor_nombre||"—")} · ${escAg(r.pedido_numero||"")} · ${fhAg(r.creado_en)}</div>
+      <div class="mut">Motivo: ${escAg(r.motivo)}${r.sugerencia?" · sugerencia: "+escAg(r.sugerencia):""}</div></div>
+      <select id="agrev_${i}" style="width:auto;margin:0">${optsUnidadAg(r.sugerencia)}</select>
+      <button class="s" onclick="agDecidirRev(${i},false)">Decidir</button>
+      ${esAdmin?`<button class="p" title="Queda como regla firme (confianza alta)" onclick="agDecidirRev(${i},true)">Decidir y confirmar</button>`:""}
+    </div></div>`).join(""):'<div class="vacio">Nada pendiente. ✅</div>';
+  // 2) Lo que decidió el agente (para corregirlo si se equivocó)
+  const evs=ag.eventos.map((e,i)=>({e,i})).filter(({e})=>ok(((e.detalle||{}).descripcion||"")+" "+((e.detalle||{}).proveedor||""))&&filtraFechaAdmin(e));
+  h+=`<h3 style="margin:18px 0 8px">Decisiones recientes del agente</h3>`;
+  h+=evs.length?evs.map(({e,i})=>{const d=e.detalle||{}; return `<div class="card" style="margin:6px 0"><div class="row">
+      <div style="flex:3"><div class="emisor">${escAg(d.descripcion||e.clave)}</div>
+      <div class="mut">${escAg(d.proveedor||"—")} · ${escAg(e.pedido_numero||"")} · ${fhAg(e.creado_en)} · decidió <b>${escAg(e.unidad_agente)}</b> por ${escAg(e.fuente)} (${escAg(e.confianza||"—")})${d.requiere_revision?" · ⚠️ requiere revisión":""}</div></div>
+      <select id="agev_${i}" style="width:auto;margin:0">${optsUnidadAg(e.unidad_agente)}</select>
+      <button onclick="agCorregirEv(${i})">Corregir</button></div></div>`;}).join(""):'<div class="vacio">Sin decisiones registradas todavía.</div>';
+  // 3) Reglas aprendidas
+  const rgs=ag.reglas.map((r,i)=>({r,i})).filter(({r})=>ok(r.producto_norm+" "+r.proveedor_nombre+" "+r.unidad)&&filtraFechaAdmin(r))
+    .sort((a,b)=>(Number(b.r.requiere_revision)-Number(a.r.requiere_revision))||0);
+  h+=`<h3 style="margin:18px 0 8px">Reglas aprendidas <span class="badge">${rgs.length}</span></h3><div class="mut" style="margin-bottom:6px">1–2 correcciones = baja · 3–4 = media · 5+ (consistentes) o confirmada por admin = alta.</div>`;
+  h+=rgs.length?rgs.map(({r,i})=>`<div class="card" style="margin:6px 0"><div class="row">
+      <div style="flex:3"><div class="emisor">${escAg(r.producto_norm)}${r.presentacion?" · "+escAg(r.presentacion):""} → <b>${escAg(r.unidad)}</b></div>
+      <div class="mut">${escAg(r.proveedor_nombre||r.proveedor_nit||"—")} · ${r.n} confirmación(es)${r.contradicciones?" · "+r.contradicciones+" en contra":""} · ${fhAg(r.ultima_en)}${r.corregido_por?" · "+escAg(r.corregido_por):""}</div></div>
+      ${badgeNivelAg(r.nivel)}
+      <span class="badge ${r.estado==="contradictoria"?"st-pool":"st-sellada"}">${escAg(r.estado)}</span>
+      ${r.requiere_revision?'<span class="badge st-pool">⚠️ revisar</span>':""}
+      ${esAdmin&&!r.confirmada_admin?`<button class="p" onclick="agConfirmarRegla(${i})">Confirmar</button>`:""}
+    </div></div>`).join(""):'<div class="vacio">Todavía no hay reglas: se crean cuando alguien corrige o decide una unidad.</div>';
+  c.innerHTML=h;
 }
 // Artículos que se le compran a un proveedor (del histórico de compras) + precio editable
 let adminProvArts={};
