@@ -629,17 +629,18 @@ function pintarAdmin(){
 const escAg=s=>String(s==null?"":s).replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
 const fhAg=d=>d?new Date(d).toLocaleString("es-CO",{timeZone:"America/Bogota",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"";
 const UNIDADES_DECISION=[["KG","Kilo (KG)"],["UND","Unidad / presentación (UND)"],["LB","Libra (LB)"]];
-let ag={cargado:false,cargando:false,rev:[],eventos:[],reglas:[],error:""};
+let ag={cargado:false,cargando:false,rev:[],eventos:[],reglas:[],correos:[],error:""};
 async function cargarAgente(forzar){
   if(ag.cargando||(ag.cargado&&!forzar)) return;
   ag.cargando=true;
   try{
-    const [r1,r2,r3]=await Promise.all([
+    const [r1,r2,r3,r4]=await Promise.all([
       SB.from("unidad_revision").select("*").eq("estado","pendiente").order("creado_en",{ascending:false}).limit(200),
       SB.from("unidad_evento").select("*").eq("tipo","decision_agente").order("creado_en",{ascending:false}).limit(60),
-      SB.from("regla_unidad_resumen").select("*").order("ultima_en",{ascending:false}).limit(300)]);
-    const e=r1.error||r2.error||r3.error; ag.error=e?e.message:"";
-    ag.rev=r1.data||[]; ag.eventos=r2.data||[]; ag.reglas=r3.data||[]; ag.cargado=true;
+      SB.from("regla_unidad_resumen").select("*").order("ultima_en",{ascending:false}).limit(300),
+      SB.from("correo_cola").select("*").order("creado_en",{ascending:false}).limit(60)]);
+    const e=r1.error||r2.error||r3.error||r4.error; ag.error=e?e.message:"";
+    ag.rev=r1.data||[]; ag.eventos=r2.data||[]; ag.reglas=r3.data||[]; ag.correos=r4.data||[]; ag.cargado=true;
   }catch(e){ ag.error=e.message; }
   ag.cargando=false; if(adminVista==="agente") pintarAdmin();
 }
@@ -666,6 +667,10 @@ function agConfirmarRegla(i){ const r=ag.reglas[i]; if(!r) return;
   if(!confirm("Confirmar como regla firme: "+r.producto_norm+" → "+r.unidad+"\n(queda con confianza ALTA)")) return;
   registrarUnidadAg({clave:r.clave,desc:r.descripcion_original,provNombre:r.proveedor_nombre,unidadAgente:r.unidad,unidad:r.unidad,admin:true}); }
 const badgeNivelAg=n=>`<span class="badge ${n==="alta"?"st-sellada":(n==="media"?"st-asignada":"st-pool")}">confianza ${escAg(n)}</span>`;
+async function agReintentarCorreo(i){ const m=ag.correos[i]; if(!m) return;
+  const {error}=await SB.rpc("correo_reintentar",{p_id:m.id});
+  if(error){ alert("No se pudo reintentar: "+error.message); return; }
+  await cargarAgente(true); }
 function pintarAgente(c,q){
   if(!ag.cargado){ c.innerHTML='<div class="vacio">⏳ Cargando lo que aprendió el agente...</div>'; cargarAgente(); return; }
   const ok=t=>!q||String(t||"").toLowerCase().includes(q);
@@ -683,6 +688,19 @@ function pintarAgente(c,q){
       <button class="s" onclick="agDecidirRev(${i},false)">Decidir</button>
       ${esAdmin?`<button class="p" title="Queda como regla firme (confianza alta)" onclick="agDecidirRev(${i},true)">Decidir y confirmar</button>`:""}
     </div></div>`).join(""):'<div class="vacio">Nada pendiente. ✅</div>';
+  // 1b) Correos del agente: estado, intentos y último error (se reintentan solos)
+  const cor=ag.correos.map((m,i)=>({m,i})).filter(({m})=>ok(m.asunto+" "+m.destinatario+" "+(m.pedido_numero||""))&&filtraFechaAdmin(m));
+  const malos=cor.filter(({m})=>m.estado==="error"||m.estado==="agotado").length;
+  h+=`<h3 style="margin:18px 0 8px">Correos del agente <span class="badge ${malos?"st-pool":"st-sellada"}">${malos?malos+" con problema":"todo enviado"}</span></h3><div class="mut" style="margin-bottom:6px">Si un correo falla se reintenta solo (a los 2 min, 10 min, 30 min y 2 h). Después de 5 intentos queda “agotado” y lo puedes reintentar aquí.</div>`;
+  h+=cor.length?cor.map(({m,i})=>{const est={enviado:"st-sellada",enviando:"st-asignada",pendiente:"st-asignada",error:"st-pool",agotado:"st-pool"}[m.estado]||"";
+    return `<div class="card" style="margin:6px 0"><div class="row">
+      <div style="flex:3"><div class="emisor">${escAg(m.asunto)}</div>
+      <div class="mut">Para ${escAg(m.destinatario)}${m.pedido_numero?" · "+escAg(m.pedido_numero):""} · creado ${fhAg(m.creado_en)}${m.enviado_en?" · enviado "+fhAg(m.enviado_en):""}</div>
+      <div class="mut">Intentos ${m.intentos}/${m.max_intentos}${m.ultimo_intento_en?" · último intento "+fhAg(m.ultimo_intento_en):""}${(m.estado==="error"&&m.proximo_intento_en)?" · próximo "+fhAg(m.proximo_intento_en):""}</div>
+      ${m.ultimo_error?`<div class="mut" style="color:#b45309">Último error: ${escAg(String(m.ultimo_error).slice(0,300))}</div>`:""}</div>
+      <span class="badge ${est}">${escAg(m.estado)}</span>
+      ${(m.estado==="error"||m.estado==="agotado")?`<button onclick="agReintentarCorreo(${i})">Reintentar ahora</button>`:""}
+    </div></div>`;}).join(""):'<div class="vacio">Todavía no hay correos registrados en la cola.</div>';
   // 2) Lo que decidió el agente (para corregirlo si se equivocó)
   const evs=ag.eventos.map((e,i)=>({e,i})).filter(({e})=>ok(((e.detalle||{}).descripcion||"")+" "+((e.detalle||{}).proveedor||""))&&filtraFechaAdmin(e));
   h+=`<h3 style="margin:18px 0 8px">Decisiones recientes del agente</h3>`;
