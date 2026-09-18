@@ -6,3 +6,14 @@
 _*.py
 *.log
 capturas/
+
+# Reforzado 18/09/2026: este repo es PUBLICO. Nada de esto debe subirse.
+ACCESOS-*.xlsx
+SEDES-Y-CLAVES.txt
+_mails.json
+*.xlsx
+_*.js
+_*.pdf
+MUESTRA_*
+PASOS-SUPABASE.md
+boceto_banco.html
