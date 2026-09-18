@@ -278,6 +278,12 @@
     if (!o.soloProveedoresDelBanco) return pendientes.slice();
     return pendientes.filter((p) => o.nitsBanco && o.nitsBanco.has(soloDigitos(p.r.nit)));
   }
+  // Enlace OFICIAL de la DIAN (el del QR de la factura): abre el buscador con el CUFE ya escrito.
+  // La persona escribe el NIT, marca la verificacion y baja el PDF con su Chrome normal.
+  function urlDian(cufe) {
+    const c = String(cufe == null ? '' : cufe).toLowerCase().replace(/[^0-9a-f]/g, '');
+    return c.length === 96 ? 'https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=' + c : '#';
+  }
   // Lo que se le manda a la cola (la base valida y descarta lo invalido / lo que ya esta en el banco)
   function itemsParaDescarga(pendientes) {
     return pendientes.map(({ r }) => ({
@@ -300,6 +306,6 @@
     limpiarNombre, partesNumero, nombreArchivoCiclo, nombreUnico,
     normAlnum, soloDigitos, sinCeros, cufeValido, clavesSistema, tipoDian, estadoNoApto,
     interpretarTablaDian, cruzarConSistema, csvPendientes, NITS_PROPIOS_BASE, nitsPropios,
-    parseTotalDian, fechaDianIso, nitsConFacturas, filtrarPendientes, itemsParaDescarga,
+    parseTotalDian, fechaDianIso, nitsConFacturas, filtrarPendientes, itemsParaDescarga, urlDian,
   };
 });
