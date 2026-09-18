@@ -234,6 +234,59 @@
     return out;
   }
 
+  // ---------------------------------------------------------------- DESCARGAS DIAN -> BANCO
+  // Total como lo trae el Excel de la DIAN: "133296.3", "1996456", "1.996.456", "1.996,50" -> numero
+  function parseTotalDian(v) {
+    if (v == null) return null;
+    let t = String(v).trim().replace(/[^\d.,-]/g, '');
+    if (!/\d/.test(t)) return null;
+    const puntos = (t.match(/\./g) || []).length, comas = (t.match(/,/g) || []).length;
+    if (puntos && comas) {
+      const dec = t.lastIndexOf('.') > t.lastIndexOf(',') ? '.' : ',';
+      t = t.split(dec === '.' ? ',' : '.').join('').replace(dec, '.');
+    } else if (comas > 1 || puntos > 1) {
+      t = t.replace(/[.,]/g, '');                                   // solo separadores de miles
+    } else if (comas === 1) {
+      const p = t.split(',');
+      t = (p[1].length === 3 && p[0] !== '0' && p[0] !== '') ? p[0] + p[1] : p[0] + '.' + p[1];
+    } else if (puntos === 1) {
+      const p = t.split('.');
+      t = (p[1].length === 3 && p[0] !== '0' && p[0] !== '' && p[0].length <= 3) ? p[0] + p[1] : t;   // "1.996" = mil; "133296.3" = decimal
+    }
+    const n = Number(t);
+    return isFinite(n) ? n : null;
+  }
+  // "18-09-2026" / "18/09/2026" / "2026-09-18" / "2026-09-18T02:59:25" -> "2026-09-18"
+  function fechaDianIso(v) {
+    const s = String(v == null ? '' : v).trim();
+    const pad = (x) => String(x).padStart(2, '0');
+    const ok = (y, m, d) => Number(m) >= 1 && Number(m) <= 12 && Number(d) >= 1 && Number(d) <= 31;
+    let m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+    if (m && ok(m[1], m[2], m[3])) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+    m = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);          // formato Colombia: dia-mes-año
+    if (m && ok(m[3], m[2], m[1])) return `${m[3]}-${pad(m[2])}-${pad(m[1])}`;
+    return null;
+  }
+  // NIT de los proveedores que YA tienen facturas en el banco (para "solo proveedores del banco")
+  function nitsConFacturas(facturasSistema) {
+    const s = new Set();
+    for (const f of facturasSistema || []) { const n = soloDigitos(f && f.nit_emisor); if (n) s.add(n); }
+    return s;
+  }
+  function filtrarPendientes(pendientes, o) {
+    o = o || {};
+    if (!o.soloProveedoresDelBanco) return pendientes.slice();
+    return pendientes.filter((p) => o.nitsBanco && o.nitsBanco.has(soloDigitos(p.r.nit)));
+  }
+  // Lo que se le manda a la cola (la base valida y descarta lo invalido / lo que ya esta en el banco)
+  function itemsParaDescarga(pendientes) {
+    return pendientes.map(({ r }) => ({
+      cufe: String(r.cufe || '').toLowerCase(), nit_emisor: r.nit, nit_receptor: r.nitReceptor || null,
+      prefijo: r.prefijo || null, folio: r.folio || null, documento: r.numero || null, emisor: r.emisor || null,
+      fecha_emision: fechaDianIso(r.fecha), total: parseTotalDian(r.total),
+    }));
+  }
+
   // CSV (separado por ; con BOM, como los que ya exporta la pagina)
   function csvPendientes(pendientes) {
     const q = (s) => `"${String(s == null ? '' : s).replace(/"/g, '""')}"`;
@@ -247,5 +300,6 @@
     limpiarNombre, partesNumero, nombreArchivoCiclo, nombreUnico,
     normAlnum, soloDigitos, sinCeros, cufeValido, clavesSistema, tipoDian, estadoNoApto,
     interpretarTablaDian, cruzarConSistema, csvPendientes, NITS_PROPIOS_BASE, nitsPropios,
+    parseTotalDian, fechaDianIso, nitsConFacturas, filtrarPendientes, itemsParaDescarga,
   };
 });

@@ -630,18 +630,19 @@ function pintarAdmin(){
 const escAg=s=>String(s==null?"":s).replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
 const fhAg=d=>d?new Date(d).toLocaleString("es-CO",{timeZone:"America/Bogota",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"";
 const UNIDADES_DECISION=[["KG","Kilo (KG)"],["UND","Unidad / presentación (UND)"],["LB","Libra (LB)"]];
-let ag={cargado:false,cargando:false,rev:[],eventos:[],reglas:[],correos:[],error:""};
+let ag={cargado:false,cargando:false,rev:[],eventos:[],reglas:[],correos:[],dian:[],error:""};
 async function cargarAgente(forzar){
   if(ag.cargando||(ag.cargado&&!forzar)) return;
   ag.cargando=true;
   try{
-    const [r1,r2,r3,r4]=await Promise.all([
+    const [r1,r2,r3,r4,r5]=await Promise.all([
       SB.from("unidad_revision").select("*").eq("estado","pendiente").order("creado_en",{ascending:false}).limit(200),
       SB.from("unidad_evento").select("*").eq("tipo","decision_agente").order("creado_en",{ascending:false}).limit(60),
       SB.from("regla_unidad_resumen").select("*").order("ultima_en",{ascending:false}).limit(300),
-      SB.from("correo_cola").select("*").order("creado_en",{ascending:false}).limit(60)]);
-    const e=r1.error||r2.error||r3.error||r4.error; ag.error=e?e.message:"";
-    ag.rev=r1.data||[]; ag.eventos=r2.data||[]; ag.reglas=r3.data||[]; ag.correos=r4.data||[]; ag.cargado=true;
+      SB.from("correo_cola").select("*").order("creado_en",{ascending:false}).limit(60),
+      SB.from("dian_descarga").select("*").order("creado_en",{ascending:false}).limit(60)]);
+    const e=r1.error||r2.error||r3.error||r4.error||r5.error; ag.error=e?e.message:"";
+    ag.rev=r1.data||[]; ag.eventos=r2.data||[]; ag.reglas=r3.data||[]; ag.correos=r4.data||[]; ag.dian=r5.data||[]; ag.cargado=true;
   }catch(e){ ag.error=e.message; }
   ag.cargando=false; if(adminVista==="agente") pintarAdmin();
 }
@@ -668,6 +669,10 @@ function agConfirmarRegla(i){ const r=ag.reglas[i]; if(!r) return;
   if(!confirm("Confirmar como regla firme: "+r.producto_norm+" → "+r.unidad+"\n(queda con confianza ALTA)")) return;
   registrarUnidadAg({clave:r.clave,desc:r.descripcion_original,provNombre:r.proveedor_nombre,unidadAgente:r.unidad,unidad:r.unidad,admin:true}); }
 const badgeNivelAg=n=>`<span class="badge ${n==="alta"?"st-sellada":(n==="media"?"st-asignada":"st-pool")}">confianza ${escAg(n)}</span>`;
+async function agReintentarDian(i){ const m=ag.dian[i]; if(!m) return;
+  const {error}=await SB.rpc("dian_reintentar",{p_id:m.id});
+  if(error){ alert("No se pudo reintentar: "+error.message); return; }
+  await cargarAgente(true); }
 async function agReintentarCorreo(i){ const m=ag.correos[i]; if(!m) return;
   const {error}=await SB.rpc("correo_reintentar",{p_id:m.id});
   if(error){ alert("No se pudo reintentar: "+error.message); return; }
@@ -702,6 +707,19 @@ function pintarAgente(c,q){
       <span class="badge ${est}">${escAg(m.estado)}</span>
       ${(m.estado==="error"||m.estado==="agotado")?`<button onclick="agReintentarCorreo(${i})">Reintentar ahora</button>`:""}
     </div></div>`;}).join(""):'<div class="vacio">Todavía no hay correos registrados en la cola.</div>';
+  // 1c) Descargas de la DIAN: facturas que el robot baja de la DIAN y sube al banco
+  const dn=ag.dian.map((m,i)=>({m,i})).filter(({m})=>ok((m.documento||"")+" "+(m.emisor||"")+" "+(m.nit_emisor||""))&&filtraFechaAdmin(m));
+  const dMalas=dn.filter(({m})=>m.estado==="error"||m.estado==="agotado").length, dEnCurso=dn.filter(({m})=>m.estado==="pendiente"||m.estado==="bajando").length;
+  h+=`<h3 style="margin:18px 0 8px">Descargas de la DIAN <span class="badge ${dMalas?"st-pool":(dEnCurso?"st-asignada":"st-sellada")}">${dMalas?dMalas+" con problema":(dEnCurso?dEnCurso+" en curso":"todo al día")}</span></h3><div class="mut" style="margin-bottom:6px">Las que marcas en el cruce (DIAN: Subir cruce). El robot las baja de a poco y las sube al banco como “Sin asignar”. Si una falla se reintenta sola (a los 15 min y a la hora); después de 3 intentos queda “agotado”.</div>`;
+  h+=dn.length?dn.map(({m,i})=>{const est={subida:"st-sellada",bajando:"st-asignada",pendiente:"st-asignada",error:"st-pool",agotado:"st-pool"}[m.estado]||"";
+    return `<div class="card" style="margin:6px 0"><div class="row">
+      <div style="flex:3"><div class="emisor">${escAg(m.documento||String(m.cufe||"").slice(0,12))} · ${escAg(m.emisor||"—")}</div>
+      <div class="mut">NIT ${escAg(m.nit_emisor)} · ${m.total!=null?money(m.total):""} · pedida ${fhAg(m.creado_en)}${m.pedido_por?" por "+escAg(m.pedido_por):""}${m.subida_en?" · subida "+fhAg(m.subida_en):""}</div>
+      <div class="mut">Intentos ${m.intentos}/${m.max_intentos}${m.ultimo_intento_en?" · último intento "+fhAg(m.ultimo_intento_en):""}${(m.estado==="error"&&m.proximo_intento_en)?" · próximo "+fhAg(m.proximo_intento_en):""}</div>
+      ${m.ultimo_error?`<div class="mut" style="color:#b45309">Último error: ${escAg(String(m.ultimo_error).slice(0,300))}</div>`:""}</div>
+      <span class="badge ${est}">${escAg(m.estado)}</span>
+      ${(m.estado==="error"||m.estado==="agotado")?`<button onclick="agReintentarDian(${i})">Reintentar ahora</button>`:""}
+    </div></div>`;}).join(""):'<div class="vacio">Todavía no has pedido ninguna descarga.</div>';
   // 2) Lo que decidió el agente (para corregirlo si se equivocó)
   const evs=ag.eventos.map((e,i)=>({e,i})).filter(({e})=>ok(((e.detalle||{}).descripcion||"")+" "+((e.detalle||{}).proveedor||""))&&filtraFechaAdmin(e));
   h+=`<h3 style="margin:18px 0 8px">Decisiones recientes del agente</h3>`;
@@ -1308,6 +1326,7 @@ async function traerTodasLasFacturas(){
   return out;
 }
 let ultimoCruce=null;
+let cr=null;   // estado del panel del cruce: casillas marcadas, filtro, marca elegida y avance de las descargas
 async function cruzarDian(ev){
   const res=$("resDian");
   const file=ev.target.files[0];
@@ -1331,24 +1350,97 @@ async function cruzarDian(ev){
     res.textContent="Leyendo TODAS las facturas del sistema...";
     const sistema=await traerTodasLasFacturas();
     // Solo cuentan las facturas cuyo RECEPTOR es una de nuestras empresas (NIT base + marcas.nit)
-    let marcasNit=[]; try{ const m=await SB.from("marcas").select("nit"); marcasNit=m.data||[]; }catch(e){}
-    const propios=BancoUtils.nitsPropios(marcasNit);
+    let marcasDb=[]; try{ const m=await SB.from("marcas").select("id,nombre,nit"); marcasDb=m.data||[]; }catch(e){}
+    const propios=BancoUtils.nitsPropios(marcasDb);
     const r=BancoUtils.cruzarConSistema(tabla.registros,sistema,{nitsPropios:propios});
     r.nitsPropios=propios;
     ultimoCruce=r;
+    if(cr&&cr.timer) clearInterval(cr.timer);
+    cr={r,tabla,total:sistema.length,marcas:marcasDb,nitsBanco:BancoUtils.nitsConFacturas(sistema),soloBanco:true,sel:new Set(),visible:[],marca:"",timer:null,cufesCola:[],progresoTxt:"",enviando:false};
     pintarCruce(r,tabla,sistema.length);
     res.textContent=r.resumen.pendientes?("Cruce listo: "+r.resumen.pendientes+" factura(s) de la DIAN NO están en el sistema."):"Cruce listo: no falta ninguna factura por subir ✅";
   }catch(e){
     res.textContent="Error: "+e.message;
   }finally{ ev.target.value=""; }   // permite volver a subir el mismo archivo
 }
-function cerrarCruce(){ const p=$("panelCruce"); if(p) p.remove(); }
+function cerrarCruce(){ if(cr&&cr.timer){ clearInterval(cr.timer); cr.timer=null; } const p=$("panelCruce"); if(p) p.remove(); }
 function descargarCruceCsv(){
   if(!ultimoCruce||!ultimoCruce.pendientes.length) return;
   const blob=new Blob([BancoUtils.csvPendientes(ultimoCruce.pendientes)],{type:"text/csv;charset=utf-8"});
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
   a.download="faltan_subir_web_"+BancoUtils.hoyColombia()+".csv";
   document.body.appendChild(a); a.click(); a.remove();
+}
+// ── Bajar de la DIAN y subir al banco (18/09/2026) ──
+// Marcas las facturas pendientes y eliges la marca; quedan en la cola (tabla dian_descarga) y el ROBOT
+// del computador las baja de la DIAN de a poco (lotes chicos, con pausas) y las sube al banco como
+// "Sin asignar", igual que cuando subes un PDF a mano. Desde la página no se puede bajar directo:
+// la DIAN exige verificación humana y bloquea consultas repetidas.
+function pintarPendCruce(){
+  const c=cr, cont=$("crucePend"); if(!c||!cont) return;
+  c.visible=BancoUtils.filtrarPendientes(c.r.pendientes,{soloProveedoresDelBanco:c.soloBanco,nitsBanco:c.nitsBanco});
+  const vis=new Set(c.visible.map(x=>x.r.cufe)); [...c.sel].forEach(k=>{ if(!vis.has(k)) c.sel.delete(k); });
+  const ocultas=c.r.pendientes.length-c.visible.length;
+  const opMarcas='<option value="">— elige la marca —</option>'+c.marcas.map(m=>`<option value="${m.id}"${String(m.id)===String(c.marca)?" selected":""}>${escAg(m.nombre)}</option>`).join("");
+  let h=`<div class="row" style="margin-bottom:6px"><button onclick="descargarCruceCsv()">⬇ CSV de pendientes (${c.r.pendientes.length})</button><span class="mut">Solo las que están en la DIAN y NO en el sistema.</span></div>
+    <div class="card" style="background:#f8fafc;margin:6px 0">
+      <div class="row" style="gap:10px"><label class="mut" style="display:flex;align-items:center;gap:8px"><input type="checkbox" style="width:auto;margin:0" ${c.soloBanco?"checked":""} onchange="cruceSoloBanco(this.checked)"> Solo proveedores que ya tienen facturas en el banco${ocultas?` (se ocultan ${ocultas})`:""}</label>
+        <span class="sp"></span><button onclick="cruceSelTodas(true)">Marcar todas (${c.visible.length})</button><button onclick="cruceSelTodas(false)">Ninguna</button></div>
+      <div class="row" style="gap:10px;margin-top:8px"><span class="mut">Subir al banco como marca:</span>
+        <select id="cruceMarca" style="width:auto;margin:0" onchange="cr.marca=this.value">${opMarcas}</select>
+        <button class="p" id="btnCruceDian" onclick="enviarADian()">⬇ Bajar de la DIAN y subir al banco (${c.sel.size})</button></div>
+      <div class="mut" id="cruceProgreso" style="margin-top:6px;white-space:pre-line">${escAg(c.progresoTxt||"")}</div>
+    </div>`;
+  h+=c.visible.length?`<table><thead><tr><th></th><th>N° factura</th><th>Proveedor</th><th>NIT</th><th>Fecha</th><th class="num">Total</th><th></th></tr></thead><tbody>${c.visible.slice(0,300).map((x,i)=>`<tr><td><input type="checkbox" style="width:auto;margin:0" ${c.sel.has(x.r.cufe)?"checked":""} onchange="cruceSel(${i},this.checked)"></td><td><b>${escAg(x.r.numero||"—")}</b></td><td>${escAg(x.r.emisor||"—")}</td><td>${escAg(x.r.nit||"—")}</td><td>${escAg(x.r.fecha||"")}</td><td class="num">${escAg(x.r.total||"")}</td><td class="mut">comparada por ${escAg(x.comparadaPor)}</td></tr>`).join("")}</tbody></table>${c.visible.length>300?`<div class="mut">… y ${c.visible.length-300} más (“Marcar todas” también las incluye; todas están en el CSV).</div>`:""}`
+    :`<div class="vacio">Con ese filtro no queda ninguna. Desmarca “Solo proveedores que ya tienen facturas en el banco” para verlas todas.</div>`;
+  cont.innerHTML=h;
+}
+function cruceSoloBanco(v){ if(!cr) return; cr.soloBanco=!!v; pintarPendCruce(); }
+function cruceSelTodas(v){ if(!cr) return; cr.visible.forEach(x=>{ if(v) cr.sel.add(x.r.cufe); else cr.sel.delete(x.r.cufe); }); pintarPendCruce(); }
+function cruceSel(i,v){
+  const x=cr&&cr.visible[i]; if(!x) return;
+  if(v) cr.sel.add(x.r.cufe); else cr.sel.delete(x.r.cufe);
+  const b=$("btnCruceDian"); if(b) b.textContent="⬇ Bajar de la DIAN y subir al banco ("+cr.sel.size+")";
+}
+async function enviarADian(){
+  const c=cr; if(!c||c.enviando) return;
+  const marcaId=Number($("cruceMarca").value||c.marca||0);
+  if(!marcaId){ alert("Elige primero la marca a la que se suben estas facturas (cada Excel de la DIAN es de una sola empresa)."); return; }
+  const elegidas=c.visible.filter(x=>c.sel.has(x.r.cufe));
+  if(!elegidas.length){ alert("Marca al menos una factura con la casilla de la izquierda."); return; }
+  const marca=(c.marcas.find(m=>m.id===marcaId)||{}).nombre||marcaId;
+  if(!confirm("Se le pedirá al robot bajar "+elegidas.length+" factura(s) de la DIAN y subirlas al banco de la marca "+marca+".\n\n• El robot abre Chrome en el computador donde corre el vigilante (INICIAR-VIGILANTE.bat debe estar encendido).\n• Tarda unos 40 segundos por factura y trabaja en lotes chicos con pausas para que la DIAN no lo bloquee.\n• Las que ya están en el banco se omiten.\n\n¿Continuar?")) return;
+  c.enviando=true; const b=$("btnCruceDian"); if(b) b.disabled=true;
+  try{
+    const items=BancoUtils.itemsParaDescarga(elegidas), tot={encolados:0,ya_en_sistema:0,ya_en_cola:0,invalidos:0};
+    for(let i=0;i<items.length;i+=200){
+      const {data,error}=await SB.rpc("dian_encolar",{p_items:items.slice(i,i+200),p_marca:marcaId,p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||"admin"});
+      if(error) throw new Error(error.message);
+      const d=Array.isArray(data)?data[0]:data; if(d) Object.keys(tot).forEach(k=>tot[k]+=Number(d[k]||0));
+    }
+    c.cufesCola=items.map(x=>x.cufe);
+    c.resumenEnvio="Encoladas "+tot.encolados+" para el robot"+(tot.ya_en_sistema?" · "+tot.ya_en_sistema+" ya estaban en el banco":"")+(tot.ya_en_cola?" · "+tot.ya_en_cola+" ya estaban en la cola":"")+(tot.invalidos?" · "+tot.invalidos+" inválidas (sin CUFE o NIT)":"")+". El robot las baja en lotes; esto se actualiza solo.";
+    c.progresoTxt=c.resumenEnvio; const el=$("cruceProgreso"); if(el) el.textContent=c.progresoTxt;
+    if(c.timer) clearInterval(c.timer);
+    c.timer=setInterval(()=>{ cruceRefrescarProgreso().catch(e=>console.warn("progreso DIAN:",e)); },10000);
+    await cruceRefrescarProgreso();
+  }catch(e){ alert("No se pudo encolar: "+e.message); }
+  finally{ c.enviando=false; const b2=$("btnCruceDian"); if(b2) b2.disabled=false; }
+}
+async function cruceRefrescarProgreso(){
+  const c=cr; if(!c||!c.cufesCola.length) return;
+  const n={pendiente:0,bajando:0,subida:0,error:0,agotado:0};
+  for(let i=0;i<c.cufesCola.length;i+=100){
+    const {data}=await SB.from("dian_descarga").select("cufe,estado").in("cufe",c.cufesCola.slice(i,i+100));
+    (data||[]).forEach(x=>{ n[x.estado]=(n[x.estado]||0)+1; });
+  }
+  let t="Avance en la DIAN: "+n.subida+" subida(s) · "+n.bajando+" bajando · "+n.pendiente+" en espera · "+n.error+" con error (reintenta solo) · "+n.agotado+" agotada(s).";
+  if(!(n.pendiente+n.bajando+n.error)){
+    if(c.timer){ clearInterval(c.timer); c.timer=null; }
+    t+=n.subida?" ✅ Terminado: las subidas ya están en “Sin asignar”.":" Terminado.";
+    await cargar();
+  }
+  c.progresoTxt=(c.resumenEnvio?c.resumenEnvio+"\n":"")+t; const el=$("cruceProgreso"); if(el) el.textContent=c.progresoTxt;
 }
 function pintarCruce(r,tabla,totalSistema){
   let p=$("panelCruce");
@@ -1362,8 +1454,7 @@ function pintarCruce(r,tabla,totalSistema){
   if(tabla.sinColumnaReceptor) h+=`<div class="mut" style="color:#b45309">⚠️ El archivo no trae “NIT Receptor”: solo se pudieron apartar las que emite nuestra propia empresa.</div>`;
   h+=`<div class="mut">Solo cuentan las facturas cuyo <b>receptor</b> es una de nuestras empresas (NIT ${escAg((r.nitsPropios||[]).join(", "))}).</div>`;
   h+=`<h3 style="margin:10px 0 6px">Pendientes por subir <span class="badge ${s.pendientes?"st-pool":"st-sellada"}">${s.pendientes}</span></h3>`;
-  h+=s.pendientes?`<div class="row" style="margin-bottom:6px"><button class="p" onclick="descargarCruceCsv()">⬇ CSV de pendientes (${s.pendientes})</button><span class="mut">Solo las que están en la DIAN y NO en el sistema.</span></div>`+tabla_(r.pendientes,x=>"comparada por "+x.comparadaPor)
-    :`<div class="vacio">No falta ninguna factura por subir. ✅</div>`;
+  h+=s.pendientes?`<div id="crucePend"></div>`:`<div class="vacio">No falta ninguna factura por subir. ✅</div>`;
   if(s.posiblesDuplicados) h+=`<h3 style="margin:14px 0 6px">Posibles duplicados — revisar a mano <span class="badge st-pool">${s.posiblesDuplicados}</span></h3><div class="mut">Mismo NIT y número que una factura del sistema pero con otro CUFE. No se piden para subir.</div>`+tabla_(r.posiblesDuplicados,x=>"en el sistema: "+((x.f&&x.f.cufe)||"").slice(0,10)+"…");
   if(s.sinDatos) h+=`<h3 style="margin:14px 0 6px">Sin datos para comparar <span class="badge">${s.sinDatos}</span></h3><div class="mut">No traen CUFE ni NIT + número: no se puede decidir si existen.</div>`+tabla_(r.sinDatos,()=>"");
   if(s.excluidasEstado) h+=`<h3 style="margin:14px 0 6px">No aptas por estado DIAN <span class="badge">${s.excluidasEstado}</span></h3><div class="mut">Anuladas o rechazadas: no se piden para subir.</div>`+tabla_(r.excluidasEstado,x=>x.r.estado);
@@ -1373,6 +1464,7 @@ function pintarCruce(r,tabla,totalSistema){
     h+=`<div class="mut" style="margin-top:6px;color:#b45309">⚠️ Dirigidas a otro receptor que no es una de nuestras empresas: <b>${s.otraEmpresa}</b> (${escAg(Object.keys(porNit).slice(0,5).map(k=>k.trim()+" ×"+porNit[k]).join(" · "))}). Si alguno de esos NIT es una empresa tuya, dime cuál y lo agrego.</div>`; }
   if(s.otrosDocumentos) h+=`<div class="mut" style="margin-top:10px">Otros documentos ignorados (eventos, documento soporte, etc.): ${s.otrosDocumentos}.</div>`;
   p.innerHTML=h;
+  if(s.pendientes) pintarPendCruce();
 }
 // Número de factura: documento o prefijo+folio, SIEMPRE sin separadores (IT081898792). Nunca el CUFE.
 function numeroFactura(f){
