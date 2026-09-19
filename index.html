@@ -207,6 +207,7 @@ tr:hover td{background:#f1f5f9}
 </div></div>
 
 <script src="js/banco-utils.js"></script>
+<script src="js/pdf-clave.js"></script>
 <script src="js/conciliacion.js"></script>
 <script src="js/conciliacion-ui.js"></script>
 <script>
@@ -1358,6 +1359,7 @@ async function cruzarDian(ev){
     // Solo cuentan las facturas cuyo RECEPTOR es una de nuestras empresas (NIT base + marcas.nit)
     let marcasDb=[]; try{ const m=await SB.from("marcas").select("id,nombre,nit"); marcasDb=m.data||[]; }catch(e){}
     const propios=BancoUtils.nitsPropios(marcasDb);
+    if(!propios.length){ res.textContent="No pude leer los NIT de las marcas (tabla marcas, columna nit): sin ellos no se distingue una compra de una venta. Revisa que cada marca tenga su NIT."; return; }
     const r=BancoUtils.cruzarConSistema(tabla.registros,sistema,{nitsPropios:propios});
     // Proveedores que compras NO maneja (lista en la base; se administra desde SUBIR FACTURAS > "Proveedores que no manejo")
     try{ if(typeof Conciliacion!=="undefined"){ const ex=await SB.from("proveedor_excluido").select("id,nombre,nit").eq("activo",true); if(ex.error) throw new Error(ex.error.message); Conciliacion.apartarExcluidosCruce(r,ex.data||[]); } }

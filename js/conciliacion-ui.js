@@ -106,6 +106,7 @@ async function concEjecutar(o) {
   conc.ocupado = true; conc.msg = 'Leyendo la web, los pedidos y el reporte del ERP...'; concPintar();
   try {
     const f = await concCargarFuentes();
+    if (!BancoUtils.nitsPropios(f.marcas).length) throw new Error('las marcas no tienen NIT en la base (tabla marcas, columna nit): sin ellos no se distingue una compra de una venta.');
     conc.fuentes = f.fuentes; conc.marcas = f.marcas; conc.nFacturas = f.nFacturas; conc.nPedidos = f.nPedidos; conc.errores = f.fuentes.errores;
     conc.erpInfo = f.fuentes.erp ? { desde: f.fuentes.erp.desde, hasta: f.fuentes.erp.hasta, cargadoEn: f.fuentes.erp.cargadoEn, total: f.fuentes.erp.docs.length, archivo: f.fuentes.erp.archivo } : null;
     concRecalcular();
@@ -322,6 +323,7 @@ async function concRefrescarCarga() {
       else if (x.estado === 'error' || x.estado === 'agotado') { it.estado = 'ERROR'; it.detalle = (x.ultimo_error || 'error al subir el PDF').slice(0, 300); }
     }
   }
+  await concCargarPasos(c);
   const pendientes = c.items.some((it) => ['EN_PROCESO', 'ESPERANDO_PDF', 'SUBIENDO_PDF'].includes(it.estado) || (it.estado === 'PENDIENTE' && !c.detenida));
   if (!pendientes && c.fase !== 'fin') {
     c.fase = 'fin'; concDetenerTimer();
@@ -332,6 +334,29 @@ async function concRefrescarCarga() {
     return;
   }
   concPintar();
+}
+// Paso a paso de cada PDF (descargada, marca, desbloqueado, validado, subido) a partir del registro pdf_proceso que escribe el robot
+async function concCargarPasos(c) {
+  if (typeof PdfClave === 'undefined') return;
+  const con = c.items.filter((it) => ['ESPERANDO_PDF', 'SUBIENDO_PDF', 'PDF_SUBIDO', 'ERROR'].includes(it.estado));
+  for (let i = 0; i < con.length; i += 100) {
+    const lote = con.slice(i, i + 100);
+    try {
+      const r = await SB.from('pdf_proceso').select('cufe,etapa,marca,codigo_error,error,nit_enmascarado,creado_en').in('cufe', lote.map((it) => it.fila.cufe)).order('id', { ascending: true });
+      if (r.error) return;
+      const por = {}; (r.data || []).forEach((e) => { (por[e.cufe] = por[e.cufe] || []).push(e); });
+      for (const it of lote) it.pasos = por[it.fila.cufe] ? PdfClave.pasosDesdeEventos(por[it.fila.cufe]) : null;
+    } catch (e) { return; }
+  }
+}
+function concPasosHtml(it) {
+  const p = it.pasos; if (!p) return '';
+  const ico = { ok: '✓', error: '✕', aviso: '⚠', pendiente: '○' }, col = { ok: '#166534', error: '#991b1b', aviso: '#b45309', pendiente: '#94a3b8' };
+  let h = '<div style="margin-top:3px;line-height:1.5;font-size:12.5px">' + p.pasos.map((s) => `<div style="color:${col[s.estado]}">${ico[s.estado]} ${escAg(s.texto)}</div>`).join('') + '</div>';
+  const e = p.error;
+  if (e && e.etapa === 'ERROR DESBLOQUEANDO') h += `<div class="mut" style="margin-top:4px"><b>ERROR — PDF NO DESBLOQUEADO</b><br>${it.fila.tipo === 'nota_credito' ? 'Nota crédito' : 'Factura'}: ${escAg(it.fila.documento)} · Marca: ${escAg(e.marca || 'sin identificar')}${e.nit_enmascarado ? ' · NIT utilizado: ' + escAg(e.nit_enmascarado) : ''}<br>Resultado: ${escAg(PdfClave.MENSAJE_ERROR[e.codigo_error] || e.codigo_error || 'error')}</div>`;
+  else if (e && e.etapa === 'ERROR SUBIENDO') h += `<div class="mut" style="margin-top:4px"><b>ERROR — no se pudo subir el PDF</b> (ya desbloqueado): ${escAg(String(e.error || '').slice(0, 160))}</div>`;
+  return h;
 }
 async function concReintentar() {
   const c = conc.carga; if (!c) return;
@@ -345,7 +370,8 @@ async function concReintentar() {
 function concMsg() { const el = $('concMsg'); if (el) el.textContent = conc.msg || ''; }
 function concFilasDeTab(tab) {
   const fs = conc.res ? conc.res.filas : [], R = Conciliacion.RESULTADO;
-  if (tab === 'factura') return fs.filter((f) => f.tipo === 'factura' && f.resultado === R.PENDIENTE);
+  if (tab === 'factura') return fs.filter((f) => f.tipo === 'factura' && f.resultado === R.PENDIENTE && f.falta_pdf);          // lo que hay que SUBIR (coincide con el boton)
+  if (tab === 'sin_erp') return fs.filter((f) => f.tipo === 'factura' && f.resultado === R.PENDIENTE && !f.falta_pdf);         // ya tiene PDF en la web, falta ingresarla al ERP
   if (tab === 'nota_credito') return fs.filter((f) => f.tipo === 'nota_credito' && f.resultado === R.PENDIENTE);
   if (tab === 'revisar') return fs.filter((f) => [R.REVISAR, R.DUPLICADA, R.ERROR].includes(f.resultado));
   if (tab === 'ingresadas') return fs.filter((f) => f.resultado === R.INGRESADA);
@@ -432,7 +458,7 @@ function concPintarCarga() {
     h += `<div style="background:#e2e8f0;border-radius:99px;height:10px;margin:8px 0;overflow:hidden"><div style="background:#166534;height:10px;width:${pct}%"></div></div>`;
     const errores = cuenta('ERROR');
     h += `<div class="mut" style="margin-bottom:6px">${cuenta('PDF_SUBIDO')} cargadas · ${cuenta('OMITIDA')} ya existían · ${errores} con error${cuenta('ESPERANDO_PDF', 'SUBIENDO_PDF') ? ' · ' + cuenta('ESPERANDO_PDF', 'SUBIENDO_PDF') + ' esperando el PDF' : ''}${cuenta('PENDIENTE') ? ' · ' + cuenta('PENDIENTE') + ' sin procesar' : ''}</div>`;
-    h += c.items.map((it) => `<div class="row" style="border-bottom:1px solid var(--line);padding:5px 0;gap:8px"><div style="flex:3"><b>${escAg(it.fila.documento)}</b> · ${escAg(it.fila.proveedor)}<div class="mut">${escAg(it.detalle || '')}</div></div>${est(it)}${it.estado === 'ESPERANDO_PDF' ? `<button title="Copiar el NIT" onclick="copiarTexto('${escAg(it.fila.nit)}',this)">📋 NIT</button><a href="${escAg(BancoUtils.urlDian(it.fila.cufe))}" target="_blank" rel="noopener noreferrer"><button class="s">Abrir en DIAN ↗</button></a>` : ''}</div>`).join('');
+    h += c.items.map((it) => `<div class="row" style="border-bottom:1px solid var(--line);padding:5px 0;gap:8px"><div style="flex:3"><b>${escAg(it.fila.documento)}</b> · ${escAg(it.fila.proveedor)}<div class="mut">${escAg(it.pasos && it.pasos.error ? '' : (it.detalle || ''))}</div>${concPasosHtml(it)}</div>${est(it)}${it.estado === 'ESPERANDO_PDF' ? `<button title="Copiar el NIT" onclick="copiarTexto('${escAg(it.fila.nit)}',this)">📋 NIT</button><a href="${escAg(BancoUtils.urlDian(it.fila.cufe))}" target="_blank" rel="noopener noreferrer"><button class="s">Abrir en DIAN ↗</button></a>` : ''}</div>`).join('');
     h += `<div class="row" style="gap:8px;margin-top:8px">${c.fase === 'procesando' ? '<button onclick="concCancelar()">Detener</button>' : `<button onclick="concCancelar()">Cerrar</button>`}${(errores || (c.detenida && cuenta('PENDIENTE'))) && c.fase !== 'procesando' ? `<button class="p" onclick="concReintentar()">↻ ${c.detenida && cuenta('PENDIENTE') ? 'Continuar y reintentar' : 'Reintentar los ' + errores + ' con error'}</button>` : ''}</div>`;
   }
   return h + '</div>';
@@ -459,7 +485,7 @@ function concPintar() {
   }
   h += concPintarCarga();
   if (res) {
-    const tabs = [['factura', 'Facturas pendientes'], ['nota_credito', 'Notas crédito pendientes'], ['revisar', 'Por revisar'], ['ingresadas', 'Ingresadas'], ['otras', 'Apartados y otros']];
+    const tabs = [['factura', 'Facturas pendientes'], ['sin_erp', 'En la web, sin ingresar al ERP'], ['nota_credito', 'Notas crédito pendientes'], ['revisar', 'Por revisar'], ['ingresadas', 'Ingresadas'], ['otras', 'Apartados y otros']];
     h += `<div class="row" style="margin:10px 0;gap:6px">${tabs.map(([k, t]) => `<button class="chip ${conc.tab === k ? 'on' : ''}" onclick="concCambiarTab('${k}')">${t} (${concFilasDeTab(k).length})</button>`).join('')}</div>`;
     const lista = concFilasDeTab(conc.tab); conc.vista = lista.slice(0, 300);
     h += lista.length ? `<table><thead><tr><th>Documento</th><th>Proveedor</th><th>Fecha</th><th class="num">Total</th><th>DIAN</th><th>Web</th><th>ERP</th><th>Resultado</th><th></th></tr></thead><tbody>${conc.vista.map((f, i) => concFila(f, i)).join('')}</tbody></table>${lista.length > 300 ? `<div class="mut">… y ${lista.length - 300} más (todas van en el CSV).</div>` : ''}` : '<div class="vacio">Nada en esta lista. ✅</div>';

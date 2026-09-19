@@ -95,11 +95,10 @@
   const soloDigitos = (s) => String(s == null ? '' : s).replace(/\D/g, '');
   const normAlnum = (s) => String(s == null ? '' : s).toUpperCase().replace(/[^A-Z0-9]/g, '');
   const sinCeros = (s) => { const t = normAlnum(s); return /^\d+$/.test(t) ? t.replace(/^0+(?=\d)/, '') : t; };
-  // NIT de NUESTRAS empresas (los que aparecen como RECEPTOR en las facturas de compra).
-  // facturas.nit_receptor esta vacio en la base, asi que la lista sale de aqui + marcas.nit.
-  const NITS_PROPIOS_BASE = ['900838083' /* Inversiones Rocoto */, '901363438' /* Arrebatao */];
+  // NIT de NUESTRAS empresas (los que aparecen como RECEPTOR en las facturas de compra). SALEN de la tabla marcas (columna nit):
+  // ningun NIT va escrito en el codigo. Sin NIT en marcas no se puede distinguir compra de venta y quien llama debe avisar (lista vacia).
   function nitsPropios(marcas, extra) {
-    const s = new Set(NITS_PROPIOS_BASE);
+    const s = new Set();
     for (const m of marcas || []) { const n = soloDigitos(m && m.nit); if (n) s.add(n); }
     for (const n of extra || []) { const d = soloDigitos(n); if (d) s.add(d); }
     return [...s];
@@ -305,7 +304,7 @@
     TZ, fechaColombia, hoyColombia, enRangoFecha, esSellada, filtrarSelladas, validarRango,
     limpiarNombre, partesNumero, nombreArchivoCiclo, nombreUnico,
     normAlnum, soloDigitos, sinCeros, cufeValido, clavesSistema, tipoDian, estadoNoApto,
-    interpretarTablaDian, cruzarConSistema, csvPendientes, NITS_PROPIOS_BASE, nitsPropios,
+    interpretarTablaDian, cruzarConSistema, csvPendientes, nitsPropios,
     parseTotalDian, fechaDianIso, nitsConFacturas, filtrarPendientes, itemsParaDescarga, urlDian,
   };
 });
