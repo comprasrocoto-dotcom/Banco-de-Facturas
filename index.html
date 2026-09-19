@@ -128,6 +128,10 @@ tr:hover td{background:#f1f5f9}
         <label style="background:#7c2d12;color:#fff;font-weight:700;padding:8px 14px;border-radius:9px;cursor:pointer;font-size:13px;border:1px solid #7c2d12" title="Subir el Excel de la DIAN para cruzar y descargar los que faltan">📤 DIAN: Subir cruce
           <input type="file" id="fileDian" accept=".csv,.xlsx,.xls" style="display:none" onchange="cruzarDian(event)">
         </label>
+        <button class="p" id="btnSubirFacturas" onclick="concSubir('factura')" style="background:#166534;border-color:#166534;font-weight:800;font-size:14px" title="Busca en el Excel de la DIAN lo que NO está en la web ni en el ERP, te muestra cuántas son y las sube al banco cuando confirmas">⬆ SUBIR FACTURAS</button>
+        <button class="p" id="btnSubirNC" onclick="concSubir('nota_credito')" style="background:#1e3a8a;border-color:#1e3a8a;font-weight:800;font-size:14px" title="Lo mismo para las notas crédito (con control de factura relacionada y N° de causación)">⬆ SUBIR NOTAS CRÉDITO</button>
+        <button class="p" onclick="concRevisar()" style="background:#0f766e;border-color:#0f766e" title="Solo mirar: qué está en la DIAN, en la web y en el ERP, sin subir nada">🔎 Pendientes de ingreso</button>
+        <input type="file" id="fileConcDian" accept=".csv,.xlsx,.xls" style="display:none" onchange="concLeerDian(event)">
         <span class="mut" id="resDian"></span>
         <span class="mut" id="resdesc"></span>
       </div>
@@ -203,6 +207,8 @@ tr:hover td{background:#f1f5f9}
 </div></div>
 
 <script src="js/banco-utils.js"></script>
+<script src="js/conciliacion.js"></script>
+<script src="js/conciliacion-ui.js"></script>
 <script>
 const SB = supabase.createClient("https://egzggxwfyqeihzgpjgmp.supabase.co", "sb_publishable_3rzP6pCef1S5nRzFkG-eHw_-BF73n91");
 let usuario=null, perfil=null, facturas=[], novedades=[], sedes=[], pedidos=[], pedidosCargados=false, pedVista="pendiente", modulo="banco";

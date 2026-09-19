@@ -207,7 +207,7 @@
         if (cands.length) return { f: cands[0], via: 'nit+numero', cands };
         return null;
       };
-      if (r.tipo === 'nota_credito' || r.tipo === 'nota_debito') { const e = encontrado(); out.notas.push({ r, enSistema: !!e }); continue; }
+      if (r.tipo === 'nota_credito' || r.tipo === 'nota_debito') { const e = encontrado(); out.notas.push({ r, enSistema: !!e, f: e ? e.f : null }); continue; }
       if (r.tipo === 'otro') { out.otrosDocumentos.push({ r }); continue; }
       if (estadoNoApto(r.estado)) { out.excluidasEstado.push({ r }); continue; }
 
