@@ -125,11 +125,6 @@ tr:hover td{background:#f1f5f9}
         <button class="p" onclick="descargarSelladas()">⬇ Descargar ZIP</button>
         <button class="p" onclick="descargarCicloCompleto()" title="Sellada + aprobada + facturada (con N° de ingreso ERP): un PDF por factura, dentro de un ZIP. Usa las fechas de Descargar selladas del/al (fecha de sellado, hora Colombia)">📄 PDF ciclo completo</button>
         <button class="p" onclick="descargarPendientes()" title="Sin Nº de ingreso ERP o con novedad registrada">📥 Pendientes y novedades</button>
-        <button class="p" onclick="exportarPendientesDian()" title="Exporta CSV con las facturas pendientes para buscarlas en el portal DIAN" style="background:#7c2d12;border-color:#7c2d12">🔐 DIAN: Exportar pendientes</button>
-        <label style="background:#7c2d12;color:#fff;font-weight:700;padding:8px 14px;border-radius:9px;cursor:pointer;font-size:13px;border:1px solid #7c2d12" title="Subir el Excel de la DIAN para cruzar y descargar los que faltan">📤 DIAN: Subir cruce
-          <input type="file" id="fileDian" accept=".csv,.xlsx,.xls" style="display:none" onchange="cruzarDian(event)">
-        </label>
-        <button class="p" id="btnIrCruce" onclick="setModulo('cruce')" style="background:#166534;border-color:#166534;font-weight:800;font-size:14px" title="Qué documentos de la DIAN faltan por ingresar al ERP: facturas pendientes, notas crédito y por revisar">🧾 Cruce DIAN</button>
         <span class="mut" id="resDian"></span>
         <span class="mut" id="resdesc"></span>
       </div>
@@ -720,7 +715,7 @@ function pintarAgente(c,q){
   // 1c) Descargas de la DIAN: facturas que el robot baja de la DIAN y sube al banco
   const dn=ag.dian.map((m,i)=>({m,i})).filter(({m})=>ok((m.documento||"")+" "+(m.emisor||"")+" "+(m.nit_emisor||""))&&filtraFechaAdmin(m));
   const dMalas=dn.filter(({m})=>m.estado==="error").length, dEnCurso=dn.filter(({m})=>m.estado!=="subida"&&m.estado!=="error").length;
-  h+=`<h3 style="margin:18px 0 8px">Descargas de la DIAN <span class="badge ${dMalas?"st-pool":(dEnCurso?"st-asignada":"st-sellada")}">${dMalas?dMalas+" con problema":(dEnCurso?dEnCurso+" esperando el PDF":"todo al día")}</span></h3><div class="mut" style="margin-bottom:6px">Las que preparas en el cruce (DIAN: Subir cruce). La DIAN no deja que un robot baje los PDF: los bajas tú con “Abrir en DIAN” y, cuando el PDF cae en Descargas, el robot lo sube solo al banco como “Sin asignar”. “Esperando el PDF” = todavía no lo has bajado.</div>`;
+  h+=`<h3 style="margin:18px 0 8px">Descargas de la DIAN <span class="badge ${dMalas?"st-pool":(dEnCurso?"st-asignada":"st-sellada")}">${dMalas?dMalas+" con problema":(dEnCurso?dEnCurso+" esperando el PDF":"todo al día")}</span></h3><div class="mut" style="margin-bottom:6px">Las que preparas en el cruce (Cruce DIAN). La DIAN no deja que un robot baje los PDF: los bajas tú con “Abrir en DIAN” y, cuando el PDF cae en Descargas, el robot lo sube solo al banco como “Sin asignar”. “Esperando el PDF” = todavía no lo has bajado.</div>`;
   h+=dn.length?dn.map(({m,i})=>{const est={subida:"st-sellada",bajando:"st-asignada",pendiente:"st-asignada",error:"st-pool",agotado:"st-pool"}[m.estado]||"";
     return `<div class="card" style="margin:6px 0"><div class="row">
       <div style="flex:3"><div class="emisor">${escAg(m.documento||String(m.cufe||"").slice(0,12))} · ${escAg(m.emisor||"—")}</div>
