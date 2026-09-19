@@ -105,6 +105,7 @@ tr:hover td{background:#f1f5f9}
         <button class="chip"    id="v-selladas" onclick="setVista('selladas')">Selladas</button>
         <button class="chip"    id="v-hecho"    onclick="setVista('hecho')">✅ Proceso terminado</button>
         <button class="chip"    id="v-nov"      onclick="setVista('nov')">Con novedad</button>
+        <button class="chip"    id="v-listas"   onclick="setVista('listas')" title="Facturas que ya tienen Ingreso ERP pero siguen sin sellar: a la sede se le olvidó tomarlas o sellarlas">⏳ Ingresadas sin sellar</button>
         <span class="sp"></span>
         <button class="chip" id="btnFiltrosFac" style="display:none" onclick="toggleFiltros('Fac')">Filtros ▾</button>
         <button class="s" id="btnsubir" style="display:none" onclick="abrirSubir()">⬆ Subir PDFs</button>
@@ -136,6 +137,7 @@ tr:hover td{background:#f1f5f9}
         <span class="mut" id="resdesc"></span>
       </div>
     </div>
+    <div id="avisoSinSellar"></div>
     <div id="lista"></div>
 
     <div id="vistaCruce" style="display:none"><div id="cruceRaiz"></div><input type="file" id="fileConcDian" accept=".csv,.xlsx,.xls" style="display:none" onchange="concLeerDian(event)"></div>
@@ -213,6 +215,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/pdf-desbloqueo-web.js"></script>
 <script src="js/pdf-subida-web.js"></script>
 <script src="js/conciliacion.js"></script>
+<script src="js/sin-sellar.js"></script>
 <script src="js/conciliacion-ui.js"></script>
 <script src="js/cruce-dian-ui.js"></script>
 <script>
@@ -1070,9 +1073,9 @@ async function ponerErp(id){
   const i=pedidos.findIndex(x=>x.id===id); if(i>=0) pedidos[i].pedido_erp=v.trim()||null;
   pintarPedidos();
 }
-let amModo=null, amId=null, amDatos=[];
+let amModo=null, amId=null, amDatos=[], amLineas={};
 async function abrirAmarre(modo, id){
-  amModo=modo; amId=id; $("amErr").textContent=""; $("amBuscar").value="";
+  amModo=modo; amId=id; amLineas={}; $("amErr").textContent=""; $("amBuscar").value="";
   if(modo==="pedido"){
     const p=pedidos.find(x=>x.id===id)||{};
     $("amTitulo").textContent="🔗 Facturas sin pedido — para amarrar al pedido "+(p.pedido_erp||p.numero||"");
@@ -1101,6 +1104,9 @@ async function borrarPedido(id){
 function pintarAmarre(){
   const q=($("amBuscar").value||"").trim().toLowerCase();
   let l=amDatos;
+  // Desde la factura: los pedidos del MISMO PROVEEDOR primero (así es más difícil amarrar el que no es)
+  const fac=(amModo==="pedido")?null:(facturas.find(x=>x.cufe===amId)||null);
+  if(fac) l=SinSellar.ordenarPedidos(fac,l);
   if(q) l=l.filter(x=>JSON.stringify(x).toLowerCase().includes(q));
   l=l.slice(0,200);
   if(!l.length){ $("amLista").innerHTML='<div class="vacio">No encontré nada con "'+q+'"</div>'; return; }
@@ -1111,15 +1117,44 @@ function pintarAmarre(){
           <div class="mut">${(x.prefijo||"")+(x.folio||"")} · ${fch(x.fecha_emision)} · NIT ${x.nit_emisor||"—"}</div></div>
         <div class="total">${money(x.total)}</div></div></div>`;
     }else{
-      return `<div class="card" style="margin:6px 0;cursor:pointer" onclick="verResumenPedido(${x.id})">
+      const mp=fac?SinSellar.mismoProveedor(fac,x):null;
+      const provBadge=!fac?"":(mp==="igual"?'<span class="badge st-sellada">✔ mismo proveedor</span>':(mp==="parecido"?'<span class="badge st-asignada">≈ proveedor parecido</span>':'<span class="badge" style="color:#991b1b;border-color:#fca5a5;background:#fef2f2">otro proveedor</span>'));
+      return `<div class="card" id="amc_${x.id}" style="margin:6px 0;cursor:pointer" onclick="verResumenPedido(${x.id})">
         <div class="row"><div><div class="emisor">${x.proveedor_texto||"—"}</div>
           <div class="mut">${x.sede_texto||""} · ${fch(x.fecha)} · Orden #${x.numero||""}</div></div>
         <div class="row" style="gap:6px">
+          ${provBadge}
           ${x.pedido_erp?`<span class="badge st-sellada">ERP ${x.pedido_erp}</span>`:""}
           ${x.factura_cufe?`<span class="badge">ya amarrado</span>`:`<span class="badge st-pool">sin factura</span>`}</div></div>
+        <div id="vz_${x.id}" class="mut" style="margin-top:8px;font-size:12.5px">🧺 cargando insumos…</div>
         <div id="resumen_${x.id}" class="mut" style="margin-top:8px;font-size:12px"></div></div>`;
     }
   }).join("") + (l.length>=200?'<div class="vacio">Escribí para afinar la búsqueda.</div>':"");
+  if(amModo!=="pedido") amVistazos(l.map(x=>x.id));
+}
+// Vistazo a los insumos de cada pedido (1 linea en la tarjeta y la lista completa al pararse encima), para no amarrar el pedido equivocado
+function amPonerVistazos(ids){
+  ids.forEach(id=>{ const el=$("vz_"+id); if(!el||amLineas[id]===undefined) return;
+    const v=SinSellar.vistazoInsumos(amLineas[id],4);
+    el.innerHTML="🧺 "+(v.n?"<b>"+v.n+" insumo"+(v.n===1?"":"s")+":</b> ":"")+escAg(v.corto);
+    const c=$("amc_"+id); if(c) c.title=v.completo?"Insumos del pedido:\n"+v.completo:"Este pedido no tiene artículos cargados";
+  });
+}
+async function amVistazos(ids){
+  amPonerVistazos(ids);
+  const faltan=ids.filter(id=>amLineas[id]===undefined);
+  for(let i=0;i<faltan.length;i+=40){
+    const chunk=faltan.slice(i,i+40); let todas=[];
+    try{
+      for(let d=0;;d+=1000){
+        const {data,error}=await SB.from("pedido_lineas").select("pedido_id,insumo,cantidad,unidad").in("pedido_id",chunk).range(d,d+999);
+        if(error) throw new Error(error.message);
+        todas=todas.concat(data||[]); if(!data||data.length<1000) break;
+      }
+    }catch(e){ chunk.forEach(id=>{ const el=$("vz_"+id); if(el) el.textContent="🧺 No se pudieron cargar los insumos."; }); continue; }
+    chunk.forEach(id=>{ amLineas[id]=todas.filter(l=>l.pedido_id===id); });
+    amPonerVistazos(chunk);
+  }
 }
 // Muestra un resumen de los articulos del pedido antes de amarrar
 // para que la sede pueda confirmar que es el pedido correcto
@@ -1708,6 +1743,7 @@ async function cargar(){
   const {data:n}=await SB.from("novedades").select("cufe,motivo,texto,created_at");
   novedades=n||[];
   pintar();
+  if(!pedidosCargados && typeof cargarPedidos==="function") cargarPedidos().then(()=>pintar()).catch(()=>{});   // para saber la sede de las Sin asignar
 }
 async function cambiarFiltroSede(){
   await cargar();
@@ -1715,13 +1751,52 @@ async function cambiarFiltroSede(){
   pintar();
 }
 function setTipo(t){tipo=t;const s=$("selTipo"); if(s&&s.value!==t) s.value=t; pintar();}
-function setVista(v){vista=v;["pool","mias","selladas","hecho","nov"].forEach(x=>$("v-"+x).classList.toggle("on",x==v));pintar();}
+function setVista(v){vista=v;if(v!=="listas") listasSede=null;["pool","mias","selladas","hecho","nov","listas"].forEach(x=>$("v-"+x).classList.toggle("on",x==v));pintar();}
 function novDe(c){return novedades.find(n=>n.cufe===c);}
+// ── Ingresadas sin sellar (19/09/2026): ya tienen Ingreso ERP pero siguen en Sin asignar / Mías sin sellar ──
+// La logica vive en js/sin-sellar.js (probada con node). Las sedes solo ven las suyas; admin y pagos ven todas.
+let listasSede=null;   // null = todas las sedes; un id o "none" = solo esa
+function mapaSedePorFactura(){ const m=new Map(); (pedidos||[]).forEach(p=>{ if(p.factura_cufe&&p.sede_id) m.set(p.factura_cufe,p.sede_id); }); return m; }
+function sedeListaKey(f){ const s=SinSellar.sedeDe(f,mapaSedePorFactura()).id; return s==null?"none":s; }
+function sinSellarVisibles(base){
+  const l=base.filter(SinSellar.esIngresadaSinSellar);
+  if(perfil&&perfil.rol==="sede"){ const m=mapaSedePorFactura(); return l.filter(f=>SinSellar.sedeDe(f,m).id===perfil.sede_id); }
+  return l;
+}
+function panelSinSellar(base){
+  const chip=$("v-listas"), caja=$("avisoSinSellar"); if(!chip||!caja) return;
+  const hoy=BancoUtils.hoyColombia(), l=sinSellarVisibles(base), n=l.length;
+  chip.textContent="⏳ Ingresadas sin sellar ("+n+")";
+  chip.style.cssText=(n&&vista!=="listas")?"background:#fffbeb;border-color:#fcd34d;color:#92400e":"";
+  if(!n){ caja.innerHTML=""; return; }
+  const res=SinSellar.resumenPorSede(l,mapaSedePorFactura(),sedes,hoy), vieja=res.reduce((a,x)=>Math.max(a,x.masVieja==null?0:x.masVieja),0), esSede=perfil&&perfil.rol==="sede";
+  if(vista==="listas"){
+    caja.innerHTML=esSede
+      ? '<div class="mut" style="margin:0 0 10px">'+SinSellar.mensajeAviso(n)+' Las más antiguas primero.</div>'
+      : '<div class="row" style="gap:6px;margin:0 0 10px;flex-wrap:wrap"><span class="mut">Por sede:</span>'+res.map(x=>{ const k=x.id==null?"none":x.id, on=listasSede!=null&&String(listasSede)===String(k);
+          return '<button class="chip '+(on?"on":"")+'" onclick="filtrarListasSede(\''+k+'\')">'+escAg(x.nombre)+' ('+x.n+')'+(x.masVieja?' · '+x.masVieja+' d':'')+'</button>'; }).join("")
+        +(listasSede!=null?'<button class="mut" style="padding:4px 10px" onclick="filtrarListasSede(null)">ver todas</button>':"")+'</div>';
+    return;
+  }
+  const texto=esSede ? SinSellar.mensajeAviso(n) : n+(n===1?" factura ya ingresada al ERP sigue":" facturas ya ingresadas al ERP siguen")+" sin sellar: "+res.map(x=>escAg(x.nombre)+" "+x.n).join(" · ")+".";
+  caja.innerHTML='<div class="card" style="border-color:#fcd34d;background:#fffbeb;margin:0 0 14px"><div class="row"><div><b style="color:#92400e">⏳ '+texto+'</b><div class="mut">'
+    +(vieja>=2?"La más antigua lleva "+vieja+" días.":"Compras ya hizo su parte; falta que la sede las tome y las selle.")+'</div></div><span class="sp"></span><button class="p" onclick="setVista(\'listas\')">Verlas</button></div></div>';
+}
+function filtrarListasSede(k){ listasSede=(k===null||k==="null")?null:(k==="none"?"none":Number(k)); pintar(); }
+function badgeSinSellar(f){
+  const e=SinSellar.etiqueta(f,BancoUtils.hoyColombia()), c={nuevo:["#075985","#f0f9ff","#7dd3fc"],aviso:["#92400e","#fffbeb","#fcd34d"],alerta:["#991b1b","#fef2f2","#fca5a5"]}[e.nivel];
+  const s=SinSellar.sedeDe(f,mapaSedePorFactura()), nom=s.id!=null?((sedes.find(x=>x.id===s.id)||{}).nombre||""):"";
+  const extra=(s.origen==="pedido"&&nom)?" · sede sugerida: "+nom+" (por su pedido)":"";
+  return '<span class="badge" style="color:'+c[0]+';background:'+c[1]+';border-color:'+c[2]+';font-weight:700">⏳ '+escAg(e.texto+extra)+'</span>';
+}
 
 function pintar(){
   const cat=$("fcat").value;
   const fSedeVal=$("fSede").value;
-  let l=facturas.filter(f=>f.tipo===tipo&&(!cat||f.categoria===cat)&&(!fSedeVal||f.sede_id===Number(fSedeVal)));
+  const base=facturas.filter(f=>f.tipo===tipo&&(!cat||f.categoria===cat)&&(!fSedeVal||f.sede_id===Number(fSedeVal)));
+  let l=base;
+  panelSinSellar(base);
+  if(vista=="listas")   l=SinSellar.ordenar(sinSellarVisibles(base).filter(f=>listasSede==null||sedeListaKey(f)===listasSede));
   if(vista=="pool")     l=l.filter(f=>f.estado=="pool"||f.estado=="asignada");
   if(vista=="mias")     l=l.filter(f=>f.estado=="asignada");
   if(vista=="selladas") l=l.filter(f=>f.estado=="sellada"||f.estado=="pagada");
@@ -1761,6 +1836,7 @@ function pintar(){
         <span class="badge">${(f.categoria||"otro").replace("_"," ")}</span>
         ${nv?`<span class="badge st-pool">CON NOVEDAD: ${nv.motivo}</span>`:""}
         ${f.num_ingreso?`<span class="badge st-sellada" style="font-size:13px;padding:5px 12px;font-weight:700">Ingreso ERP: ${f.num_ingreso}</span>`:""}
+        ${SinSellar.esIngresadaSinSellar(f)?badgeSinSellar(f):""}
         ${(f.pedido_erp||f.pedido_num)?`<span class="badge st-asignada">🔗 Pedido ${f.pedido_erp||f.pedido_num}</span>`:""}
         <span class="sp"></span>
         ${(perfil.rol==="sede"&&f.estado=="pool")?`<button class="s" onclick="tomar('${f.cufe}')">Es mía</button>`:""}
