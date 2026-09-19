@@ -1,0 +1,3 @@
+qpdf (Apache-2.0, https://github.com/qpdf/qpdf) compilado a WebAssembly por @neslinesli93/qpdf-wasm 0.3.0 (ISC).
+Se incluye aqui (qpdf.js + qpdf.wasm) para desbloquear los PDF protegidos de la DIAN sin instalar nada en el sistema ni depender de npm.
+Uso: lib/pdf-desbloqueo.js. Sin red, sin IA.

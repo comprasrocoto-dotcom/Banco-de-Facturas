@@ -45,3 +45,28 @@ create policy pdf_config_leer on pdf_config for select to authenticated using (m
 drop policy if exists pdf_proceso_leer on pdf_proceso;
 create policy pdf_proceso_leer on pdf_proceso for select to authenticated using (mi_rol() in ('admin','pagos'));
 -- Solo el agente (service_role, que salta RLS) escribe en estas tablas.
+
+-- ---------- registro desde la WEB (carga manual): solo admin/pagos, con las mismas etapas; rechaza un NIT completo por descuido ----------
+create or replace function pdf_proceso_registrar(p_eventos jsonb) returns int
+language plpgsql security definer set search_path = public as $fn$
+declare n int;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' and mi_rol() not in ('admin','pagos') then raise exception 'sin permiso para registrar el proceso de PDF'; end if;
+  if p_eventos is null or jsonb_typeof(p_eventos) <> 'array' then raise exception 'p_eventos debe ser una lista'; end if;
+  if jsonb_array_length(p_eventos) > 200 then raise exception 'maximo 200 eventos por llamada'; end if;
+  if exists (select 1 from jsonb_to_recordset(p_eventos) as x(nit_enmascarado text) where x.nit_enmascarado ~ '[0-9]{5,}') then raise exception 'el NIT debe ir enmascarado'; end if;
+  insert into pdf_proceso (cufe, documento, tipo, marca, sede, nombre_pdf_original, nombre_pdf_desbloqueado, etapa, resultado, cantidad_intentos, codigo_error, error, nit_enmascarado, origen_marca)
+  select lower(x.cufe), left(x.documento, 100), left(coalesce(x.tipo, 'factura'), 30), left(x.marca, 100), left(x.sede, 100), left(x.nombre_pdf_original, 200), left(x.nombre_pdf_desbloqueado, 200),
+         x.etapa, left(x.resultado, 20), coalesce(x.cantidad_intentos, 0), left(x.codigo_error, 40), left(x.error, 500), left(x.nit_enmascarado, 30), left(x.origen_marca, 30)
+    from jsonb_to_recordset(p_eventos) as x(cufe text, documento text, tipo text, marca text, sede text, nombre_pdf_original text, nombre_pdf_desbloqueado text, etapa text, resultado text,
+                                              cantidad_intentos int, codigo_error text, error text, nit_enmascarado text, origen_marca text);
+  get diagnostics n = row_count;
+  return n;
+end $fn$;
+revoke all on function pdf_proceso_registrar(jsonb) from public, anon;
+grant execute on function pdf_proceso_registrar(jsonb) to authenticated, service_role;
+
+-- ---------- marcas: el NIT es la clave de los PDF, asi que la tabla ya no se lee sin sesion (aplicado 18/09/2026) ----------
+alter table marcas enable row level security;
+drop policy if exists marcas_leer on marcas;
+create policy marcas_leer on marcas for select to authenticated using (true);

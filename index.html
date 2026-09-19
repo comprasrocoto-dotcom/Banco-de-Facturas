@@ -208,6 +208,9 @@ tr:hover td{background:#f1f5f9}
 
 <script src="js/banco-utils.js"></script>
 <script src="js/pdf-clave.js"></script>
+<script src="js/pdf-desbloqueo-core.js"></script>
+<script src="js/pdf-desbloqueo-web.js"></script>
+<script src="js/pdf-subida-web.js"></script>
 <script src="js/conciliacion.js"></script>
 <script src="js/conciliacion-ui.js"></script>
 <script>
@@ -2236,6 +2239,11 @@ async function subirPdfs(){
   const marcas={}; document.querySelectorAll("#mar option").forEach(o=>marcas[o.value]=o.textContent);
   let ok=0; const errs=[];
   $("res").innerHTML="⏳ Procesando "+archivos.length+" archivo(s)...";
+  // Desbloqueo (18/09/2026): los PDF de la DIAN vienen protegidos con el NIT de la marca. Se desbloquean y VALIDAN antes de leerlos y subirlos;
+  // el que no se pueda desbloquear NO se sube (queda en la lista de errores). Ver js/pdf-subida-web.js
+  const unl=await desbloquearParaSubir(archivos,marca,tipo);
+  errs.push(...unl.errores); archivos=unl.listos;
+  if(!archivos.length){ $("res").innerHTML="⚠️ No se subió ningún PDF."+(errs.length?"<br>⚠️ "+errs.join("<br>"):""); return; }
 
   // Fase 1: pre-procesar todos los PDFs y extraer datos
   let datosArchivos=[];
@@ -2302,10 +2310,10 @@ async function subirPdfs(){
         estado:"pool", archivo_pdf:path}, {onConflict:"cufe"});
       if(ins.error) throw new Error(ins.error.message);
       if(!d.folio) console.log("⚠️ sin folio leido del PDF:", f.name, d);
-      ok++;
-    }catch(e){ errs.push(x.nombre+": "+e.message); }
+      ok++; pdfRegistrarSubida(x.file.name,x.cufe,x.datos&&x.datos.documento,null);
+    }catch(e){ errs.push(x.nombre+": "+e.message); pdfRegistrarSubida(x.file.name,x.cufe,x.datos&&x.datos.documento,e.message); }
   }
-  $("res").innerHTML="✅ "+ok+" de "+datosArchivos.length+" subida(s) y guardada(s) como pendientes (pool)."
+  $("res").innerHTML="✅ "+ok+" de "+datosArchivos.length+" subida(s) y guardada(s) como pendientes (pool)."+pdfNotaManual()
     +(errs.length?"<br>⚠️ "+errs.join("<br>"):"");
   archivos=[];
   await cargar();
@@ -2350,10 +2358,10 @@ async function confirmarSubidaConManual(){
         nit_emisor:d.nit, fecha_emision:d.fecha, total:d.total,
         estado:"pool", archivo_pdf:path}, {onConflict:"cufe"});
       if(ins.error) throw new Error(ins.error.message);
-      ok++;
-    }catch(e){ errs.push(x.nombre+": "+e.message); }
+      ok++; pdfRegistrarSubida(x.file.name,x.cufe,x.datos&&x.datos.documento,null);
+    }catch(e){ errs.push(x.nombre+": "+e.message); pdfRegistrarSubida(x.file.name,x.cufe,x.datos&&x.datos.documento,e.message); }
   }
-  $("res").innerHTML="✅ "+ok+" de "+datosArchivos.length+" subida(s) y guardada(s) como pendientes (pool)."
+  $("res").innerHTML="✅ "+ok+" de "+datosArchivos.length+" subida(s) y guardada(s) como pendientes (pool)."+pdfNotaManual()
     +(errs.length?"<br>⚠️ "+errs.join("<br>"):"");
   archivos=[];
   window._datosSubida=null;
