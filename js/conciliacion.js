@@ -15,11 +15,11 @@
 
   const RESULTADO = {
     INGRESADA: 'INGRESADA', PENDIENTE: 'PENDIENTE_DE_INGRESO', DUPLICADA: 'DUPLICADA', ANULADA: 'ANULADA',
-    REVISAR: 'REVISAR', ERROR: 'ERROR_DE_CONCILIACION',
+    REVISAR: 'REVISAR', ERROR: 'ERROR_DE_CONCILIACION', APARTADO: 'PROVEEDOR_APARTADO',
   };
   const ETIQUETA = {
     INGRESADA: 'INGRESADA', PENDIENTE_DE_INGRESO: 'PENDIENTE DE INGRESO', DUPLICADA: 'DUPLICADA', ANULADA: 'ANULADA',
-    REVISAR: 'REVISAR', ERROR_DE_CONCILIACION: 'ERROR DE CONCILIACIÓN',
+    REVISAR: 'REVISAR', ERROR_DE_CONCILIACION: 'ERROR DE CONCILIACIÓN', PROVEEDOR_APARTADO: 'PROVEEDOR APARTADO',
   };
 
   // ---------------------------------------------------------------- normalizacion
@@ -191,6 +191,28 @@
     return out;
   }
 
+  // ---------------------------------------------------------------- proveedores que compras NO maneja
+  // Se reconoce por NIT (si se conoce) o por nombre normalizado IGUAL. Nunca por "parecido": apartar de mas es peor que apartar de menos.
+  function proveedorExcluido(r, excluidos) {
+    const nit = B.soloDigitos(r.nit);
+    for (const e of excluidos || []) {
+      if (e.nit && nit && B.soloDigitos(e.nit) === nit) return { e, por: 'NIT' };
+      if (e.nombre && compararProveedor(r.nit, r.emisor, e.nombre) === 'igual') return { e, por: 'nombre' };
+    }
+    return null;
+  }
+  // Para el cruce de siempre (panel "DIAN: Subir cruce"): saca de pendientes / duplicados / sin datos / notas a los proveedores apartados
+  function apartarExcluidosCruce(cruce, excluidos) {
+    cruce.apartados = [];
+    if (!excluidos || !excluidos.length) return cruce;
+    for (const k of ['pendientes', 'posiblesDuplicados', 'sinDatos', 'notas']) {
+      cruce[k] = cruce[k].filter((x) => { const m = proveedorExcluido(x.r, excluidos); if (m) cruce.apartados.push({ r: x.r, de: k, por: m.por, nombre: m.e.nombre }); return !m; });
+    }
+    for (const k of ['pendientes', 'posiblesDuplicados', 'sinDatos', 'notas']) cruce.resumen[k] = cruce[k].length;
+    cruce.resumen.apartados = cruce.apartados.length;
+    return cruce;
+  }
+
   // ---------------------------------------------------------------- conciliacion
   function construirContexto(fuentes) {
     // hay reporte del ERP si trae documentos, o si al menos se sabe desde que fecha cubre (consulta puntual sin resultados)
@@ -248,7 +270,7 @@
       fila.motivo = 'Mismo NIT y número que una factura de la web pero con otro CUFE. No se sube: revisa cuál es la buena.';
       return fila;
     }
-    const faltaFuente = !ctx.erp ? 'ERP (no hay reporte cargado)' : (ctx.errores.erp ? 'ERP (' + ctx.errores.erp + ')' : (ctx.errores.pedidos ? 'pedidos (' + ctx.errores.pedidos + ')' : null));
+    const faltaFuente = !ctx.erp ? 'ERP (no hay reporte cargado)' : (ctx.errores.erp ? 'ERP (' + ctx.errores.erp + ')' : (ctx.errores.pedidos ? 'pedidos (' + ctx.errores.pedidos + ')' : (ctx.errores.excluidos ? 'lista de proveedores apartados (' + ctx.errores.excluidos + ')' : null)));
     if (faltaFuente) {
       fila.erp = { estado: 'ERROR', detalle: faltaFuente };
       fila.resultado = RESULTADO.ERROR; fila.accion = 'ninguna';
@@ -271,6 +293,16 @@
   function conciliar(registros, fuentes, opciones) {
     fuentes = fuentes || {}; opciones = opciones || {};
     const ctx = construirContexto(fuentes);
+    const propios = (opciones.nitsPropios || []).map(B.soloDigitos);
+    const apartados = [];
+    if (!(fuentes.errores && fuentes.errores.excluidos) && (fuentes.excluidos || []).length) {
+      registros = registros.filter((r) => {
+        const nuestra = !propios.length || !r.nitReceptor || propios.includes(B.soloDigitos(r.nitReceptor));   // solo compras nuestras
+        const m = nuestra && ['factura', 'nota_credito', 'nota_debito'].includes(r.tipo) ? proveedorExcluido(r, fuentes.excluidos) : null;
+        if (m) apartados.push({ r, m });
+        return !m;
+      });
+    }
     const cruce = B.cruzarConSistema(registros, fuentes.facturasWeb || [], { nitsPropios: opciones.nitsPropios });
     const filas = [];
     const webErr = fuentes.errores && fuentes.errores.web;
@@ -290,6 +322,11 @@
       filas.push({ r: x.r, cufe: String(x.r.cufe || '').toLowerCase(), tipo: x.r.tipo, documento: x.r.numero, proveedor: x.r.emisor, nit: x.r.nit, fecha: B.fechaDianIso(x.r.fecha), total: B.parseTotalDian(x.r.total),
         dian: { estado: 'EN_DIAN' }, web: { estado: 'ERROR' }, erp: { estado: 'ERROR' }, resultado: RESULTADO.ERROR, accion: 'ninguna', motivo: 'Faltan datos (CUFE o NIT + número) para identificar el documento.', causacion: null, factura_relacionada: null, candidatos: [], falta_pdf: false });
     }
+    for (const x of apartados) {
+      filas.push({ r: x.r, cufe: String(x.r.cufe || '').toLowerCase(), tipo: x.r.tipo, documento: x.r.numero || (x.r.prefijo + x.r.folio), proveedor: x.r.emisor, nit: x.r.nit, fecha: B.fechaDianIso(x.r.fecha), total: B.parseTotalDian(x.r.total),
+        dian: { estado: 'EN_DIAN' }, web: { estado: 'NO_APLICA' }, erp: { estado: 'NO_APLICA' }, resultado: RESULTADO.APARTADO, accion: 'ninguna', excluido_id: x.m.e.id || null,
+        motivo: 'Proveedor apartado: lo maneja otra persona (' + x.m.e.nombre + ', reconocido por ' + x.m.por + '). No se sube ni se revisa aquí.', causacion: null, factura_relacionada: null, candidatos: [], falta_pdf: false });
+    }
     filas.sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')) || String(a.proveedor || '').localeCompare(String(b.proveedor || '')) || String(a.documento || '').localeCompare(String(b.documento || '')) || String(a.cufe).localeCompare(String(b.cufe)));
     return { filas, resumen: resumir(filas, cruce, ctx), cruce };
   }
@@ -303,7 +340,7 @@
       out.porTipo[t] = {
         total: cuenta((f) => f.tipo === t), ingresadas: por(t, RESULTADO.INGRESADA), pendientes: por(t, RESULTADO.PENDIENTE),
         porSubir: por(t, RESULTADO.PENDIENTE, (f) => f.falta_pdf), enWebSinIngreso: por(t, RESULTADO.PENDIENTE, (f) => !f.falta_pdf),
-        revisar: por(t, RESULTADO.REVISAR), duplicadas: por(t, RESULTADO.DUPLICADA), anuladas: por(t, RESULTADO.ANULADA), errores: por(t, RESULTADO.ERROR),
+        apartados: por(t, RESULTADO.APARTADO), revisar: por(t, RESULTADO.REVISAR), duplicadas: por(t, RESULTADO.DUPLICADA), anuladas: por(t, RESULTADO.ANULADA), errores: por(t, RESULTADO.ERROR),
       };
     }
     return out;
@@ -343,6 +380,6 @@
   return {
     RESULTADO, ETIQUETA, sinTildes, clavesDocumento, tieneNumero, tokensNombre, normalizarNombre, nombreOrdenado, compararProveedor,
     parseNumeroCo, fechaCoIso, causacionDe, csvATabla, interpretarTablaErp, indexarErp, buscarEnErp, buscarEnPedidos,
-    conciliar, seleccionarParaCarga, verificarAntesDeCargar, criteriosConsulta, filaAuditoria,
+    proveedorExcluido, apartarExcluidosCruce, conciliar, seleccionarParaCarga, verificarAntesDeCargar, criteriosConsulta, filaAuditoria,
   };
 });

@@ -77,7 +77,7 @@ const concNumErp = (d) => Object.assign({}, d, { base: Number(d.base) || 0, impu
 
 async function concCargarFuentes() {
   const errores = {};
-  const [facturas, pedidos, erpDocs, cargas, alias, decisiones, marcas] = await Promise.all([
+  const [facturas, pedidos, erpDocs, cargas, alias, decisiones, marcas, excluidos] = await Promise.all([
     concIntentar(() => concPaginar((a, b) => SB.from('facturas').select('cufe,nit_emisor,prefijo,folio,documento,tipo,estado,num_ingreso').order('cufe').range(a, b)), errores, 'web'),
     concIntentar(() => concPaginar((a, b) => SB.from('pedidos').select('numero,proveedor_texto,nit_proveedor,factura_cufe,pedido_erp,numero_factura').or('numero_factura.not.is.null,factura_cufe.not.is.null').order('id').range(a, b)), errores, 'pedidos'),
     concIntentar(() => concPaginar((a, b) => SB.from('erp_documento').select('causacion,serie,numero,fecha,su_doc,su_doc_clave,contacto,contacto_norm,almacen,base,impuestos,neto,tipo,procesado').order('causacion').range(a, b)), errores, 'erp'),
@@ -85,6 +85,7 @@ async function concCargarFuentes() {
     concIntentar(async () => { const r = await SB.from('proveedor_alias').select('nit,nombre_erp_norm'); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'alias'),
     concIntentar(async () => { const r = await SB.from('conciliacion_decision').select('cufe,decision,causacion_erp,factura_relacionada,nota'); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'decisiones'),
     concIntentar(async () => { const r = await SB.from('marcas').select('id,nombre,nit'); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'marcas'),
+    concIntentar(async () => { const r = await SB.from('proveedor_excluido').select('id,nombre,nit').eq('activo', true); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'excluidos'),
   ]);
   if (errores.alias) errores.erp = errores.erp || ('alias: ' + errores.alias);            // sin los alias confirmados no se puede juzgar el ERP con seguridad
   if (errores.decisiones) errores.erp = errores.erp || ('decisiones: ' + errores.decisiones);
@@ -94,7 +95,7 @@ async function concCargarFuentes() {
   const erp = docs.length ? { docs, desde: desdes[0] || null, hasta: hastas[hastas.length - 1] || null, cargadoEn: cargas && cargas[0] ? cargas[0].cargado_en : null, archivo: cargas && cargas[0] ? cargas[0].archivo : '' } : null;
   return {
     marcas: marcas || [], nFacturas: (facturas || []).length, nPedidos: (pedidos || []).length,
-    fuentes: { facturasWeb: facturas || [], pedidos: pedidos || [], erp, alias: (alias || []).map((a) => ({ nit: a.nit, nombre_norm: a.nombre_erp_norm })), decisiones: decisiones || [], errores },
+    fuentes: { facturasWeb: facturas || [], pedidos: pedidos || [], erp, alias: (alias || []).map((a) => ({ nit: a.nit, nombre_norm: a.nombre_erp_norm })), decisiones: decisiones || [], excluidos: excluidos || [], errores },
   };
 }
 
@@ -173,12 +174,40 @@ async function concAccion(i, accion) {
       const c = prompt('¿Con qué número de causación quedó ' + f.documento + ' en el ERP? (ej. FCRC3423)\nDéjalo vacío para cancelar.'); if (!c || !c.trim()) return;
       await concDecidir(f, 'en_erp', c, f.factura_relacionada, 'confirmada a mano');
     } else if (accion === 'deshacer') { await concDecidir(f, 'ninguna', null, f.factura_relacionada, null); }
+    else if (accion === 'apartar') { if (!confirm('¿Apartar a ' + f.proveedor + ' (NIT ' + f.nit + ')?\n\nSe quitan de las listas y de SUBIR todos sus documentos porque los maneja otra persona. Puedes volver a incluirlo cuando quieras.')) return; await concApartar(f.proveedor, f.nit); }
+    else if (accion === 'incluir') { if (!f.excluido_id) { alert('Este proveedor se aparta por su NIT o nombre; búscalo en “Proveedores que no manejo” y usa Volver a incluir.'); return; } await concIncluir(f.excluido_id); }
     else if (accion === 'control') {
       const rel = prompt('Nota crédito ' + f.documento + ' (' + f.proveedor + ')\n\n¿A qué factura corresponde? (ej. FE-9000)\nDéjalo vacío si no lo sabes: no se inventa.', f.factura_relacionada || ''); if (rel === null) return;
       const caus = prompt('¿Con qué número de causación quedó en el ERP? (ej. AAR18)\nDéjalo vacío si todavía no la has ingresado.', f.causacion || ''); if (caus === null) return;
       await concDecidir(f, caus.trim() ? 'en_erp' : 'ninguna', caus, rel.trim(), 'control de nota crédito');
     }
   } catch (e) { alert('No se pudo guardar: ' + e.message); }
+}
+
+// ---------------------------------------------------------------- proveedores que compras NO maneja
+async function concApartar(nombre, nit) {
+  const { data, error } = await SB.rpc('proveedor_excluir', { p_nombre: nombre, p_nombre_norm: Conciliacion.nombreOrdenado(nombre), p_nit: nit || null, p_motivo: 'los maneja otra persona', p_usuario: concUsuario() });
+  if (error) throw new Error(error.message);
+  const lista = conc.fuentes.excluidos.filter((e) => e.id !== data);
+  lista.push({ id: data, nombre, nit: nit ? String(nit).replace(/\D/g, '') : null });
+  conc.fuentes.excluidos = lista; concRecalcular(); concPintar();
+}
+async function concIncluir(id) {
+  const { error } = await SB.rpc('proveedor_reincorporar', { p_id: id, p_usuario: concUsuario() });
+  if (error) throw new Error(error.message);
+  conc.fuentes.excluidos = conc.fuentes.excluidos.filter((e) => e.id !== id); concRecalcular(); concPintar();
+}
+async function concAgregarExcluido() {
+  const n = prompt('Nombre del proveedor que compras NO maneja (como sale en la DIAN, sin importar mayúsculas ni S.A.S.):'); if (!n || !n.trim()) return;
+  const nit = prompt('NIT (opcional, solo números; déjalo vacío si no lo sabes):', '');
+  try { await concApartar(n.trim(), nit && nit.trim() ? nit.trim() : null); } catch (e) { alert('No se pudo guardar: ' + e.message); }
+}
+async function concQuitarExcluido(id) { try { await concIncluir(id); } catch (e) { alert('No se pudo guardar: ' + e.message); } }
+function concVerExcluidos() { conc.verExcluidos = !conc.verExcluidos; concPintar(); }
+function concPintarExcluidos() {
+  const lista = (conc.fuentes && conc.fuentes.excluidos) || [];
+  if (!conc.verExcluidos) return '';
+  return `<div class="card" style="background:#f8fafc;margin:8px 0"><div class="row"><b>Proveedores que compras NO maneja (${lista.length})</b><span class="sp"></span><button onclick="concAgregarExcluido()">➕ Agregar proveedor</button></div><div class="mut" style="margin:4px 0">Sus documentos no aparecen en los listados ni se suben. Se reconocen por NIT o por nombre igual (no por parecido). “Volver a incluir” no borra nada.</div>${lista.length ? lista.slice().sort((a, b) => a.nombre.localeCompare(b.nombre)).map((e) => `<div class="row" style="border-bottom:1px solid var(--line);padding:4px 0;gap:8px"><div style="flex:3">${escAg(e.nombre)}${e.nit ? ` <span class="mut">· NIT ${escAg(e.nit)}</span>` : ''}</div><button onclick="concQuitarExcluido(${Number(e.id)})">↩ Volver a incluir</button></div>`).join('') : '<div class="vacio">No hay proveedores apartados.</div>'}</div>`;
 }
 
 // ---------------------------------------------------------------- SUBIR: confirmar, cargar con progreso, terminar
@@ -191,7 +220,7 @@ function concMarcaDe(r) {
   return m ? m.id : null;
 }
 function concPreguntarCarga(tipoDoc) {
-  const errs = Object.keys(conc.errores || {}).filter((k) => ['web', 'erp', 'pedidos'].includes(k));
+  const errs = Object.keys(conc.errores || {}).filter((k) => ['web', 'erp', 'pedidos', 'excluidos'].includes(k));
   const lista = Conciliacion.seleccionarParaCarga(conc.res.filas, tipoDoc);
   const nombre = CONC_NOMBRE_TIPO[tipoDoc];
   conc.carga = { tipo: tipoDoc, fase: 'confirmar', items: lista.map((f) => ({ fila: f, estado: 'PENDIENTE', detalle: '' })), idx: 0, cancelar: false, marca: '', timer: null, audit: [], bloqueo: '' };
@@ -320,7 +349,7 @@ function concFilasDeTab(tab) {
   if (tab === 'nota_credito') return fs.filter((f) => f.tipo === 'nota_credito' && f.resultado === R.PENDIENTE);
   if (tab === 'revisar') return fs.filter((f) => [R.REVISAR, R.DUPLICADA, R.ERROR].includes(f.resultado));
   if (tab === 'ingresadas') return fs.filter((f) => f.resultado === R.INGRESADA);
-  return fs.filter((f) => f.resultado === R.ANULADA || (f.tipo === 'nota_debito' && f.resultado === R.PENDIENTE));
+  return fs.filter((f) => f.resultado === R.ANULADA || f.resultado === R.APARTADO || (f.tipo === 'nota_debito' && f.resultado === R.PENDIENTE));
 }
 function concDescargarCsv() {
   const fs = concFilasDeTab(conc.tab); if (!fs.length) return;
@@ -361,6 +390,8 @@ function concAcciones(f, i) {
   else if (f.resultado === R.PENDIENTE) h += b('Ya está en el ERP…', 'ya_esta');
   else if (f.resultado === R.INGRESADA && f.erp.fuente === 'confirmada a mano') h += b('↩ Deshacer', 'deshacer');
   if (f.tipo === 'nota_credito' && [R.PENDIENTE, R.INGRESADA, R.REVISAR].includes(f.resultado)) h += b('✏ Control', 'control');
+  if (f.resultado === R.APARTADO) h += b('↩ Volver a incluir', 'incluir');
+  else if ([R.PENDIENTE, R.REVISAR].includes(f.resultado)) h += b('🚫 No lo manejo', 'apartar');
   return h;
 }
 function concFila(f, i) {
@@ -418,17 +449,17 @@ function concPintar() {
   if (!e && res) h += `<div style="color:#991b1b;margin:4px 0"><b>Falta el reporte del ERP.</b> Sin él no se puede saber qué está ingresado: nada se sube. Usa “📥 Cargar reporte del ERP” (el reporte “Documentos” de Hiopos, en CSV).</div>`;
   if (conc.avisoAuditoria) h += `<div style="color:#b45309;margin:2px 0">⚠️ ${escAg(conc.avisoAuditoria)}</div>`;
   h += `<div class="row" style="margin:8px 0;gap:8px"><label style="background:#0f766e;color:#fff;font-weight:700;padding:6px 12px;border-radius:9px;cursor:pointer;font-size:13px">📥 Cargar reporte del ERP<input type="file" accept=".csv,.xlsx,.xls" style="display:none" onchange="concLeerErp(event)"></label>
-    <button onclick="concEjecutar({tipoLog:'conciliar'})">🔄 Volver a conciliar</button><button onclick="concOtroDian()">📂 Otro Excel de la DIAN</button><button onclick="concDescargarCsv()">⬇ CSV de esta lista</button></div>`;
+    <button onclick="concEjecutar({tipoLog:'conciliar'})">🔄 Volver a conciliar</button><button onclick="concOtroDian()">📂 Otro Excel de la DIAN</button><button onclick="concDescargarCsv()">⬇ CSV de esta lista</button><button onclick="concVerExcluidos()">🚫 Proveedores que no manejo (${conc.fuentes ? conc.fuentes.excluidos.length : '…'})</button></div>${concPintarExcluidos()}`;
   if (s) {
     const T = s.porTipo;
     const tarjeta = (tp, tit, col) => `<div style="flex:1;min-width:260px;border:1px solid var(--line);border-radius:10px;padding:10px"><b>${tit}</b><div class="mut" style="margin:4px 0"><b>${T[tp].porSubir}</b> por subir (falta el PDF) · <b>${T[tp].enWebSinIngreso}</b> en la web sin ingresar al ERP · <b>${T[tp].revisar + T[tp].duplicadas + T[tp].errores}</b> por revisar · <b>${T[tp].ingresadas}</b> ya ingresadas</div>
       <button class="p" style="background:${col};border-color:${col};font-weight:800" ${T[tp].porSubir && e ? '' : 'disabled'} onclick="concSubir('${tp}')">⬆ SUBIR ${tp === 'factura' ? 'FACTURAS' : 'NOTAS CRÉDITO'} (${T[tp].porSubir})</button></div>`;
     h += `<div class="row" style="gap:10px;align-items:stretch">${tarjeta('factura', 'Facturas', '#166534')}${tarjeta('nota_credito', 'Notas crédito', '#1e3a8a')}</div>`;
-    h += `<div class="mut" style="margin:6px 0">Se apartaron: ${s.emitidasPropias} emitidas por nosotros (ventas) · ${s.otrosDocumentos} otros documentos (eventos, etc.)${T.nota_debito.total ? ` · ${T.nota_debito.total} nota(s) débito` : ''}.</div>`;
+    h += `<div class="mut" style="margin:6px 0">Se apartaron: ${s.emitidasPropias} emitidas por nosotros (ventas) · ${s.otrosDocumentos} otros documentos (eventos, etc.) · ${T.factura.apartados + T.nota_credito.apartados + T.nota_debito.apartados} de proveedores que no manejas${T.nota_debito.total ? ` · ${T.nota_debito.total} nota(s) débito` : ''}.</div>`;
   }
   h += concPintarCarga();
   if (res) {
-    const tabs = [['factura', 'Facturas pendientes'], ['nota_credito', 'Notas crédito pendientes'], ['revisar', 'Por revisar'], ['ingresadas', 'Ingresadas'], ['otras', 'Otros']];
+    const tabs = [['factura', 'Facturas pendientes'], ['nota_credito', 'Notas crédito pendientes'], ['revisar', 'Por revisar'], ['ingresadas', 'Ingresadas'], ['otras', 'Apartados y otros']];
     h += `<div class="row" style="margin:10px 0;gap:6px">${tabs.map(([k, t]) => `<button class="chip ${conc.tab === k ? 'on' : ''}" onclick="concCambiarTab('${k}')">${t} (${concFilasDeTab(k).length})</button>`).join('')}</div>`;
     const lista = concFilasDeTab(conc.tab); conc.vista = lista.slice(0, 300);
     h += lista.length ? `<table><thead><tr><th>Documento</th><th>Proveedor</th><th>Fecha</th><th class="num">Total</th><th>DIAN</th><th>Web</th><th>ERP</th><th>Resultado</th><th></th></tr></thead><tbody>${conc.vista.map((f, i) => concFila(f, i)).join('')}</tbody></table>${lista.length > 300 ? `<div class="mut">… y ${lista.length - 300} más (todas van en el CSV).</div>` : ''}` : '<div class="vacio">Nada en esta lista. ✅</div>';

@@ -1359,6 +1359,9 @@ async function cruzarDian(ev){
     let marcasDb=[]; try{ const m=await SB.from("marcas").select("id,nombre,nit"); marcasDb=m.data||[]; }catch(e){}
     const propios=BancoUtils.nitsPropios(marcasDb);
     const r=BancoUtils.cruzarConSistema(tabla.registros,sistema,{nitsPropios:propios});
+    // Proveedores que compras NO maneja (lista en la base; se administra desde SUBIR FACTURAS > "Proveedores que no manejo")
+    try{ if(typeof Conciliacion!=="undefined"){ const ex=await SB.from("proveedor_excluido").select("id,nombre,nit").eq("activo",true); if(ex.error) throw new Error(ex.error.message); Conciliacion.apartarExcluidosCruce(r,ex.data||[]); } }
+    catch(e){ r.avisoExcluidos="No se pudo leer la lista de proveedores apartados ("+e.message+"): se muestran todos."; }
     r.nitsPropios=propios;
     ultimoCruce=r;
     if(cr&&cr.timer) clearInterval(cr.timer);
@@ -1481,6 +1484,8 @@ function pintarCruce(r,tabla,totalSistema){
   if(tabla.sinColumnaNit) h+=`<div class="mut" style="color:#b45309">⚠️ El archivo no trae “NIT Emisor”: solo se pudo comparar por CUFE.</div>`;
   if(tabla.sinColumnaReceptor) h+=`<div class="mut" style="color:#b45309">⚠️ El archivo no trae “NIT Receptor”: solo se pudieron apartar las que emite nuestra propia empresa.</div>`;
   h+=`<div class="mut">Solo cuentan las facturas cuyo <b>receptor</b> es una de nuestras empresas (NIT ${escAg((r.nitsPropios||[]).join(", "))}).</div>`;
+  if(s.apartados) h+=`<div class="mut" style="margin-top:4px">Proveedores apartados (los maneja otra persona): <b>${s.apartados}</b> documento(s) que no se muestran ni se piden. Se administran en “⬆ SUBIR FACTURAS” → “🚫 Proveedores que no manejo”.</div>`;
+  if(r.avisoExcluidos) h+=`<div class="mut" style="color:#b45309">⚠️ ${escAg(r.avisoExcluidos)}</div>`;
   h+=`<h3 style="margin:10px 0 6px">Pendientes por subir <span class="badge ${s.pendientes?"st-pool":"st-sellada"}">${s.pendientes}</span></h3>`;
   h+=s.pendientes?`<div id="crucePend"></div>`:`<div class="vacio">No falta ninguna factura por subir. ✅</div>`;
   if(s.posiblesDuplicados) h+=`<h3 style="margin:14px 0 6px">Posibles duplicados — revisar a mano <span class="badge st-pool">${s.posiblesDuplicados}</span></h3><div class="mut">Mismo NIT y número que una factura del sistema pero con otro CUFE. No se piden para subir.</div>`+tabla_(r.posiblesDuplicados,x=>"en el sistema: "+((x.f&&x.f.cufe)||"").slice(0,10)+"…");
