@@ -24,6 +24,11 @@ h1{font-size:16px;margin:0;letter-spacing:.3px;font-weight:700}
 .sp{flex:1}
 .chip{padding:6px 13px;border:1px solid var(--line);border-radius:999px;cursor:pointer;font-size:13px;font-weight:600;color:var(--mut);background:#fff;transition:.15s}
 .chip:hover{border-color:#cbd5e1;color:var(--txt)}
+/* desplegable "Facturas / Notas crédito": se ve como los chips pero abre una lista */
+.sel-chip{width:auto;margin:0;padding:5px 32px 5px 14px;line-height:1.3;border:1px solid var(--accent);border-radius:999px;cursor:pointer;font-size:13px;font-weight:700;color:#fff;background-color:var(--accent);
+  -webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat:no-repeat;background-position:right 12px center}
+.sel-chip option{color:#0f172a;background:#fff;font-weight:600}
 .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
 .wrap{max-width:1120px;margin:0 auto;padding:22px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px;box-shadow:0 1px 2px rgba(15,23,42,.05)}
@@ -91,8 +96,10 @@ tr:hover td{background:#f1f5f9}
   <div class="wrap">
     <div id="filtrosFacturas">
       <div class="row" style="margin-bottom:10px">
-        <button class="chip on" id="t-fac"  onclick="setTipo('factura')">Facturas</button>
-        <button class="chip"    id="t-nc"   onclick="setTipo('nota_credito')">Notas crédito</button>
+        <select id="selTipo" class="sel-chip" title="Qué documentos ver: facturas o notas crédito" onchange="setTipo(this.value)">
+          <option value="factura">Facturas</option>
+          <option value="nota_credito">Notas crédito</option>
+        </select>
         <button class="chip on" id="v-pool"     onclick="setVista('pool')">Sin asignar</button>
         <button class="chip"    id="v-mias"     onclick="setVista('mias')">Mías</button>
         <button class="chip"    id="v-selladas" onclick="setVista('selladas')">Selladas</button>
@@ -1707,7 +1714,7 @@ async function cambiarFiltroSede(){
   await cargarPedidos();
   pintar();
 }
-function setTipo(t){tipo=t;$("t-fac").classList.toggle("on",t=="factura");$("t-nc").classList.toggle("on",t=="nota_credito");pintar();}
+function setTipo(t){tipo=t;const s=$("selTipo"); if(s&&s.value!==t) s.value=t; pintar();}
 function setVista(v){vista=v;["pool","mias","selladas","hecho","nov"].forEach(x=>$("v-"+x).classList.toggle("on",x==v));pintar();}
 function novDe(c){return novedades.find(n=>n.cufe===c);}
 
