@@ -65,6 +65,7 @@ tr:hover td{background:#f1f5f9}
 .vacio{text-align:center;color:var(--mut);padding:44px;background:#fff;border:1px dashed var(--line);border-radius:14px}
 .login-tag{display:inline-block;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
 .filtros-panel{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:14px}
+#vistaAdmin.adm-import #panelFiltrosAdm,#vistaAdmin.adm-import #btnFiltrosAdm{display:none!important}   /* Importar bases no usa el filtro por fecha */
 #fSede{background:#d1fae5;border:2px solid #059669;color:#064e3b;font-weight:700;padding:8px 16px;font-size:14px;border-radius:8px}
 </style>
 </head>
@@ -147,6 +148,7 @@ tr:hover td{background:#f1f5f9}
         <button class="chip"    id="ad-art"  onclick="setAdmin('art')">Artículos</button>
         <button class="chip"    id="ad-cat"  onclick="setAdmin('cat')">Qué le compro a cada proveedor</button>
         <button class="chip"    id="ad-agente" onclick="setAdmin('agente')">🤖 Agente</button>
+        <button class="chip"    id="ad-import" onclick="setAdmin('import')">📥 Importar bases</button>
         <span class="sp"></span>
         <input id="qa" placeholder="🔎 buscar..." style="width:240px;margin:0" oninput="pintarAdmin()">
         <button class="chip" id="btnFiltrosAdm" style="display:none" onclick="toggleFiltros('Adm')">Filtros ▾</button>
@@ -216,6 +218,9 @@ tr:hover td{background:#f1f5f9}
 <script src="js/pdf-subida-web.js"></script>
 <script src="js/conciliacion.js"></script>
 <script src="js/sin-sellar.js"></script>
+<script src="js/conversiones.js"></script>
+<script src="js/importacion.js"></script>
+<script src="js/importacion-ui.js"></script>
 <script src="js/conciliacion-ui.js"></script>
 <script src="js/cruce-dian-ui.js"></script>
 <script>
@@ -264,19 +269,55 @@ async function entrar(){
 async function salir(){await SB.auth.signOut();location.reload();}
 
 let arts=[], provs=[], cat=[], minmax=[], provArts=[], npLineas=0;
+// Trae TODAS las filas de una tabla (por paginas de 1.000). Si algo falla devuelve lo que alcanzo a traer (como antes: la pantalla sigue).
+async function traerTodo(tabla, cols, orden){
+  const out=[];
+  try{
+    for(let i=0;;i+=1000){
+      let q=SB.from(tabla).select(cols);
+      (orden||[]).forEach(o=>{ q=q.order(o); });
+      const {data,error}=await q.range(i,i+999);
+      if(error){ console.warn("traerTodo "+tabla+": "+error.message); break; }
+      out.push(...(data||[]));
+      if(!data||data.length<1000) break;
+    }
+  }catch(e){ console.warn("traerTodo "+tabla+": "+e.message); }
+  return out;
+}
+// MÁXIMOS Y MÍNIMOS EN UNIDAD DE COMPRA. En la base viven en la unidad de INVENTARIO (maximos_minimos.subarticulo);
+// aquí se pasan a la unidad de COMPRA del artículo con la conversión que ya existe (unidades_medida + la presentación). Ver js/conversiones.js
+let convCtx=null, mmIdx=new Map();
+async function prepararConversiones(){
+  MM={}; minmax.forEach(r=>{ const k=String(r.articulo||"").trim().toUpperCase(); if(!k) return; (MM[k]=MM[k]||[]).push(r); });
+  mmIdx=Conversiones.indexarMaxMin(minmax);
+  const [um,uc,ua]=await Promise.all([ traerTodo("unidades_medida","formato,medida,unidad",["id"]), traerTodo("unidad_catalogo","canon,nombre,familia,base,factor_base,activo",["canon"]), traerTodo("unidad_alias","alias,canon,activo",["alias"]) ]);
+  convCtx=Conversiones.crearContexto({unidadesMedida:um, catalogo:uc.filter(c=>c.activo!==false), alias:ua});
+}
+// Las dos celdas (MÍN. y MÁX.) de un artículo. data-max = el número que usa la alerta de máximo (en unidad de compra si se pudo convertir).
+function mmCeldas(a){
+  const vacio={min:"---",max:"---",tMin:"",tMax:"",dMax:""};
+  const fila=Conversiones.filaDe(mmIdx, a.nombre, _almacenDeSede());
+  if(!fila) return vacio;
+  const r=Conversiones.minMaxEnCompra(fila, a.unidad, convCtx||undefined);
+  if(r.ok){
+    const u=' <span style="font-size:11px">'+escAg(r.unidad)+'</span>', t=' title="'+escAg(r.tooltip)+'"';
+    return {min:(r.min==null?"---":r.minTxt+u), max:(r.max==null?"---":r.maxTxt+u), tMin:t, tMax:t, dMax:(r.max==null?"":' data-max="'+r.max+'"')};
+  }
+  // sin regla clara para convertir: se deja el número de inventario, con su unidad y el motivo (nunca se inventa una conversión)
+  const u=' <span style="font-size:11px;color:#b45309">'+escAg(r.unidadInv||"")+' ⚠</span>', t=' title="'+escAg("Está en unidad de inventario ("+(r.unidadInv||"?")+"): "+r.motivo)+'"';
+  return {min:(r.minInv==null?"---":Conversiones.fmt(r.minInv)+u), max:(r.maxInv==null?"---":Conversiones.fmt(r.maxInv)+u), tMin:t, tMax:t, dMax:(r.maxInv==null?"":' data-max="'+r.maxInv+'"')};
+}
 async function nuevoPedido(){
   $("np_err").textContent=""; $("np_lineas").innerHTML=""; npLineas=0; provArts=[];
   const hoy=new Date().toISOString().slice(0,10);
   $("np_fecha").value=hoy; $("np_entrega").value=""; $("np_obs").value=""; $("np_resp").value="";
   if(!provs.length){
-    const a=await SB.from("proveedores").select("id,nit,razon_social,nombre_comercial").order("razon_social");
-    provs=a.data||[];
-    const b=await SB.from("articulos").select("codigo_barras,articulo_hiopos,articulo_comercial,unimedida_compra,subfamilia").order("articulo_comercial");
-    arts=b.data||[];
-    const c=await SB.from("catalogo_compras").select("codigo_barras,id_proveedor,precio_negociado");
-    cat=c.data||[];
-    const m=await SB.from("maximos_minimos").select("articulo,almacen,minimo,maximo");
-    minmax=m.data||[];
+    // Se pide por paginas: la API corta en 1.000 filas y maximos_minimos ya tiene mas.
+    provs=await traerTodo("proveedores","id,nit,razon_social,nombre_comercial",["razon_social","id"]);
+    arts=await traerTodo("articulos","codigo_barras,articulo_hiopos,articulo_comercial,unimedida_compra,subfamilia",["articulo_comercial","id"]);
+    cat=await traerTodo("catalogo_compras","codigo_barras,id_proveedor,precio_negociado",["id"]);
+    minmax=await traerTodo("maximos_minimos","articulo,almacen,subarticulo,minimo,maximo",["id"]);
+    await prepararConversiones();
   }
   $("np_prov").innerHTML='<option value="">— elegí proveedor —</option>'+provs.map(x=>`<option value="${x.id}">${x.razon_social||x.nombre_comercial}</option>`).join("");
   if(perfil.rol==="sede"){
@@ -350,15 +391,13 @@ function pintarProductos(){
     if(!q) return true;
     return ((a.codigo||"")+" "+(a.nombre||"")).toLowerCase().includes(q);
   });
-  const nomDe=a=>((a.nombre||"").replace(/\s*\([^)]*\)\s*$/,"")).trim().toUpperCase();
   $("np_tabla").innerHTML = filas.slice(0,400).map(a=>{
-    const nom=nomDe(a);
-    const mm=minmax.find(x=>(x.articulo||"").toUpperCase().trim()===nom)||{};
+    const mc=mmCeldas(a);
     const c=npCant[a.codigo]||0;
     return `<tr><td class="mut">${a.codigo||""}</td><td>${a.nombre||""}</td>
       <td class="mut">${a.unidad||"—"}</td>
-      <td class="num mut">${mm.minimo!=null&&mm.minimo!==""?Number(mm.minimo).toFixed(0):"---"}</td>
-      <td class="num mut">${mm.maximo!=null&&mm.maximo!==""?Number(mm.maximo).toFixed(0):"---"}</td>
+      <td class="num mut" style="white-space:nowrap"${mc.tMin}>${mc.min}</td>
+      <td class="num mut" style="white-space:nowrap"${mc.tMax}${mc.dMax}>${mc.max}</td>
       <td class="num"><span style="display:inline-flex;align-items:center;gap:6px;justify-content:flex-end">
         <button style="padding:4px 10px" onclick="paso('${(a.codigo||"").replace(/'/g,"")}',${c-1})">−</button>
         <input type="text" inputmode="decimal" value="${c}" style="width:88px;margin:0;text-align:center"
@@ -421,13 +460,13 @@ function calcularTotal(){
     if(!a) return;
     const pr=precioDe(codigoDe(a.value)), cant=numEs(c.value);
     const sp=r.querySelector("span");
-    const nom=(a.value||"").replace(/\s*\(.*\)$/,"").trim().toUpperCase();
-    const mm=minmax.find(x=>(x.articulo||"").toUpperCase().trim()===nom);
+    const fila=Conversiones.filaDe(mmIdx, a.value, _almacenDeSede());
     let aviso="";
-    if(mm){
-      const mi=Number(mm.minimo||0), ma=Number(mm.maximo||0);
-      if(mi>0 && cant>0 && cant<mi) aviso=" ⚠️ mín "+mi.toFixed(2);
-      else aviso=" (mín "+mi.toFixed(1)+" / máx "+ma.toFixed(1)+")";
+    if(fila){
+      const m=Conversiones.minMaxEnCompra(fila, unidadDe(a.value), convCtx||undefined);
+      const mi=m.ok?(m.min||0):Number(fila.minimo||0), ma=m.ok?(m.max||0):Number(fila.maximo||0), u=m.ok?" "+m.unidad:"";
+      if(mi>0 && cant>0 && cant<mi) aviso=" ⚠️ mín "+Conversiones.fmt(mi)+u;
+      else aviso=" (mín "+Conversiones.fmt(mi)+" / máx "+Conversiones.fmt(ma)+u+")";
     }
     const un=unidadDe(a.value);
     if(sp) sp.textContent=(un? un+" · ":"")+(pr? money(pr): "s/precio")+aviso;
@@ -558,9 +597,11 @@ async function guardarPedido(){
 }
 let adminCargado=false, adminVista="prov", adminProv=[], adminArt=[], adminCat=[];
 function setAdmin(v){ adminVista=v;
-  ["prov","art","cat","agente"].forEach(x=>$("ad-"+x).classList.toggle("on", x==v));
+  ["prov","art","cat","agente","import"].forEach(x=>$("ad-"+x).classList.toggle("on", x==v));
   $("filtroCat").style.display = (v=="cat")?"flex":"none";
-  $("btnAdmNuevo").style.display = (v=="agente")?"none":"";
+  $("btnAdmNuevo").style.display = (v=="agente"||v=="import")?"none":"";
+  $("qa").style.display = (v=="import")?"none":"";
+  $("vistaAdmin").classList.toggle("adm-import", v=="import");
   pintarAdmin();
 }
 async function cargarAdmin(){
@@ -611,6 +652,8 @@ function pintarAdmin(){
       }).join("") || '<div class="vacio">Sin resultados.</div>';
   } else if(adminVista==="agente"){
     pintarAgente(c,q);
+  } else if(adminVista==="import"){
+    impPintar(c);
   } else {
     const pid=Number($("catProv").value||0);
     if(!pid){ c.innerHTML='<div class="vacio">Elegí un proveedor para ver qué se le compra.</div>'; return; }
@@ -2174,7 +2217,7 @@ async function guardarNov(){
 <div id="modalPedido" class="modal"><div class="card" style="max-width:1080px;width:96vw">
   <h1>➕ Nuevo pedido</h1>
   <div class="row">
-    <div style="flex:1"><label class="mut">Sede</label><select id="np_sede"></select></div>
+    <div style="flex:1"><label class="mut">Sede</label><select id="np_sede" onchange="pintarProductos()"></select></div>
     <div style="flex:1"><label class="mut">Tipo</label>
       <select id="np_tipo"><option>Requisicion</option><option>Pedido</option><option>Traslado</option></select></div>
   </div>
@@ -2486,9 +2529,11 @@ function _maxSede(articuloHiopos){
 function _avisoFila(tr, inp){
   if(!tr||!tr.cells||tr.cells.length<4) return null;
   const cs=tr.cells, txt=c=>String(c.textContent||"").replace(/\s+/g," ").trim();
-  let max=numEs(txt(cs[cs.length-2]));      // MÁX de la tabla
+  const cMax=cs[cs.length-2], dMax=cMax.dataset&&cMax.dataset.max;
+  const conDato=(dMax!=null&&dMax!=="");
+  let max=conDato?Number(dMax):numEs(txt(cMax));   // MÁX de la tabla (en unidad de COMPRA si se pudo convertir; ver data-max)
   const nom=txt(cs[1])||txt(cs[0]);           // ARTÍCULO
-  const mx=_maxSede(nom);                     // si la base tiene MÁXIMO de ESTA sede, manda ese
+  const mx=conDato?null:_maxSede(nom);        // si la base tiene MÁXIMO de ESTA sede, manda ese
   if(mx) max=mx.max;
   const c=numEs(inp.value||0);
   return c>0 && max>0 ? {nom:nom, max:max, cant:c} : (max>0?{nom:nom,max:max,cant:0}:null);
@@ -2503,16 +2548,16 @@ function _pintarAviso(tr, inp, r){
   inp.style.background= grave ? "#fee2e2" : "#fff1f2";
   inp.style.borderColor= grave ? "#b91c1c" : "#dc2626";
   inp.style.color="#b91c1c"; inp.style.fontWeight="700";
-  inp.title=`⚠️ Vas a pedir ${r.cant} y el MÁXIMO es ${r.max}`+(grave?"  ← ¿kilos o gramos?":"");
+  inp.title=`⚠️ Vas a pedir ${r.cant} y el MÁXIMO es ${Conversiones.fmt(r.max)}`+(grave?"  ← ¿kilos o gramos?":"");
   if(!tr.querySelector(".aviso-max")){
     const d=document.createElement("div");
     d.className="aviso-max";
     d.style.cssText="grid-column:1/-1;color:#b91c1c;font-size:11.5px;font-weight:600;padding:2px 4px";
-    d.textContent=`⚠️ ${r.nom}: pides ${r.cant} y el MÁXIMO es ${r.max}`+(grave?"  ← ¡REVISÁ LA UNIDAD! (¿kilos o gramos?)":"");
+    d.textContent=`⚠️ ${r.nom}: pides ${r.cant} y el MÁXIMO es ${Conversiones.fmt(r.max)}`+(grave?"  ← ¡REVISÁ LA UNIDAD! (¿kilos o gramos?)":"");
     tr.appendChild(d);
   } else {
     tr.querySelector(".aviso-max").textContent=
-      `⚠️ ${r.nom}: pides ${r.cant} y el MÁXIMO es ${r.max}`+(grave?"  ← ¡REVISÁ LA UNIDAD! (¿kilos o gramos?)":"");
+      `⚠️ ${r.nom}: pides ${r.cant} y el MÁXIMO es ${Conversiones.fmt(r.max)}`+(grave?"  ← ¡REVISÁ LA UNIDAD! (¿kilos o gramos?)":"");
   }
 }
 document.addEventListener("input", e=>{
@@ -2531,7 +2576,7 @@ revisarMaximos = async function(){
     const r=_avisoFila(tr, inp);
     if(r&&r.cant>0&&r.max>0&&r.cant>r.max){
       const grave=r.cant>r.max*3; if(grave) graves=true;
-      avisos.push(`• ${r.nom}: vas a pedir ${r.cant} y el MÁXIMO es ${r.max}`+
+      avisos.push(`• ${r.nom}: vas a pedir ${r.cant} y el MÁXIMO es ${Conversiones.fmt(r.max)}`+
                   (grave? "   ← ¡REVISÁ LA UNIDAD! (¿kilos o gramos?)" : ""));
     }
   });
