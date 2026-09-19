@@ -79,6 +79,7 @@ tr:hover td{background:#f1f5f9}
     <h1>🏦 BANCO DE FACTURAS</h1>
     <button class="chip on" id="m-banco" onclick="setModulo('banco')">Facturas</button>
     <button class="chip"    id="m-pedidos" onclick="setModulo('pedidos')">📋 Pedidos</button>
+    <button class="chip"  id="m-cruce" style="display:none" onclick="setModulo('cruce')">🧾 Cruce DIAN</button>
     <button class="chip"  id="m-admin" style="display:none" onclick="setModulo('admin')">⚙️ Admin</button>
     <span id="sede" class="badge"></span>
     <select id="fSede" style="width:auto;margin:0;display:none" onchange="cambiarFiltroSede()">
@@ -128,16 +129,14 @@ tr:hover td{background:#f1f5f9}
         <label style="background:#7c2d12;color:#fff;font-weight:700;padding:8px 14px;border-radius:9px;cursor:pointer;font-size:13px;border:1px solid #7c2d12" title="Subir el Excel de la DIAN para cruzar y descargar los que faltan">📤 DIAN: Subir cruce
           <input type="file" id="fileDian" accept=".csv,.xlsx,.xls" style="display:none" onchange="cruzarDian(event)">
         </label>
-        <button class="p" id="btnSubirFacturas" onclick="concSubir('factura')" style="background:#166534;border-color:#166534;font-weight:800;font-size:14px" title="Busca en el Excel de la DIAN lo que NO está en la web ni en el ERP, te muestra cuántas son y las sube al banco cuando confirmas">⬆ SUBIR FACTURAS</button>
-        <button class="p" id="btnSubirNC" onclick="concSubir('nota_credito')" style="background:#1e3a8a;border-color:#1e3a8a;font-weight:800;font-size:14px" title="Lo mismo para las notas crédito (con control de factura relacionada y N° de causación)">⬆ SUBIR NOTAS CRÉDITO</button>
-        <button class="p" onclick="concRevisar()" style="background:#0f766e;border-color:#0f766e" title="Solo mirar: qué está en la DIAN, en la web y en el ERP, sin subir nada">🔎 Pendientes de ingreso</button>
-        <input type="file" id="fileConcDian" accept=".csv,.xlsx,.xls" style="display:none" onchange="concLeerDian(event)">
+        <button class="p" id="btnIrCruce" onclick="setModulo('cruce')" style="background:#166534;border-color:#166534;font-weight:800;font-size:14px" title="Qué documentos de la DIAN faltan por ingresar al ERP: facturas pendientes, notas crédito y por revisar">🧾 Cruce DIAN</button>
         <span class="mut" id="resDian"></span>
         <span class="mut" id="resdesc"></span>
       </div>
     </div>
     <div id="lista"></div>
 
+    <div id="vistaCruce" style="display:none"><div id="cruceRaiz"></div><input type="file" id="fileConcDian" accept=".csv,.xlsx,.xls" style="display:none" onchange="concLeerDian(event)"></div>
     <div id="vistaAdmin" style="display:none">
       <div class="row" style="margin-bottom:14px">
         <button class="chip on" id="ad-prov" onclick="setAdmin('prov')">Proveedores</button>
@@ -213,6 +212,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/pdf-subida-web.js"></script>
 <script src="js/conciliacion.js"></script>
 <script src="js/conciliacion-ui.js"></script>
+<script src="js/cruce-dian-ui.js"></script>
 <script>
 const SB = supabase.createClient("https://egzggxwfyqeihzgpjgmp.supabase.co", "sb_publishable_3rzP6pCef1S5nRzFkG-eHw_-BF73n91");
 let usuario=null, perfil=null, facturas=[], novedades=[], sedes=[], pedidos=[], pedidosCargados=false, pedVista="pendiente", modulo="banco";
@@ -231,7 +231,7 @@ async function sesion(u){
   perfil=p||{nombre:u.email,rol:"sede"};
   $("login").style.display="none"; $("app").style.display="block";
   const s=perfil.sedes;
-  if(perfil.rol==="admin"||perfil.rol==="pagos"){$("btnsubir").style.display="inline-block";$("barraDescarga").style.display="flex";}
+  if(perfil.rol==="admin"||perfil.rol==="pagos"){$("btnsubir").style.display="inline-block";$("barraDescarga").style.display="flex";$("m-cruce").style.display="inline-block";}
   if(perfil.rol==="admin"){ $("m-admin").style.display="inline-block"; $("btnIngresos").style.display="inline-block"; }
   const {data:ss}=await SB.from("sedes").select("id,nombre,marca_id,marcas(nombre)").order("nombre");
   sedes=ss||[];
@@ -883,6 +883,9 @@ function setModulo(m){
   modulo=m;
   $("m-banco").classList.toggle("on",m=="banco");
   $("m-pedidos").classList.toggle("on",m=="pedidos");
+  $("m-cruce").classList.toggle("on",m=="cruce");
+  $("vistaCruce").style.display = (m=="cruce")?"block":"none";
+  if(m=="cruce" && typeof concPintar==="function") concPintar();
   $("filtrosFacturas").style.display = (m=="banco")?"block":"none";
   $("barraDescarga").style.display = (m=="banco" && (perfil.rol==="admin"||perfil.rol==="pagos"))?"flex":"none";
   $("lista").style.display = (m=="banco")?"block":"none";
@@ -1560,11 +1563,17 @@ function enviarResumen(){
     encodeURIComponent("Banco de Facturas: resumen del ingreso #"+o.id)+"&body="+
     encodeURIComponent(cuerpo.slice(0,1800));
 }
+// La base no deja dos órdenes de ingreso al ERP activas a la vez (doble clic, dos usuarios): se explica en claro
+function msgPedirOrden(err){
+  if(err && (err.code==="23505" || /ux_ordenes_ingresos_activa|duplicate key/i.test(err.message||"")))
+    return "Ya hay un ingreso al ERP en curso o esperando al vigilante.\n\nEspera a que termine antes de pedir otro (así no se ingresa dos veces la misma factura).\nSi el vigilante está apagado, enciéndelo con INICIAR-VIGILANTE.bat.";
+  return "No se pudo pedir: "+(err&&err.message);
+}
 // Relanza: crea una orden nueva para que el agente retome lo que quedó con novedad
 async function relanzar(){
   if(!confirm("Se va a RELANZAR el ingreso al ERP.\n\nEl agente va a:\n1) buscar pedidos ya ingresados que quedaron SIN FACTURAR y facturarlos\n2) tomar los pedidos nuevos con factura amarrada\n\n¿Pedimos la orden?")) return;
   const r=await SB.from("ordenes").insert({tipo:"ingresos",estado:"pendiente",pedida_por:usuario.id});
-  if(r.error){ alert("No se pudo pedir: "+r.error.message); return; }
+  if(r.error){ alert(msgPedirOrden(r.error)); return; }
   await cargarOrdenes();
   alert("✅ Orden de relanzamiento enviada.\n\nEl VIGILANTE la toma en menos de 30 segundos (si está encendido en tu PC).");
 }
@@ -1582,7 +1591,7 @@ async function pedirIngresos(){
       eleg.slice(0,15).map(p=>"• "+p.numero+" · "+(p.proveedor_texto||"")).join("\n")+
       (eleg.length>15?"\n… y "+(eleg.length-15)+" más":"")+"\n\n¿Pedimos la orden?")) return;
   const r=await SB.from("ordenes").insert({tipo:"ingresos",estado:"pendiente",pedida_por:usuario.id});
-  if(r.error){ alert("No se pudo pedir: "+r.error.message); return; }
+  if(r.error){ alert(msgPedirOrden(r.error)); return; }
   await cargarOrdenes();
   alert("✅ Orden enviada.\n\nEl VIGILANTE local la toma en menos de 30 segundos (si está encendido en tu PC).\n\nSi no arranca: abrí el VIGILANTE (INICIAR-VIGILANTE.bat).");
 }

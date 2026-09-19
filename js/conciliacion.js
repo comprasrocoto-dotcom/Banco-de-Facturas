@@ -109,7 +109,7 @@
     for (let i = 0; i < Math.min(rows.length, 15); i++) { if ((rows[i] || []).map(norm).some((h) => h === 'su doc')) { hi = i; break; } }
     if (hi < 0) return { error: 'No encontre la columna "Su Doc" en el reporte del ERP. Debe ser el reporte "Documentos" de Hiopos (Serie / Número, Fecha Doc, Su Doc, Contacto, Neto).' };
     const H = rows[hi].map(norm), idx = (re) => H.findIndex((h) => re.test(h));
-    const col = { serie: idx(/^serie/), fecha: idx(/^fecha/), suDoc: idx(/^su doc$/), contacto: idx(/^contacto$/), almacen: idx(/^almacen$/), base: idx(/^base$/), imp: idx(/^impuestos$/), neto: idx(/^neto$/), procesado: idx(/^procesado$/) };
+    const col = { serie: idx(/^serie/), fecha: idx(/^fecha/), hora: idx(/^hora$/), suDoc: idx(/^su doc$/), contacto: idx(/^contacto$/), almacen: idx(/^almacen$/), base: idx(/^base$/), imp: idx(/^impuestos$/), neto: idx(/^neto$/), procesado: idx(/^procesado$/) };
     if (col.serie < 0 || col.suDoc < 0 || col.contacto < 0 || col.neto < 0) return { error: 'Al reporte del ERP le faltan columnas (Serie / Número, Su Doc, Contacto, Neto).' };
     const v = (c, i) => (i >= 0 ? String(c[i] == null ? '' : c[i]).trim() : '');
     const docs = []; const vistos = new Set(); let repetidos = 0, descartadas = 0;
@@ -122,8 +122,10 @@
       vistos.add(causacion);
       const neto = parseNumeroCo(v(c, col.neto)), base = parseNumeroCo(v(c, col.base)), imp = parseNumeroCo(v(c, col.imp));
       const suDoc = v(c, col.suDoc), contacto = v(c, col.contacto);
+      const fechaIso = fechaCoIso(v(c, col.fecha)), hm = v(c, col.hora).match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+      const hora = hm ? hm[1].padStart(2, '0') + ':' + hm[2] + ':' + (hm[3] || '00') : null;
       docs.push({
-        causacion, serie: sn[1].toUpperCase(), numero: sn[2], fecha: fechaCoIso(v(c, col.fecha)), su_doc: suDoc, su_doc_clave: normAlnum(suDoc),
+        causacion, serie: sn[1].toUpperCase(), numero: sn[2], fecha: fechaIso, hora, fecha_hora: fechaIso ? fechaIso + 'T' + (hora || '00:00:00') : null, su_doc: suDoc, su_doc_clave: normAlnum(suDoc),
         contacto, contacto_norm: normalizarNombre(contacto), almacen: v(c, col.almacen), base, impuestos: imp, neto,
         tipo: neto < 0 ? 'nota_credito' : 'factura', procesado: /^(true|si|sí|1)$/i.test(v(c, col.procesado)),
       });
@@ -133,7 +135,7 @@
     return {
       docs, resumen: {
         total: docs.length, facturas: docs.filter((d) => d.tipo === 'factura').length, notas: docs.filter((d) => d.tipo === 'nota_credito').length,
-        desde: fechas[0] || null, hasta: fechas[fechas.length - 1] || null, repetidos, descartadas,
+        desde: fechas[0] || null, hasta: fechas[fechas.length - 1] || null, corte: docs.map((d) => d.fecha_hora).filter(Boolean).sort().pop() || null, repetidos, descartadas,
         sinNumero: docs.filter((d) => !tieneNumero(d.su_doc)).length,
       },
     };
@@ -214,7 +216,44 @@
   }
 
   // ---------------------------------------------------------------- conciliacion
-  function construirContexto(fuentes) {
+  // ---------------------------------------------------------------- frescura del reporte del ERP y estados operativos
+  // ¿de cuando son los datos del ERP? Prioridad: cuando se genero el archivo; si no se sabe, la hora del ultimo documento que trae.
+  function datosDelErp(erp) {
+    if (!erp) return null;
+    const mod = erp.archivo_modificado || erp.datosA;
+    if (mod) { const d = new Date(mod); if (!isNaN(d.getTime())) return d; }
+    if (erp.corte) {   // "2026-09-18T19:35:02" / "2026-09-18 19:35:02": hora de Colombia (UTC-5, sin horario de verano)
+      const t = String(erp.corte).trim().replace(' ', 'T'); const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(t) ? t : t + '-05:00');
+      if (!isNaN(d.getTime())) return d;
+    }
+    return null;
+  }
+  // maxHoras: numero => se EXIGE frescura; undefined => no se exige (comportamiento anterior)
+  function frescuraErp(erp, ahora, maxHoras) {
+    if (typeof maxHoras !== 'number') return { aplica: false, ok: true, horas: null, datosA: null, maxHoras: null };
+    const d = datosDelErp(erp);
+    if (!d) return { aplica: true, ok: false, desconocida: true, horas: null, datosA: null, maxHoras };
+    const horas = Math.max(0, ((ahora || new Date()).getTime() - d.getTime()) / 3600000);
+    return { aplica: true, ok: horas <= maxHoras, horas, datosA: d.toISOString(), maxHoras };
+  }
+  const ESTADO = {
+    PENDIENTE: 'PENDIENTE DE INGRESO', INGRESADA: 'INGRESADA', REVISAR: 'POR REVISAR', ERROR_CONSULTA: 'ERROR DE CONSULTA', ANULADA: 'ANULADA',
+    NOTA_DEBITO: 'NOTA DÉBITO', APARTADO: 'PROVEEDOR APARTADO', EMITIDA: 'EMITIDA POR NOSOTROS', OTRO: 'OTRO DOCUMENTO',
+  };
+  const CLASE = { factura: 'FACTURA', nota_credito: 'NOTA CRÉDITO', nota_debito: 'NOTA DÉBITO' };
+  // Estado que ve la persona. Una consulta que FALLA es ERROR DE CONSULTA; lo que no se puede determinar es POR REVISAR; nunca se asume "pendiente".
+  function estadoOperativo(f) {
+    const R = RESULTADO;
+    if (f.resultado === R.INGRESADA) return ESTADO.INGRESADA;
+    if (f.resultado === R.ANULADA) return ESTADO.ANULADA;
+    if (f.resultado === R.APARTADO) return ESTADO.APARTADO;
+    if (f.tipo === 'nota_debito') return ESTADO.NOTA_DEBITO;
+    if (f.resultado === R.PENDIENTE) return ESTADO.PENDIENTE;
+    if (f.resultado === R.ERROR) return ['CONSULTA_WEB', 'CONSULTA_ERP', 'CONSULTA_PEDIDOS', 'LISTA_APARTADOS'].includes(f.causa) ? ESTADO.ERROR_CONSULTA : ESTADO.REVISAR;
+    return ESTADO.REVISAR;   // REVISAR y DUPLICADA
+  }
+
+  function construirContexto(fuentes, opciones) {
     // hay reporte del ERP si trae documentos, o si al menos se sabe desde que fecha cubre (consulta puntual sin resultados)
     const erp = fuentes.erp && Array.isArray(fuentes.erp.docs) && (fuentes.erp.docs.length || fuentes.erp.desde) ? fuentes.erp : null;
     const alias = new Set((fuentes.alias || []).map((a) => B.soloDigitos(a.nit) + '|' + (a.nombre_norm || normalizarNombre(a.nombre_erp))));
@@ -224,6 +263,7 @@
       erp, erpIdx: erp ? indexarErp(erp.docs) : null, alias, decisiones, pedidos: fuentes.pedidos || [],
       desde: erp ? (erp.desde || fechas[0] || null) : null, hasta: erp ? (erp.hasta || fechas[fechas.length - 1] || null) : null,
       errores: fuentes.errores || {},
+      frescura: frescuraErp(erp, (opciones && opciones.ahora) || null, opciones && opciones.erpMaxHoras),
     };
   }
 
@@ -233,6 +273,8 @@
       fecha: B.fechaDianIso(r.fecha), total: B.parseTotalDian(r.total),
       dian: { estado: 'EN_DIAN' }, web, erp: { estado: 'NO_ESTA_EN_ERP' },
       resultado: null, accion: 'ninguna', motivo: '', causacion: null, factura_relacionada: null, candidatos: [], falta_pdf: false,
+      sede_id: web && web.f && web.f.sede_id != null ? web.f.sede_id : null,   // solo si la factura ya esta en la web con sede; nunca se deduce
+      causa: null,
     };
     const dec = ctx.decisiones.get(fila.cufe) || null;
     if (dec && dec.factura_relacionada) fila.factura_relacionada = dec.factura_relacionada;
@@ -261,12 +303,12 @@
     }
     if (probables.length && !(dec && dec.decision === 'no_esta')) {
       fila.erp = { estado: 'PROBABLE', nivel: 'probable', causacion: probables[0].causacion, fuente: probables[0].fuente, detalle: probables.map((x) => x.detalle).join(' | ') };
-      fila.resultado = RESULTADO.REVISAR; fila.accion = 'revisar';
+      fila.resultado = RESULTADO.REVISAR; fila.accion = 'revisar'; fila.causa = 'PROBABLE';
       fila.motivo = 'Parece estar en el ERP pero no es seguro: ' + probables[0].detalle + '. Confirma si es la misma o si no está.';
       return fila;
     }
     if (web.estado === 'DUPLICADA') {
-      fila.resultado = RESULTADO.DUPLICADA; fila.accion = 'revisar';
+      fila.resultado = RESULTADO.DUPLICADA; fila.accion = 'revisar'; fila.causa = 'DUPLICADA_WEB';
       fila.motivo = 'Mismo NIT y número que una factura de la web pero con otro CUFE. No se sube: revisa cuál es la buena.';
       return fila;
     }
@@ -274,12 +316,21 @@
     if (faltaFuente) {
       fila.erp = { estado: 'ERROR', detalle: faltaFuente };
       fila.resultado = RESULTADO.ERROR; fila.accion = 'ninguna';
+      fila.causa = ctx.errores.erp ? 'CONSULTA_ERP' : (!ctx.erp ? 'SIN_REPORTE_ERP' : (ctx.errores.pedidos ? 'CONSULTA_PEDIDOS' : 'LISTA_APARTADOS'));
       fila.motivo = 'No se pudo comprobar en ' + faltaFuente + '. Una consulta fallida NO significa que no exista: no se sube.';
+      return fila;
+    }
+    // El reporte del ERP es una FOTO: si es muy viejo (o no se sabe de cuando es) no se puede afirmar que algo NO esta ingresado.
+    if (ctx.frescura.aplica && !ctx.frescura.ok) {
+      fila.erp = { estado: 'DESACTUALIZADO', detalle: ctx.frescura.desconocida ? 'no se sabe de cuándo es el reporte' : 'reporte de hace ' + Math.round(ctx.frescura.horas) + ' h' };
+      fila.resultado = RESULTADO.REVISAR; fila.accion = 'ninguna'; fila.causa = 'ERP_DESACTUALIZADO';
+      fila.motivo = ctx.frescura.desconocida ? 'No se sabe de cuándo es el reporte del ERP: carga uno nuevo para poder confirmar si está pendiente.'
+        : 'El reporte del ERP tiene ' + Math.round(ctx.frescura.horas) + ' h (máximo ' + ctx.frescura.maxHoras + ' h): pudo ingresarse después. Carga un reporte nuevo.';
       return fila;
     }
     if (!(dec && dec.decision === 'no_esta') && ctx.desde && fila.fecha && fila.fecha < ctx.desde) {
       fila.erp = { estado: 'SIN_COBERTURA', detalle: 'el reporte del ERP empieza el ' + ctx.desde };
-      fila.resultado = RESULTADO.REVISAR; fila.accion = 'revisar';
+      fila.resultado = RESULTADO.REVISAR; fila.accion = 'revisar'; fila.causa = 'SIN_COBERTURA';
       fila.motivo = 'Emitida el ' + fila.fecha + ', antes de que empiece el reporte del ERP (' + ctx.desde + '): pudo ingresarse antes y no se ve. Confirma a mano.';
       return fila;
     }
@@ -292,8 +343,8 @@
   // registros: salida de interpretarTablaDian. fuentes: { facturasWeb, pedidos, erp:{docs,desde,hasta,cargadoEn}, alias, decisiones, errores:{web,erp,pedidos} }
   function conciliar(registros, fuentes, opciones) {
     fuentes = fuentes || {}; opciones = opciones || {};
-    const ctx = construirContexto(fuentes);
-    const propios = (opciones.nitsPropios || []).map(B.soloDigitos);
+    const ctx = construirContexto(fuentes, opciones);
+    const propios =(opciones.nitsPropios || []).map(B.soloDigitos);
     const apartados = [];
     if (!(fuentes.errores && fuentes.errores.excluidos) && (fuentes.excluidos || []).length) {
       registros = registros.filter((r) => {
@@ -307,7 +358,7 @@
     const filas = [];
     const webErr = fuentes.errores && fuentes.errores.web;
     const conWeb = (x, tipo, web) => {
-      if (webErr) { filas.push(Object.assign(evaluar(x.r, tipo, { estado: 'ERROR', detalle: webErr }, ctx), {})); const f = filas[filas.length - 1]; if (f.resultado === RESULTADO.PENDIENTE || f.resultado === RESULTADO.REVISAR) { f.resultado = RESULTADO.ERROR; f.accion = 'ninguna'; f.motivo = 'No se pudo consultar la web (' + webErr + '). Una consulta fallida NO significa que no exista: no se sube.'; f.falta_pdf = false; } return; }
+      if (webErr) { filas.push(Object.assign(evaluar(x.r, tipo, { estado: 'ERROR', detalle: webErr }, ctx), {})); const f = filas[filas.length - 1]; if (f.resultado === RESULTADO.PENDIENTE || f.resultado === RESULTADO.REVISAR) { f.resultado = RESULTADO.ERROR; f.accion = 'ninguna'; f.causa = 'CONSULTA_WEB'; f.motivo = 'No se pudo consultar la web (' + webErr + '). Una consulta fallida NO significa que no exista: no se sube.'; f.falta_pdf = false; } return; }
       filas.push(evaluar(x.r, tipo, web, ctx));
     };
     for (const x of cruce.pendientes) conWeb(x, x.r.tipo, { estado: 'NO_ESTA_EN_WEB' });
@@ -320,7 +371,7 @@
     }
     for (const x of cruce.sinDatos) {
       filas.push({ r: x.r, cufe: String(x.r.cufe || '').toLowerCase(), tipo: x.r.tipo, documento: x.r.numero, proveedor: x.r.emisor, nit: x.r.nit, fecha: B.fechaDianIso(x.r.fecha), total: B.parseTotalDian(x.r.total),
-        dian: { estado: 'EN_DIAN' }, web: { estado: 'ERROR' }, erp: { estado: 'ERROR' }, resultado: RESULTADO.ERROR, accion: 'ninguna', motivo: 'Faltan datos (CUFE o NIT + número) para identificar el documento.', causacion: null, factura_relacionada: null, candidatos: [], falta_pdf: false });
+        dian: { estado: 'EN_DIAN' }, web: { estado: 'ERROR' }, erp: { estado: 'ERROR' }, resultado: RESULTADO.ERROR, accion: 'ninguna', causa: 'SIN_DATOS', motivo: 'Faltan datos (CUFE o NIT + número) para identificar el documento.', causacion: null, factura_relacionada: null, candidatos: [], falta_pdf: false });
     }
     for (const x of apartados) {
       filas.push({ r: x.r, cufe: String(x.r.cufe || '').toLowerCase(), tipo: x.r.tipo, documento: x.r.numero || (x.r.prefijo + x.r.folio), proveedor: x.r.emisor, nit: x.r.nit, fecha: B.fechaDianIso(x.r.fecha), total: B.parseTotalDian(x.r.total),
@@ -328,7 +379,10 @@
         motivo: 'Proveedor apartado: lo maneja otra persona (' + x.m.e.nombre + ', reconocido por ' + x.m.por + '). No se sube ni se revisa aquí.', causacion: null, factura_relacionada: null, candidatos: [], falta_pdf: false });
     }
     filas.sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')) || String(a.proveedor || '').localeCompare(String(b.proveedor || '')) || String(a.documento || '').localeCompare(String(b.documento || '')) || String(a.cufe).localeCompare(String(b.cufe)));
-    return { filas, resumen: resumir(filas, cruce, ctx), cruce };
+    filas.forEach((f) => { f.estado = estadoOperativo(f); f.clase = CLASE[f.tipo] || 'OTRO DOCUMENTO'; });
+    // Lo que NO requiere ninguna accion (ventas nuestras, otros documentos, dirigidas a otra empresa): solo se cuenta, no llena la bandeja
+    const noAplica = { emitidasPropias: cruce.emitidasPropias.map((x) => x.r), otrosDocumentos: cruce.otrosDocumentos.map((x) => x.r), otraEmpresa: cruce.otraEmpresa.map((x) => x.r) };
+    return { filas, resumen: resumir(filas, cruce, ctx), cruce, noAplica, frescura: ctx.frescura };
   }
 
   function resumir(filas, cruce, ctx) {
@@ -343,6 +397,9 @@
         apartados: por(t, RESULTADO.APARTADO), revisar: por(t, RESULTADO.REVISAR), duplicadas: por(t, RESULTADO.DUPLICADA), anuladas: por(t, RESULTADO.ANULADA), errores: por(t, RESULTADO.ERROR),
       };
     }
+    out.porEstado = {};
+    for (const f of filas) if (f.tipo !== 'nota_debito') out.porEstado[f.estado] = (out.porEstado[f.estado] || 0) + 1;
+    out.frescura = ctx.frescura;
     return out;
   }
 
@@ -357,6 +414,7 @@
     if (n.resultado === RESULTADO.PENDIENTE && n.falta_pdf) return { ok: true, fila: n };
     if (n.resultado === RESULTADO.INGRESADA) return { ok: false, estado: 'YA_EXISTE_EN_ERP', motivo: n.motivo, fila: n };
     if (n.resultado === RESULTADO.PENDIENTE) return { ok: false, estado: 'YA_EXISTE_EN_WEB', motivo: 'El PDF ya está en la web.', fila: n };
+    if (n.causa === 'ERP_DESACTUALIZADO') return { ok: false, estado: 'ERP_DESACTUALIZADO', motivo: n.motivo, fila: n };
     if (n.resultado === RESULTADO.ERROR) return { ok: false, estado: 'ERROR_DE_CONSULTA', motivo: n.motivo, fila: n };
     return { ok: false, estado: n.resultado, motivo: n.motivo, fila: n };
   }
@@ -370,7 +428,7 @@
   // Fila para el registro de auditoria (tabla conciliacion_resultado)
   function filaAuditoria(f, momento) {
     const web = { EN_WEB: 'si', NO_ESTA_EN_WEB: 'no', DUPLICADA: 'duplicada', ERROR: 'error', NO_APLICA: 'no_aplica' }[f.web && f.web.estado] || 'no_aplica';
-    const erp = { EN_ERP: 'si', NO_ESTA_EN_ERP: 'no', PROBABLE: 'probable', SIN_COBERTURA: 'sin_cobertura', ERROR: 'error', NO_APLICA: 'no_aplica' }[f.erp && f.erp.estado] || 'no_aplica';
+    const erp = { EN_ERP: 'si', NO_ESTA_EN_ERP: 'no', PROBABLE: 'probable', SIN_COBERTURA: 'sin_cobertura', DESACTUALIZADO: 'desactualizado', ERROR: 'error', NO_APLICA: 'no_aplica' }[f.erp && f.erp.estado] || 'no_aplica';
     return {
       momento: momento || 'conciliacion', cufe: f.cufe || null, documento: f.documento || null, tipo: f.tipo, proveedor: f.proveedor || null, nit_emisor: f.nit || null,
       fecha_emision: f.fecha || null, res_dian: 'si', res_web: web, res_erp: erp, resultado: f.resultado, motivo: String(f.motivo || '').slice(0, 900), causacion_erp: f.causacion || null,
@@ -378,7 +436,7 @@
   }
 
   return {
-    RESULTADO, ETIQUETA, sinTildes, clavesDocumento, tieneNumero, tokensNombre, normalizarNombre, nombreOrdenado, compararProveedor,
+    ESTADO, CLASE, estadoOperativo, frescuraErp, datosDelErp, RESULTADO, ETIQUETA, sinTildes, clavesDocumento, tieneNumero, tokensNombre, normalizarNombre, nombreOrdenado, compararProveedor,
     parseNumeroCo, fechaCoIso, causacionDe, csvATabla, interpretarTablaErp, indexarErp, buscarEnErp, buscarEnPedidos,
     proveedorExcluido, apartarExcluidosCruce, conciliar, seleccionarParaCarga, verificarAntesDeCargar, criteriosConsulta, filaAuditoria,
   };

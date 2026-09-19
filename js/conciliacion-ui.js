@@ -4,7 +4,8 @@
 //  La logica de decidir (que esta ingresado y que no) vive en js/conciliacion.js: pura, determinista y probada con node.
 //  Este archivo solo lee las tablas, pinta y manda a la cola. NO usa IA. Usa las globales de index.html (SB, perfil, usuario, escAg, $, cargar, cr).
 // ============================================================
-let conc = { tabla: null, archivo: '', fuentes: null, res: null, tab: 'factura', carga: null, ocupado: false, msg: '', errores: {}, erpInfo: null, marcas: [], quiere: null, vista: [], nFacturas: 0, nPedidos: 0 };
+let conc = { tabla: null, archivo: '', fuentes: null, res: null, tab: 'factura', carga: null, ocupado: false, msg: '', errores: {}, erpInfo: null, marcas: [], quiere: null, vista: [], nFacturas: 0, nPedidos: 0,
+  filtro: { desde: '', hasta: '', proveedor: '', sede: '', q: '' }, sedes: [], maxHoras: 12, verOtros: false, tabOtros: 'ingresadas', detalle: null };
 
 const concUsuario = () => (typeof perfil !== 'undefined' && perfil && perfil.nombre) || (typeof usuario !== 'undefined' && usuario && usuario.email) || 'admin';
 const concBadge = (txt, cls, st) => `<span class="badge ${cls || ''}" style="${st || ''}">${escAg(txt)}</span>`;
@@ -43,18 +44,22 @@ async function concLeerErp(ev) {
     conc.msg = 'Leyendo el reporte del ERP...'; concMsg();
     const t = Conciliacion.interpretarTablaErp(await concFilas(file));
     if (t.error) { alert(t.error); conc.msg = ''; concMsg(); return; }
-    const s = t.resumen;
+    const s = t.resumen, modif = new Date(file.lastModified || Date.now()), edadH = Math.max(0, (Date.now() - modif.getTime()) / 3600000);
     if (!confirm('Reporte del ERP: ' + s.total + ' documentos (' + s.facturas + ' facturas y ' + s.notas + ' notas crédito) del ' + s.desde + ' al ' + s.hasta + '.' + (s.sinNumero ? '\n' + s.sinNumero + ' no traen número de factura en "Su Doc" (se comparan por proveedor y monto).' : '') +
+      '\n\nArchivo generado el ' + modif.toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) + ' (hace ' + Math.round(edadH) + ' h).' +
+      (edadH > conc.maxHoras ? '\n⚠️ Tiene más de ' + conc.maxHoras + ' h: se guarda, pero los pendientes quedarán POR REVISAR hasta que cargues un reporte reciente de Hiopos.' : '') +
       '\n\nSe guardan en la web como copia del ERP. Solo agrega o actualiza por N° de causación: no borra nada.\n\n¿Cargar?')) { conc.msg = ''; concMsg(); return; }
     const { data: id, error } = await SB.rpc('erp_carga_iniciar', { p_archivo: file.name, p_usuario: concUsuario() });
     if (error) throw new Error(error.message);
-    const docs = t.docs.map((d) => ({ causacion: d.causacion, serie: d.serie, numero: d.numero, fecha: d.fecha, su_doc: d.su_doc, contacto: d.contacto, contacto_norm: d.contacto_norm, almacen: d.almacen, base: d.base, impuestos: d.impuestos, neto: d.neto, tipo: d.tipo, procesado: d.procesado }));
+    const docs = t.docs.map((d) => ({ causacion: d.causacion, serie: d.serie, numero: d.numero, fecha: d.fecha, su_doc: d.su_doc, contacto: d.contacto, contacto_norm: d.contacto_norm, almacen: d.almacen, hora: d.hora, base: d.base, impuestos: d.impuestos, neto: d.neto, tipo: d.tipo, procesado: d.procesado }));
     for (let i = 0; i < docs.length; i += 500) {
       conc.msg = 'Guardando el reporte del ERP... ' + Math.min(i + 500, docs.length) + ' de ' + docs.length; concMsg();
       const r = await SB.rpc('erp_cargar_lote', { p_carga: id, p_docs: docs.slice(i, i + 500) });
       if (r.error) throw new Error(r.error.message);
     }
     const c = await SB.rpc('erp_carga_cerrar', { p_carga: id }); if (c.error) throw new Error(c.error.message);
+    const m = await SB.rpc('erp_carga_marcar_archivo', { p_carga: id, p_modificado: modif.toISOString() });   // de cuando es la foto del ERP (no de cuando se subio)
+    if (m.error) throw new Error(m.error.message);
     conc.msg = '';
     if (conc.tabla) await concEjecutar({ tipoLog: 'conciliar' }); else { conc.msg = '✅ Reporte del ERP cargado (' + s.total + ' documentos). Ahora sube el Excel de la DIAN con "SUBIR FACTURAS".'; concPintar(); }
   } catch (e) { conc.msg = ''; alert('No se pudo cargar el reporte del ERP: ' + e.message + '\n\n(Si dice que no existe la tabla, falta ejecutar banco_web/supabase/conciliacion.sql en Supabase.)'); concMsg(); }
@@ -77,23 +82,28 @@ const concNumErp = (d) => Object.assign({}, d, { base: Number(d.base) || 0, impu
 
 async function concCargarFuentes() {
   const errores = {};
-  const [facturas, pedidos, erpDocs, cargas, alias, decisiones, marcas, excluidos] = await Promise.all([
-    concIntentar(() => concPaginar((a, b) => SB.from('facturas').select('cufe,nit_emisor,prefijo,folio,documento,tipo,estado,num_ingreso').order('cufe').range(a, b)), errores, 'web'),
+  const [facturas, pedidos, erpDocs, cargas, alias, decisiones, marcas, excluidos, config, sedes] = await Promise.all([
+    concIntentar(() => concPaginar((a, b) => SB.from('facturas').select('cufe,nit_emisor,prefijo,folio,documento,tipo,estado,num_ingreso,sede_id').order('cufe').range(a, b)), errores, 'web'),
     concIntentar(() => concPaginar((a, b) => SB.from('pedidos').select('numero,proveedor_texto,nit_proveedor,factura_cufe,pedido_erp,numero_factura').or('numero_factura.not.is.null,factura_cufe.not.is.null').order('id').range(a, b)), errores, 'pedidos'),
     concIntentar(() => concPaginar((a, b) => SB.from('erp_documento').select('causacion,serie,numero,fecha,su_doc,su_doc_clave,contacto,contacto_norm,almacen,base,impuestos,neto,tipo,procesado').order('causacion').range(a, b)), errores, 'erp'),
-    concIntentar(async () => { const r = await SB.from('erp_carga').select('id,archivo,cargado_en,total,desde,hasta,cargado_por').not('total', 'is', null).order('id', { ascending: false }).limit(100); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'erp'),
+    concIntentar(async () => { const r = await SB.from('erp_carga').select('id,archivo,cargado_en,total,desde,hasta,cargado_por,archivo_modificado,corte').not('total', 'is', null).order('id', { ascending: false }).limit(100); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'erp'),
     concIntentar(async () => { const r = await SB.from('proveedor_alias').select('nit,nombre_erp_norm'); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'alias'),
     concIntentar(async () => { const r = await SB.from('conciliacion_decision').select('cufe,decision,causacion_erp,factura_relacionada,nota'); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'decisiones'),
     concIntentar(async () => { const r = await SB.from('marcas').select('id,nombre,nit'); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'marcas'),
     concIntentar(async () => { const r = await SB.from('proveedor_excluido').select('id,nombre,nit').eq('activo', true); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'excluidos'),
+    concIntentar(async () => { const r = await SB.from('cruce_config').select('clave,valor'); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'config'),
+    concIntentar(async () => { const r = await SB.from('sedes').select('id,nombre'); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'sedes'),
   ]);
   if (errores.alias) errores.erp = errores.erp || ('alias: ' + errores.alias);            // sin los alias confirmados no se puede juzgar el ERP con seguridad
   if (errores.decisiones) errores.erp = errores.erp || ('decisiones: ' + errores.decisiones);
   const docs = (erpDocs || []).map(concNumErp);
   const desdes = (cargas || []).map((c) => c.desde).filter(Boolean).sort();
   const hastas = (cargas || []).map((c) => c.hasta).filter(Boolean).sort();
-  const erp = docs.length ? { docs, desde: desdes[0] || null, hasta: hastas[hastas.length - 1] || null, cargadoEn: cargas && cargas[0] ? cargas[0].cargado_en : null, archivo: cargas && cargas[0] ? cargas[0].archivo : '' } : null;
+  const ultima = cargas && cargas[0] ? cargas[0] : {};
+  const erp = docs.length ? { docs, desde: desdes[0] || null, hasta: hastas[hastas.length - 1] || null, cargadoEn: ultima.cargado_en || null, archivo: ultima.archivo || '', archivo_modificado: ultima.archivo_modificado || null, corte: ultima.corte || null } : null;
+  const horas = Number(((config || []).find((c) => c.clave === 'erp_max_horas') || {}).valor);
   return {
+    maxHoras: horas > 0 ? horas : 12, sedes: sedes || [],
     marcas: marcas || [], nFacturas: (facturas || []).length, nPedidos: (pedidos || []).length,
     fuentes: { facturasWeb: facturas || [], pedidos: pedidos || [], erp, alias: (alias || []).map((a) => ({ nit: a.nit, nombre_norm: a.nombre_erp_norm })), decisiones: decisiones || [], excluidos: excluidos || [], errores },
   };
@@ -108,7 +118,8 @@ async function concEjecutar(o) {
     const f = await concCargarFuentes();
     if (!BancoUtils.nitsPropios(f.marcas).length) throw new Error('las marcas no tienen NIT en la base (tabla marcas, columna nit): sin ellos no se distingue una compra de una venta.');
     conc.fuentes = f.fuentes; conc.marcas = f.marcas; conc.nFacturas = f.nFacturas; conc.nPedidos = f.nPedidos; conc.errores = f.fuentes.errores;
-    conc.erpInfo = f.fuentes.erp ? { desde: f.fuentes.erp.desde, hasta: f.fuentes.erp.hasta, cargadoEn: f.fuentes.erp.cargadoEn, total: f.fuentes.erp.docs.length, archivo: f.fuentes.erp.archivo } : null;
+    conc.maxHoras = f.maxHoras; conc.sedes = f.sedes;
+    conc.erpInfo = f.fuentes.erp ? { desde: f.fuentes.erp.desde, hasta: f.fuentes.erp.hasta, cargadoEn: f.fuentes.erp.cargadoEn, total: f.fuentes.erp.docs.length, archivo: f.fuentes.erp.archivo, archivo_modificado: f.fuentes.erp.archivo_modificado, corte: f.fuentes.erp.corte } : null;
     concRecalcular();
     conc.msg = '';
     if (!o.silencioso) await concAuditoria(o.tipoLog || 'conciliar');
@@ -116,8 +127,10 @@ async function concEjecutar(o) {
   finally { conc.ocupado = false; concPintar(); }
 }
 function concRecalcular() {
-  conc.res = Conciliacion.conciliar(conc.tabla.registros, conc.fuentes, { nitsPropios: BancoUtils.nitsPropios(conc.marcas) });
+  conc.res = Conciliacion.conciliar(conc.tabla.registros, conc.fuentes, concOpciones());
 }
+// Opciones de la conciliacion: nuestros NIT (de la tabla marcas), la hora de ahora y las horas maximas del reporte del ERP (tabla cruce_config)
+const concOpciones = () => ({ nitsPropios: BancoUtils.nitsPropios(conc.marcas), ahora: new Date(), erpMaxHoras: conc.maxHoras });
 // Auditoria: en "subir" se guarda TODO lo del tipo; en una simple revision, solo lo que no esta ingresado
 async function concAuditoria(tipoLog) {
   try {
@@ -148,12 +161,20 @@ async function concRevisar() {
   if (!conc.tabla) { conc.quiere = null; alert('Elige el Excel que bajaste de la DIAN (el de "Documentos recibidos").'); $('fileConcDian').click(); return; }
   await concEjecutar({ tipoLog: 'conciliar' });
 }
-function concCerrar() { concDetenerTimer(); conc.carga = null; const p = $('panelConc'); if (p) p.remove(); }
+function concCerrar() { concDetenerTimer(); conc.carga = null; if (typeof setModulo === 'function') setModulo('banco'); }
 function concDetenerTimer() { if (conc.carga && conc.carga.timer) { clearInterval(conc.carga.timer); conc.carga.timer = null; } }
 
 // ---------------------------------------------------------------- correcciones de una persona (conocimiento estructurado, no IA)
 async function concDecidir(f, decision, causacion, facturaRel, nota, candidato) {
   const nit = f.nit || '';
+  // Si otra persona ya corrigió este documento mientras esta pantalla estaba abierta, se avisa antes de pisar su decisión
+  try {
+    const p = await SB.from('conciliacion_decision').select('cufe,decision,causacion_erp,factura_relacionada,decidido_por').eq('cufe', f.cufe).limit(1);
+    const previo = (p.data && p.data[0]) || null, local = conc.fuentes.decisiones.find((d) => String(d.cufe).toLowerCase() === f.cufe) || null;
+    const v = (o, k) => (o && o[k]) || null;
+    if ((v(previo, 'decision') !== v(local, 'decision') || v(previo, 'causacion_erp') !== v(local, 'causacion_erp') || v(previo, 'factura_relacionada') !== v(local, 'factura_relacionada'))
+      && !confirm('Otra persona' + (previo && previo.decidido_por ? ' (' + previo.decidido_por + ')' : '') + ' ya corrigió este documento mientras tenías la pantalla abierta.\n\nDecisión actual: ' + (v(previo, 'decision') || 'ninguna') + (previo && previo.causacion_erp ? ' · ' + previo.causacion_erp : '') + '\n\n¿Quieres reemplazarla con la tuya?')) return;
+  } catch (e) { /* si no se puede comprobar, se sigue como antes */ }
   const alias = candidato && candidato.doc ? Conciliacion.normalizarNombre(candidato.doc.contacto) : '';
   const { error } = await SB.rpc('conciliacion_decidir', { p_cufe: f.cufe, p_decision: decision, p_causacion: causacion || null, p_factura_rel: facturaRel || null, p_nota: nota || null,
     p_nit: decision === 'en_erp' ? nit : null, p_contacto_erp: candidato && candidato.doc ? candidato.doc.contacto : null, p_contacto_norm: decision === 'en_erp' ? alias : null,
@@ -166,8 +187,8 @@ async function concDecidir(f, decision, causacion, facturaRel, nota, candidato) 
   if (decision === 'en_erp' && alias && nit) conc.fuentes.alias.push({ nit, nombre_norm: alias });
   concRecalcular(); concPintar();
 }
-async function concAccion(i, accion) {
-  const f = conc.vista[i]; if (!f) return;
+async function concAccion(i, accion, fila) {
+  const f = fila || conc.vista[i]; if (!f) return;
   try {
     if (accion === 'es_esa') { const c = f.candidatos[0]; await concDecidir(f, 'en_erp', c.causacion, null, 'confirmada como la misma factura', c); }
     else if (accion === 'no_esta') { if (!confirm('Confirmas que ' + f.documento + ' (' + f.proveedor + ') NO está en el ERP?\nDeja de aparecer como dudosa y queda como pendiente de ingreso.')) return; await concDecidir(f, 'no_esta', null, f.factura_relacionada, 'confirmada como pendiente'); }
@@ -226,6 +247,9 @@ function concPreguntarCarga(tipoDoc) {
   const nombre = CONC_NOMBRE_TIPO[tipoDoc];
   conc.carga = { tipo: tipoDoc, fase: 'confirmar', items: lista.map((f) => ({ fila: f, estado: 'PENDIENTE', detalle: '' })), idx: 0, cancelar: false, marca: '', timer: null, audit: [], bloqueo: '' };
   if (errs.length || !conc.fuentes.erp) conc.carga.bloqueo = !conc.fuentes.erp && !errs.includes('erp') ? 'No hay reporte del ERP cargado. Carga el reporte "Documentos" de Hiopos (botón "Cargar reporte del ERP") y vuelve a intentar.' : 'No se pudo consultar: ' + errs.map((k) => k + ' (' + conc.errores[k] + ')').join(', ') + '. Una consulta que falla NO significa que el documento no exista, así que no se sube nada.';
+  const fr = conc.res && conc.res.frescura;
+  if (!conc.carga.bloqueo && fr && fr.aplica && !fr.ok) conc.carga.bloqueo = fr.desconocida ? 'No se sabe de cuándo es el reporte del ERP. Carga uno nuevo de Hiopos y vuelve a intentar.'
+    : 'El reporte del ERP tiene ' + Math.round(fr.horas) + ' h (máximo ' + fr.maxHoras + ' h). Si otra persona ya ingresó facturas, el cruce no lo puede saber. Carga un reporte nuevo de Hiopos y vuelve a intentar.';
   concPintar();
   const el = $('concCargaBox'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
@@ -247,8 +271,8 @@ async function concFuentesFrescas(f) {
   const k = Conciliacion.criteriosConsulta(f.r), errores = {};
   const uniq = (arr, key) => { const m = new Map(); arr.flat().filter(Boolean).forEach((x) => m.set(key(x), x)); return [...m.values()]; };
   const q = async (fn) => { const r = await fn(); if (r.error) throw new Error(r.error.message); return r.data || []; };
-  const colsF = 'cufe,nit_emisor,prefijo,folio,documento,tipo,estado,num_ingreso', colsE = 'causacion,serie,numero,fecha,su_doc,su_doc_clave,contacto,contacto_norm,almacen,base,impuestos,neto,tipo,procesado', colsP = 'numero,proveedor_texto,nit_proveedor,factura_cufe,pedido_erp,numero_factura';
-  const [fa, fb, ea, eb, pa, pb, alias, dec, carga] = await Promise.all([
+  const colsF = 'cufe,nit_emisor,prefijo,folio,documento,tipo,estado,num_ingreso,sede_id', colsE = 'causacion,serie,numero,fecha,su_doc,su_doc_clave,contacto,contacto_norm,almacen,base,impuestos,neto,tipo,procesado', colsP = 'numero,proveedor_texto,nit_proveedor,factura_cufe,pedido_erp,numero_factura';
+  const [fa, fb, ea, eb, pa, pb, alias, dec, carga, ultimaCarga] = await Promise.all([
     concIntentar(() => q(() => SB.from('facturas').select(colsF).eq('cufe', k.cufe)), errores, 'web'),
     concIntentar(() => q(() => SB.from('facturas').select(colsF).eq('nit_emisor', k.nit)), errores, 'web'),
     concIntentar(() => (k.digitos ? q(() => SB.from('erp_documento').select(colsE).ilike('su_doc_clave', '*' + k.digitos + '*')) : Promise.resolve([])), errores, 'erp'),
@@ -258,36 +282,44 @@ async function concFuentesFrescas(f) {
     concIntentar(() => q(() => SB.from('proveedor_alias').select('nit,nombre_erp_norm').eq('nit', k.nit)), errores, 'erp'),
     concIntentar(() => q(() => SB.from('conciliacion_decision').select('cufe,decision,causacion_erp,factura_relacionada,nota').eq('cufe', k.cufe)), errores, 'erp'),
     concIntentar(() => q(() => SB.from('erp_carga').select('desde,cargado_en').not('total', 'is', null).order('desde', { ascending: true }).limit(1)), errores, 'erp'),
+    concIntentar(() => q(() => SB.from('erp_carga').select('archivo_modificado,corte').not('total', 'is', null).order('id', { ascending: false }).limit(1)), errores, 'erp'),
   ]);
   const desde = carga && carga[0] ? carga[0].desde : null;
   return {
     facturasWeb: uniq([fa || [], fb || []], (x) => x.cufe), pedidos: uniq([pa || [], pb || []], (x) => x.numero + '|' + x.numero_factura),
-    erp: desde ? { docs: uniq([ea || [], eb || []], (x) => x.causacion).map(concNumErp), desde } : null,
+    erp: desde ? { docs: uniq([ea || [], eb || []], (x) => x.causacion).map(concNumErp), desde, archivo_modificado: ultimaCarga && ultimaCarga[0] ? ultimaCarga[0].archivo_modificado : null, corte: ultimaCarga && ultimaCarga[0] ? ultimaCarga[0].corte : null } : null,
     alias: (alias || []).map((a) => ({ nit: a.nit, nombre_norm: a.nombre_erp_norm })), decisiones: dec || [], errores,
   };
 }
 async function concProcesar(items) {
-  const c = conc.carga, total = c.items.length, opciones = { nitsPropios: BancoUtils.nitsPropios(conc.marcas) };
+  const c = conc.carga, total = c.items.length;
   for (const it of items) {
     if (c.cancelar) break;
     c.idx = c.items.indexOf(it) + 1; it.estado = 'EN_PROCESO'; it.detalle = 'volviendo a comprobar en la web y el ERP...'; concPintar();
     try {
-      const v = Conciliacion.verificarAntesDeCargar(it.fila, await concFuentesFrescas(it.fila), opciones);
+      const v = Conciliacion.verificarAntesDeCargar(it.fila, await concFuentesFrescas(it.fila), concOpciones());
       const fv = v.fila || it.fila;
       if (!v.ok) {
-        const etiqueta = { YA_EXISTE_EN_ERP: 'YA EXISTE EN EL ERP', YA_EXISTE_EN_WEB: 'YA EXISTE EN LA WEB', ERROR_DE_CONSULTA: 'ERROR DE CONSULTA' }[v.estado] || v.estado;
-        it.estado = v.estado === 'ERROR_DE_CONSULTA' ? 'ERROR' : 'OMITIDA'; it.detalle = etiqueta + ' · ' + (v.motivo || '');
+        const etiqueta = { YA_EXISTE_EN_ERP: 'YA EXISTE EN EL ERP', YA_EXISTE_EN_WEB: 'YA EXISTE EN LA WEB', ERROR_DE_CONSULTA: 'ERROR DE CONSULTA', ERP_DESACTUALIZADO: 'REPORTE DEL ERP DESACTUALIZADO' }[v.estado] || v.estado;
+        it.estado = (v.estado === 'ERROR_DE_CONSULTA' || v.estado === 'ERP_DESACTUALIZADO') ? 'ERROR' : 'OMITIDA'; it.detalle = etiqueta + ' · ' + (v.motivo || '');
+        if (v.estado === 'ERP_DESACTUALIZADO') { c.cancelar = true; c.msg = 'El reporte del ERP se volvió viejo: carga uno nuevo y pulsa “Continuar y reintentar”.'; }
         c.audit.push(Object.assign(Conciliacion.filaAuditoria(fv, 'reverificacion'), { motivo: (etiqueta + ': ' + (v.motivo || '')).slice(0, 900) }));
       } else {
-        const item = Object.assign(BancoUtils.itemsParaDescarga([{ r: it.fila.r }])[0], { tipo: it.fila.tipo });
+        const item = Object.assign(BancoUtils.itemsParaDescarga([{ r: it.fila.r }])[0], { tipo: it.fila.tipo, emisor_norm: Conciliacion.normalizarNombre(it.fila.proveedor) });
         const marcaId = concMarcaDe(it.fila.r) || Number(c.marca);
-        const { data, error } = await SB.rpc('dian_encolar', { p_items: [item], p_marca: marcaId, p_usuario: concUsuario() });
-        if (error) throw new Error(error.message);
-        const d = Array.isArray(data) ? data[0] : data;
-        if (d && Number(d.ya_en_sistema)) { it.estado = 'OMITIDA'; it.detalle = 'YA EXISTE EN LA WEB (el banco ya la tiene)'; }
-        else if (d && Number(d.invalidos)) { it.estado = 'ERROR'; it.detalle = 'sin CUFE o NIT válido'; }
-        else { it.estado = 'ESPERANDO_PDF'; it.detalle = d && Number(d.ya_en_cola) ? 'ya estaba en la lista de descargas' : 'en la lista de descargas'; }
-        c.audit.push(Object.assign(Conciliacion.filaAuditoria(fv, 'reverificacion'), { motivo: 'Re-verificada: sigue pendiente. ' + it.estado + ' — ' + it.detalle }));
+        // ULTIMA validacion en la BASE (bloqueo por CUFE + reporte del ERP reciente + no esta en la web ni en el ERP): dos usuarios a la vez no pasan los dos
+        const { data, error } = await SB.rpc('cruce_encolar_verificado', { p_items: [item], p_marca: marcaId, p_usuario: concUsuario() });
+        if (error) {
+          if (/ERP_DESACTUALIZADO/.test(error.message)) { it.estado = 'ERROR'; it.detalle = 'REPORTE DEL ERP DESACTUALIZADO · carga un reporte nuevo'; c.cancelar = true; c.msg = 'El reporte del ERP se volvió viejo: carga uno nuevo y pulsa “Continuar y reintentar”.'; concPintar(); continue; }
+          throw new Error(error.message);
+        }
+        const d = (Array.isArray(data) ? data[0] : data) || {}, res = d.o_resultado;
+        if (res === 'YA_EXISTE_EN_WEB') { it.estado = 'OMITIDA'; it.detalle = 'YA EXISTE EN LA WEB (el banco ya la tiene)'; }
+        else if (res === 'YA_EXISTE_EN_ERP') { it.estado = 'OMITIDA'; it.detalle = 'YA EXISTE EN EL ERP · ' + (d.o_motivo || ''); }
+        else if (res === 'ENCOLADA' || res === 'YA_EN_COLA') { it.estado = 'ESPERANDO_PDF'; it.detalle = res === 'YA_EN_COLA' ? 'ya estaba en la lista de descargas' : 'en la lista de descargas'; }
+        else { it.estado = 'ERROR'; it.detalle = d.o_motivo || 'sin CUFE o NIT válido'; }
+        if (it.estado !== 'OMITIDA') c.audit.push(Object.assign(Conciliacion.filaAuditoria(fv, 'reverificacion'), { motivo: 'Re-verificada: sigue pendiente. ' + it.estado + ' — ' + it.detalle }));
+        else c.audit.push(Object.assign(Conciliacion.filaAuditoria(fv, 'reverificacion'), { motivo: ('Verificacion final en la base: ' + it.detalle).slice(0, 900) }));
       }
     } catch (e) { it.estado = 'ERROR'; it.detalle = String(e.message || e).slice(0, 300); }   // un error NO detiene el resto
     concPintar();
@@ -369,13 +401,13 @@ async function concReintentar() {
 // ---------------------------------------------------------------- pintar
 function concMsg() { const el = $('concMsg'); if (el) el.textContent = conc.msg || ''; }
 function concFilasDeTab(tab) {
-  const fs = conc.res ? conc.res.filas : [], R = Conciliacion.RESULTADO;
-  if (tab === 'factura') return fs.filter((f) => f.tipo === 'factura' && f.resultado === R.PENDIENTE && f.falta_pdf);          // lo que hay que SUBIR (coincide con el boton)
-  if (tab === 'sin_erp') return fs.filter((f) => f.tipo === 'factura' && f.resultado === R.PENDIENTE && !f.falta_pdf);         // ya tiene PDF en la web, falta ingresarla al ERP
-  if (tab === 'nota_credito') return fs.filter((f) => f.tipo === 'nota_credito' && f.resultado === R.PENDIENTE);
-  if (tab === 'revisar') return fs.filter((f) => [R.REVISAR, R.DUPLICADA, R.ERROR].includes(f.resultado));
-  if (tab === 'ingresadas') return fs.filter((f) => f.resultado === R.INGRESADA);
-  return fs.filter((f) => f.resultado === R.ANULADA || f.resultado === R.APARTADO || (f.tipo === 'nota_debito' && f.resultado === R.PENDIENTE));
+  const fs = conc.res ? conc.res.filas : [], E = Conciliacion.ESTADO;
+  if (tab === 'factura') return fs.filter((f) => f.tipo === 'factura' && f.estado === E.PENDIENTE);            // facturas pendientes de ingreso (con o sin PDF en la web)
+  if (tab === 'nota_credito') return fs.filter((f) => f.tipo === 'nota_credito' && f.estado === E.PENDIENTE);
+  if (tab === 'revisar') return fs.filter((f) => f.tipo !== 'nota_debito' && (f.estado === E.REVISAR || f.estado === E.ERROR_CONSULTA));
+  if (tab === 'sin_erp') return fs.filter((f) => f.tipo === 'factura' && f.estado === E.PENDIENTE && !f.falta_pdf);   // ya tiene PDF en la web, falta ingresarla al ERP
+  if (tab === 'ingresadas') return fs.filter((f) => f.estado === E.INGRESADA);
+  return fs.filter((f) => [E.ANULADA, E.APARTADO, E.NOTA_DEBITO].includes(f.estado));                                // apartadas, anuladas, notas debito
 }
 function concDescargarCsv() {
   const fs = concFilasDeTab(conc.tab); if (!fs.length) return;
@@ -386,47 +418,6 @@ function concDescargarCsv() {
   a.download = 'conciliacion_' + conc.tab + '_' + BancoUtils.hoyColombia() + '.csv'; document.body.appendChild(a); a.click(); a.remove();
 }
 function concCambiarTab(t) { conc.tab = t; concPintar(); }
-function concCeldaWeb(f) {
-  const w = f.web || {};
-  if (w.estado === 'EN_WEB') return concBadge('EN WEB', 'st-sellada') + (f.web.pedido ? `<div class="mut">pedido ${escAg(f.web.pedido)}</div>` : '');
-  if (w.estado === 'NO_ESTA_EN_WEB') return concBadge('NO — falta PDF', 'st-pool') + (f.web.pedido ? `<div class="mut">pedido ${escAg(f.web.pedido)}</div>` : '');
-  if (w.estado === 'DUPLICADA') return concBadge('CUFE DISTINTO', '', CONC_ROJO);
-  if (w.estado === 'ERROR') return concBadge('ERROR DE CONSULTA', '', CONC_ROJO);
-  return '<span class="mut">—</span>';
-}
-function concCeldaErp(f) {
-  const e = f.erp || {};
-  if (e.estado === 'EN_ERP') return concBadge('EN ERP', 'st-sellada') + `<div class="mut">${escAg(e.causacion || '')} · ${escAg(e.fuente || '')}</div>`;
-  if (e.estado === 'NO_ESTA_EN_ERP') return concBadge('NO ESTÁ', 'st-pool');
-  if (e.estado === 'PROBABLE') return concBadge('PROBABLE', 'st-asignada') + `<div class="mut">${escAg(e.causacion || '')}</div>`;
-  if (e.estado === 'SIN_COBERTURA') return concBadge('SIN COBERTURA', 'st-asignada');
-  if (e.estado === 'ERROR') return concBadge('ERROR DE CONSULTA', '', CONC_ROJO);
-  return '<span class="mut">—</span>';
-}
-function concCeldaResultado(f) {
-  const R = Conciliacion.RESULTADO, et = Conciliacion.ETIQUETA[f.resultado] || f.resultado;
-  const cls = { [R.INGRESADA]: 'st-sellada', [R.PENDIENTE]: 'st-pool', [R.REVISAR]: 'st-asignada', [R.DUPLICADA]: 'st-asignada' }[f.resultado] || '';
-  return concBadge(et + (f.tipo === 'nota_credito' ? ' · NC' : f.tipo === 'nota_debito' ? ' · ND' : ''), cls, f.resultado === R.ERROR ? CONC_ROJO : '');
-}
-function concAcciones(f, i) {
-  const R = Conciliacion.RESULTADO, b = (txt, acc, extra) => `<button class="${extra || ''}" style="padding:2px 8px;margin:1px" onclick="concAccion(${i},'${acc}')">${txt}</button>`;
-  let h = '';
-  if (f.resultado === R.REVISAR && f.candidatos.length) h += b('✔ Es esa', 'es_esa', 's') + b('✖ No está', 'no_esta');
-  else if (f.resultado === R.REVISAR) h += b('✖ No está', 'no_esta') + b('Ya está…', 'ya_esta');
-  else if (f.resultado === R.PENDIENTE) h += b('Ya está en el ERP…', 'ya_esta');
-  else if (f.resultado === R.INGRESADA && f.erp.fuente === 'confirmada a mano') h += b('↩ Deshacer', 'deshacer');
-  if (f.tipo === 'nota_credito' && [R.PENDIENTE, R.INGRESADA, R.REVISAR].includes(f.resultado)) h += b('✏ Control', 'control');
-  if (f.resultado === R.APARTADO) h += b('↩ Volver a incluir', 'incluir');
-  else if ([R.PENDIENTE, R.REVISAR].includes(f.resultado)) h += b('🚫 No lo manejo', 'apartar');
-  return h;
-}
-function concFila(f, i) {
-  const rel = f.tipo === 'nota_credito' ? `<div class="mut">↳ factura: <b>${escAg(f.factura_relacionada || 'sin indicar')}</b> · causación ERP: <b>${escAg(f.causacion || 'sin ingresar')}</b></div>` : '';
-  const cand = f.candidatos && f.candidatos.length && f.resultado === 'REVISAR' ? `<div class="mut">${escAg(f.candidatos[0].detalle)}</div>` : '';
-  return `<tr><td><b>${escAg(f.documento || '—')}</b>${rel}${f.resultado === 'REVISAR' || f.resultado === 'DUPLICADA' || f.resultado === 'ERROR_DE_CONCILIACION' ? (cand || `<div class="mut">${escAg(f.motivo)}</div>`) : ''}</td>
-    <td>${escAg(f.proveedor || '—')}<div class="mut">NIT ${escAg(f.nit || '—')}</div></td><td>${escAg(f.fecha || '')}</td><td class="num">${f.total == null ? '' : escAg(money(f.total))}</td>
-    <td>${concBadge('EN DIAN', 'st-sellada')}</td><td>${concCeldaWeb(f)}</td><td>${concCeldaErp(f)}</td><td>${concCeldaResultado(f)}</td><td>${concAcciones(f, i)}</td></tr>`;
-}
 function concPintarCarga() {
   const c = conc.carga; if (!c) return '';
   const nombre = CONC_NOMBRE_TIPO[c.tipo], uno = c.tipo === 'nota_credito' ? 'Nota crédito' : 'Factura';
@@ -463,32 +454,4 @@ function concPintarCarga() {
   }
   return h + '</div>';
 }
-function concPintar() {
-  let p = $('panelConc');
-  if (!p) { p = document.createElement('div'); p.id = 'panelConc'; p.className = 'card'; p.style.margin = '0 0 16px'; $('barraDescarga').insertAdjacentElement('afterend', p); }
-  const res = conc.res, s = res ? res.resumen : null, R = Conciliacion.RESULTADO;
-  let h = `<div class="row"><b>Conciliación DIAN ↔ Web ↔ ERP</b><span class="sp"></span><button onclick="concCerrar()">Cerrar</button></div>`;
-  h += `<div class="mut" id="concMsg" style="margin:4px 0">${escAg(conc.msg || '')}</div>`;
-  const e = conc.erpInfo, hora = (t) => (t ? new Date(t).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : '');
-  h += `<div class="mut" style="margin:4px 0">DIAN: <b>${conc.tabla ? conc.tabla.registros.length : 0}</b> documentos leídos${conc.archivo ? ' (' + escAg(conc.archivo) + ')' : ''} · Web: <b>${conc.nFacturas}</b> facturas y <b>${conc.nPedidos}</b> pedidos con factura · ERP: ${e ? `<b>${e.total}</b> documentos del ${escAg(e.desde || '?')} al ${escAg(e.hasta || '?')} (reporte cargado ${escAg(hora(e.cargadoEn))})` : '<b style="color:#991b1b">sin reporte cargado</b>'}</div>`;
-  for (const k of Object.keys(conc.errores || {})) h += `<div style="color:#991b1b;margin:2px 0">⛔ No se pudo leer ${escAg(k)}: ${escAg(conc.errores[k])}. Lo que dependa de eso queda como ERROR DE CONCILIACIÓN (no se sube).</div>`;
-  if (!e && res) h += `<div style="color:#991b1b;margin:4px 0"><b>Falta el reporte del ERP.</b> Sin él no se puede saber qué está ingresado: nada se sube. Usa “📥 Cargar reporte del ERP” (el reporte “Documentos” de Hiopos, en CSV).</div>`;
-  if (conc.avisoAuditoria) h += `<div style="color:#b45309;margin:2px 0">⚠️ ${escAg(conc.avisoAuditoria)}</div>`;
-  h += `<div class="row" style="margin:8px 0;gap:8px"><label style="background:#0f766e;color:#fff;font-weight:700;padding:6px 12px;border-radius:9px;cursor:pointer;font-size:13px">📥 Cargar reporte del ERP<input type="file" accept=".csv,.xlsx,.xls" style="display:none" onchange="concLeerErp(event)"></label>
-    <button onclick="concEjecutar({tipoLog:'conciliar'})">🔄 Volver a conciliar</button><button onclick="concOtroDian()">📂 Otro Excel de la DIAN</button><button onclick="concDescargarCsv()">⬇ CSV de esta lista</button><button onclick="concVerExcluidos()">🚫 Proveedores que no manejo (${conc.fuentes ? conc.fuentes.excluidos.length : '…'})</button></div>${concPintarExcluidos()}`;
-  if (s) {
-    const T = s.porTipo;
-    const tarjeta = (tp, tit, col) => `<div style="flex:1;min-width:260px;border:1px solid var(--line);border-radius:10px;padding:10px"><b>${tit}</b><div class="mut" style="margin:4px 0"><b>${T[tp].porSubir}</b> por subir (falta el PDF) · <b>${T[tp].enWebSinIngreso}</b> en la web sin ingresar al ERP · <b>${T[tp].revisar + T[tp].duplicadas + T[tp].errores}</b> por revisar · <b>${T[tp].ingresadas}</b> ya ingresadas</div>
-      <button class="p" style="background:${col};border-color:${col};font-weight:800" ${T[tp].porSubir && e ? '' : 'disabled'} onclick="concSubir('${tp}')">⬆ SUBIR ${tp === 'factura' ? 'FACTURAS' : 'NOTAS CRÉDITO'} (${T[tp].porSubir})</button></div>`;
-    h += `<div class="row" style="gap:10px;align-items:stretch">${tarjeta('factura', 'Facturas', '#166534')}${tarjeta('nota_credito', 'Notas crédito', '#1e3a8a')}</div>`;
-    h += `<div class="mut" style="margin:6px 0">Se apartaron: ${s.emitidasPropias} emitidas por nosotros (ventas) · ${s.otrosDocumentos} otros documentos (eventos, etc.) · ${T.factura.apartados + T.nota_credito.apartados + T.nota_debito.apartados} de proveedores que no manejas${T.nota_debito.total ? ` · ${T.nota_debito.total} nota(s) débito` : ''}.</div>`;
-  }
-  h += concPintarCarga();
-  if (res) {
-    const tabs = [['factura', 'Facturas pendientes'], ['sin_erp', 'En la web, sin ingresar al ERP'], ['nota_credito', 'Notas crédito pendientes'], ['revisar', 'Por revisar'], ['ingresadas', 'Ingresadas'], ['otras', 'Apartados y otros']];
-    h += `<div class="row" style="margin:10px 0;gap:6px">${tabs.map(([k, t]) => `<button class="chip ${conc.tab === k ? 'on' : ''}" onclick="concCambiarTab('${k}')">${t} (${concFilasDeTab(k).length})</button>`).join('')}</div>`;
-    const lista = concFilasDeTab(conc.tab); conc.vista = lista.slice(0, 300);
-    h += lista.length ? `<table><thead><tr><th>Documento</th><th>Proveedor</th><th>Fecha</th><th class="num">Total</th><th>DIAN</th><th>Web</th><th>ERP</th><th>Resultado</th><th></th></tr></thead><tbody>${conc.vista.map((f, i) => concFila(f, i)).join('')}</tbody></table>${lista.length > 300 ? `<div class="mut">… y ${lista.length - 300} más (todas van en el CSV).</div>` : ''}` : '<div class="vacio">Nada en esta lista. ✅</div>';
-  }
-  p.innerHTML = h;
-}
+function concPintar() { if (typeof cruceDianPintar === 'function') cruceDianPintar(); }
