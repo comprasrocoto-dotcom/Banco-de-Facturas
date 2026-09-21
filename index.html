@@ -1128,8 +1128,8 @@ async function abrirAmarre(modo, id){
     const f=facturas.find(x=>x.cufe===id)||{};
     $("amTitulo").textContent="🔗 Buscar el pedido de la factura "+(((f.prefijo||"")+(f.folio||""))||"");
     if(!pedidosCargados) await cargarPedidos();
-    // Las sedes solo ven sus propios pedidos; admin/pagos ven todos
-    amDatos = (perfil.rol==="sede") ? pedidos.filter(p=>p.sede_id===perfil.sede_id) : pedidos;
+    // Las sedes solo ven sus propios pedidos; admin/pagos ven todos. Y de esos, SOLO los que aun esperan factura (pendientes, sin factura amarrada)
+    amDatos = ((perfil.rol==="sede") ? pedidos.filter(p=>p.sede_id===perfil.sede_id) : pedidos).filter(SinSellar.pendienteDeAmarrar);
   }
   pintarAmarre();
   $("modalAmarre").classList.add("on");
@@ -1147,13 +1147,15 @@ async function borrarPedido(id){
 function pintarAmarre(){
   const q=($("amBuscar").value||"").trim().toLowerCase();
   let l=amDatos;
-  // Desde la factura: los pedidos del MISMO PROVEEDOR primero (así es más difícil amarrar el que no es)
+  // Desde la factura: del pedido MÁS RECIENTE al más antiguo. Cada uno dice si es del mismo proveedor (etiqueta), así es más difícil amarrar el que no es.
   const fac=(amModo==="pedido")?null:(facturas.find(x=>x.cufe===amId)||null);
-  if(fac) l=SinSellar.ordenarPedidos(fac,l);
+  if(amModo!=="pedido") l=SinSellar.ordenarRecientes(l);
   if(q) l=l.filter(x=>JSON.stringify(x).toLowerCase().includes(q));
+  const totalL=l.length;
   l=l.slice(0,200);
-  if(!l.length){ $("amLista").innerHTML='<div class="vacio">No encontré nada con "'+q+'"</div>'; return; }
-  $("amLista").innerHTML=l.map(x=>{
+  if(!l.length){ $("amLista").innerHTML=q?'<div class="vacio">No encontré nada con "'+escAg(q)+'"</div>':(amModo==="pedido"?'<div class="vacio">No hay facturas sin pedido.</div>':'<div class="vacio">No hay pedidos pendientes por amarrar.</div>'); return; }
+  const cuenta=(amModo==="pedido")?"":`<div class="mut" style="margin:4px 2px">${totalL} pedido${totalL===1?"":"s"} pendiente${totalL===1?"":"s"} por amarrar · del más reciente al más antiguo</div>`;
+  $("amLista").innerHTML=cuenta+l.map(x=>{
     if(amModo==="pedido"){
       return `<div class="card" style="margin:6px 0;cursor:pointer" onclick="amarrarConFactura('${x.cufe}')">
         <div class="row"><div><div class="emisor">${x.emisor||"—"}</div>

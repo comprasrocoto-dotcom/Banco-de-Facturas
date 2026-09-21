@@ -70,6 +70,13 @@
     return pedidos.map((p, i) => ({ p, i, r: rank[mismoProveedor(factura, p)] != null ? rank[mismoProveedor(factura, p)] : 2 }))
       .sort((a, b) => a.r - b.r || a.i - b.i).map((x) => x.p);
   }
+  // Desde la FACTURA: solo los pedidos que aun esperan factura (pendientes y sin factura amarrada). Los "facturado" sin factura web son historicos importados.
+  const pendienteDeAmarrar = (p) => !!p && !p.factura_cufe && (p.estado == null || p.estado === 'pendiente');
+  // Del mas reciente al mas antiguo: por la fecha del pedido y, a igual fecha, por el orden en que se crearon (id). Los que no traen fecha, al final.
+  function ordenarRecientes(pedidos) {
+    const f = (p) => (p && p.fecha && p.fecha !== 'null' ? String(p.fecha).slice(0, 10) : '');
+    return (pedidos || []).slice().sort((a, b) => f(b).localeCompare(f(a)) || (Number(b.id) || 0) - (Number(a.id) || 0));
+  }
   // Vistazo a los insumos: una linea corta para la tarjeta y la lista completa para el globo (tooltip)
   function vistazoInsumos(lineas, max) {
     max = max || 4;
@@ -81,5 +88,5 @@
     return { n: ls.length, corto, completo: ls.map((l) => '• ' + nombre(l) + cant(l)).join('\n') };
   }
 
-  return { DIAS_AVISO, DIAS_ALERTA, diasEntre, conIngreso, esIngresadaSinSellar, etiqueta, ordenar, sedeDe, resumenPorSede, mensajeAviso, mismoProveedor, ordenarPedidos, vistazoInsumos };
+  return { DIAS_AVISO, DIAS_ALERTA, diasEntre, conIngreso, esIngresadaSinSellar, etiqueta, ordenar, sedeDe, resumenPorSede, mensajeAviso, mismoProveedor, ordenarPedidos, pendienteDeAmarrar, ordenarRecientes, vistazoInsumos };
 });
