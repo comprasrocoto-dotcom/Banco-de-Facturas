@@ -90,6 +90,7 @@ tr:hover td{background:#f1f5f9}
     <button class="chip on" id="m-banco" onclick="setModulo('banco')">Facturas</button>
     <button class="chip"    id="m-pedidos" onclick="setModulo('pedidos')">📋 Pedidos</button>
     <button class="chip"  id="m-cruce" style="display:none" onclick="setModulo('cruce')">🧾 Cruce DIAN</button>
+    <button class="chip"  id="m-precios" style="display:none" onclick="setModulo('precios')">💲 Precios</button>
     <button class="chip"  id="m-admin" style="display:none" onclick="setModulo('admin')">⚙️ Admin</button>
     <span id="sede" class="badge"></span>
     <select id="fSede" style="width:auto;margin:0;display:none" onchange="cambiarFiltroSede()">
@@ -146,6 +147,7 @@ tr:hover td{background:#f1f5f9}
     <div id="lista"></div>
 
     <div id="vistaCruce" style="display:none"><div id="cruceRaiz"></div><input type="file" id="fileConcDian" accept=".csv,.xlsx,.xls" style="display:none" onchange="concLeerDian(event)"></div>
+    <div id="vistaPrecios" style="display:none"><div id="preciosRaiz"></div></div>
     <div id="vistaAdmin" style="display:none">
       <div class="row" style="margin-bottom:14px">
         <button class="chip on" id="ad-prov" onclick="setAdmin('prov')">Proveedores</button>
@@ -226,6 +228,8 @@ tr:hover td{background:#f1f5f9}
 <script src="js/conversiones.js"></script>
 <script src="js/importacion.js"></script>
 <script src="js/importacion-ui.js"></script>
+<script src="js/precios.js"></script>
+<script src="js/precios-ui.js"></script>
 <script src="js/conciliacion-ui.js"></script>
 <script src="js/cruce-dian-ui.js"></script>
 <script>
@@ -246,7 +250,7 @@ async function sesion(u){
   perfil=p||{nombre:u.email,rol:"sede"};
   $("login").style.display="none"; $("app").style.display="block";
   const s=perfil.sedes;
-  if(perfil.rol==="admin"||perfil.rol==="pagos"){$("btnsubir").style.display="inline-block";$("barraDescarga").style.display="flex";$("m-cruce").style.display="inline-block";}
+  if(perfil.rol==="admin"||perfil.rol==="pagos"){$("btnsubir").style.display="inline-block";$("barraDescarga").style.display="flex";$("m-cruce").style.display="inline-block";$("m-precios").style.display="inline-block";}
   if(perfil.rol==="admin"){ $("m-admin").style.display="inline-block"; $("btnIngresos").style.display="inline-block"; }
   const {data:ss}=await SB.from("sedes").select("id,nombre,marca_id,marcas(nombre)").order("nombre");
   sedes=ss||[];
@@ -946,6 +950,9 @@ function setModulo(m){
   if(m=="pedidos" && !pedidosCargados) cargarPedidos();
   $("vistaAdmin").style.display = (m=="admin")?"block":"none";
   if(m=="admin" && !adminCargado) cargarAdmin();
+  $("m-precios").classList.toggle("on",m=="precios");
+  $("vistaPrecios").style.display = (m=="precios")?"block":"none";
+  if(m=="precios") precAbrir();
 }
 function toggleFiltros(which){
   const panel=$("panelFiltros"+which), btn=$("btnFiltros"+which);
