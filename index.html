@@ -2303,13 +2303,16 @@ async function guardarNov(){
 <div id="modalUnidad" class="modal"><div class="card" style="max-width:520px">
   <h1>➕ Crear unidad de medida</h1>
   <div class="mut" style="margin-bottom:8px">La unidad queda en la base y disponible en todas las listas de unidades. El agente también la reconoce en el texto de las facturas.</div>
+  <label class="mut">Unidad de compra en el ERP <span title="Tal como el ERP la escribe en el artículo (columna Unidad de compra). El robot busca esa fila al facturar. Elígela de la lista o escríbela; si no aplica, déjala vacía.">ⓘ</span></label>
+  <input id="nu_erp" list="nu_erp_lista" placeholder="Ej.: PAQUETEX25UND" oninput="nuErpCambio()" onchange="nuErpCambio()" autocomplete="off" style="text-transform:uppercase">
+  <datalist id="nu_erp_lista"></datalist><div id="nu_erp_aviso" style="font-size:12px;margin:2px 0 6px"></div>
   <label class="mut">Nombre</label><input id="nu_nombre" placeholder="Ej.: Arroba, Tula, Galón de 5 L" oninput="nuNombreCambio()" autocomplete="off">
   <div class="row" style="gap:12px">
     <div style="flex:1"><label class="mut">Código (sin espacios)</label><input id="nu_canon" placeholder="ARROBA" oninput="nuCanonEscrito()" autocomplete="off" style="text-transform:uppercase"></div>
     <div style="flex:1"><label class="mut">Tipo</label><select id="nu_familia" onchange="nuFamiliaCambio()">
       <option value="masa">Peso</option><option value="volumen">Volumen</option><option value="conteo">Conteo (unidades)</option><option value="empaque" selected>Empaque (caja, bolsa, tula…)</option></select></div>
   </div>
-  <div id="nu_fila_factor" style="display:none"><label class="mut" id="nu_factor_txt"></label><input id="nu_factor" inputmode="decimal" placeholder="Ej.: 12500" autocomplete="off"></div>
+  <div id="nu_fila_factor" style="display:none"><label class="mut" id="nu_factor_txt"></label><div class="row" style="gap:8px"><input id="nu_factor" inputmode="decimal" placeholder="Ej.: 25" oninput="nuFactorEscrito()" autocomplete="off" style="flex:1"><select id="nu_inv" style="flex:2"></select></div></div>
   <label class="mut">¿Cómo la maneja el ERP? <span title="Al facturar, el robot elige la fila del ERP solo por estas tres clases. Si no sabes, deja Unidad.">ⓘ</span></label>
   <select id="nu_um"><option value="UND">Unidad / presentación (UND)</option><option value="KG">Kilo (KG)</option><option value="LB">Libra (LB)</option></select>
   <label class="mut">Otros nombres con que aparece en las facturas (opcional, separados por coma)</label><input id="nu_alias" placeholder="Ej.: ARR, ARROBAS" autocomplete="off">
