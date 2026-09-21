@@ -232,6 +232,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/precios-ui.js"></script>
 <script src="js/unidad-nueva.js"></script>
 <script src="js/unidad-nueva-ui.js"></script>
+<script src="js/decisiones-agente.js"></script>
 <script src="js/conciliacion-ui.js"></script>
 <script src="js/cruce-dian-ui.js"></script>
 <script>
@@ -698,19 +699,20 @@ function pintarAdmin(){
 // cuenta en la base (función unidad_registrar_correccion) y sube la confianza de la regla.
 const escAg=s=>String(s==null?"":s).replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
 const fhAg=d=>d?new Date(d).toLocaleString("es-CO",{timeZone:"America/Bogota",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"";
-let ag={cargado:false,cargando:false,rev:[],eventos:[],reglas:[],correos:[],dian:[],error:"",unidades:[],aliasMapa:{}};
+let ag={cargado:false,cargando:false,rev:[],eventos:[],validaciones:[],reglas:[],correos:[],dian:[],error:"",unidades:[],aliasMapa:{}};
 async function cargarAgente(forzar){
   if(ag.cargando||(ag.cargado&&!forzar)) return;
   ag.cargando=true;
   try{
-    const [r1,r2,r3,r4,r5]=await Promise.all([
+    const [r1,r2,r3,r4,r5,r6]=await Promise.all([
       SB.from("unidad_revision").select("*").eq("estado","pendiente").order("creado_en",{ascending:false}).limit(200),
-      SB.from("unidad_evento").select("*").eq("tipo","decision_agente").order("creado_en",{ascending:false}).limit(60),
+      SB.from("unidad_evento").select("*").eq("tipo","decision_agente").is("oculto_en",null).order("creado_en",{ascending:false}).limit(200),
       SB.from("regla_unidad_resumen").select("*").order("ultima_en",{ascending:false}).limit(300),
       SB.from("correo_cola").select("*").order("creado_en",{ascending:false}).limit(60),
-      SB.from("dian_descarga").select("*").order("creado_en",{ascending:false}).limit(60)]);
+      SB.from("dian_descarga").select("*").order("creado_en",{ascending:false}).limit(60),
+      SB.from("unidad_evento").select("clave,tipo,unidad_usuario,creado_en").in("tipo",["correccion_usuario","confirmacion_admin"]).order("creado_en",{ascending:false}).limit(1000)]);   // lo que la persona ya dejo firme
     const e=r1.error||r2.error||r3.error||r4.error||r5.error; ag.error=e?e.message:"";
-    ag.rev=r1.data||[]; ag.eventos=r2.data||[]; ag.reglas=r3.data||[]; ag.correos=r4.data||[]; ag.dian=r5.data||[]; ag.cargado=true;
+    ag.rev=r1.data||[]; ag.eventos=r2.data||[]; ag.reglas=r3.data||[]; ag.correos=r4.data||[]; ag.dian=r5.data||[]; ag.validaciones=r6.data||[]; ag.cargado=true;
     await cargarUnidadesAg();
   }catch(e){ ag.error=e.message; }
   ag.cargando=false; if(adminVista==="agente") pintarAdmin();
@@ -727,14 +729,27 @@ async function registrarUnidadAg(o){   // o: {clave, desc, provNombre, unidadAge
     p_unidad_agente:o.unidadAgente||null, p_unidad_usuario:o.unidad,
     p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||"admin", p_admin:!!o.admin, p_revision_id:o.revId||null});
   if(error){ alert("No se pudo guardar: "+error.message); return; }
+  if(o.ocultarIds&&o.ocultarIds.length) await agOcultarEventos(o.ocultarIds);      // ya corregida: sale de "Decisiones recientes"
   await cargarAgente(true);
+}
+// Saca decisiones de la lista (siguen en la base; no cambia ninguna regla). Si falla, la lista simplemente queda como estaba.
+async function agOcultarEventos(ids){
+  try{ const {error}=await SB.rpc("unidad_evento_ocultar",{p_ids:ids,p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||"admin"});
+    if(error) console.warn("ocultar decisiones: "+error.message); }catch(e){ console.warn("ocultar decisiones: "+e.message); }
 }
 function agDecidirRev(i,admin){ const r=ag.rev[i]; if(!r) return;
   registrarUnidadAg({clave:r.clave,desc:r.descripcion_original,provNombre:r.proveedor_nombre,unidadAgente:null,unidad:$("agrev_"+i).value,admin,revId:r.id}); }
 function agCorregirEv(i){ const e=ag.eventos[i]; if(!e) return; const d=e.detalle||{};
   const u=$("agev_"+i).value;
   if(u&&u===e.unidad_agente&&!confirm("Es la misma unidad que decidió el agente. ¿Registrar como CONFIRMACIÓN?")) return;
-  registrarUnidadAg({clave:e.clave,desc:d.descripcion,provNombre:d.proveedor,unidadAgente:e.unidad_agente,unidad:u,admin:false}); }
+  return registrarUnidadAg({clave:e.clave,desc:d.descripcion,provNombre:d.proveedor,unidadAgente:e.unidad_agente,unidad:u,admin:false,ocultarIds:DecisionesAgente.idsDeClave(ag.eventos,e.clave)}); }
+// "Quitar": la decision del agente esta bien (o no importa) y no quiero verla en la lista. No cambia ninguna regla.
+async function agQuitarEv(i){ const e=ag.eventos[i]; if(!e) return;
+  await agOcultarEventos(DecisionesAgente.idsDeClave(ag.eventos,e.clave)); await cargarAgente(true); }
+async function agQuitarTodasEv(){
+  const v=DecisionesAgente.visibles(ag.eventos,ag.validaciones); if(!v.length) return;
+  if(!confirm("¿Quitar de la lista las "+v.length+" decisiones que se ven? No cambia ninguna regla ni corrección; solo dejan de mostrarse.")) return;
+  await agOcultarEventos([].concat(...v.map(x=>DecisionesAgente.idsDeClave(ag.eventos,x.e.clave)))); await cargarAgente(true); }
 function agConfirmarRegla(i){ const r=ag.reglas[i]; if(!r) return;
   if(!confirm("Confirmar como regla firme: "+r.producto_norm+" → "+r.unidad+"\n(queda con confianza ALTA)")) return;
   registrarUnidadAg({clave:r.clave,desc:r.descripcion_original,provNombre:r.proveedor_nombre,unidadAgente:r.unidad,unidad:r.unidad,admin:true}); }
@@ -791,13 +806,13 @@ function pintarAgente(c,q){
       ${m.estado!=="subida"?`<a href="${escAg(BancoUtils.urlDian(m.cufe))}" target="_blank" rel="noopener noreferrer"><button class="s">Abrir en DIAN ↗</button></a>`:""}${m.estado==="error"?`<button onclick="agReintentarDian(${i})">Reintentar ahora</button>`:""}
     </div></div>`;}).join(""):'<div class="vacio">Todavía no has pedido ninguna descarga.</div>';
   // 2) Lo que decidió el agente (para corregirlo si se equivocó)
-  const evs=ag.eventos.map((e,i)=>({e,i})).filter(({e})=>ok(((e.detalle||{}).descripcion||"")+" "+((e.detalle||{}).proveedor||""))&&filtraFechaAdmin(e));
-  h+=`<h3 style="margin:18px 0 8px">Decisiones recientes del agente</h3>`;
+  const evs=DecisionesAgente.visibles(ag.eventos,ag.validaciones).filter(({e})=>ok(((e.detalle||{}).descripcion||"")+" "+((e.detalle||{}).proveedor||""))&&filtraFechaAdmin(e));
+  h+=`<h3 style="margin:18px 0 8px">Decisiones recientes del agente <span class="badge">${evs.length}</span> ${evs.length?'<button class="s" onclick="agQuitarTodasEv()" title="Las saca de esta lista; no cambia ninguna regla">Quitar todas</button>':""}</h3><div class="mut" style="margin-bottom:6px">Corrige la unidad si se equivocó, o pulsa Quitar si está bien: en los dos casos sale de la lista.</div>`;
   h+=evs.length?evs.map(({e,i})=>{const d=e.detalle||{}; return `<div class="card" style="margin:6px 0"><div class="row">
       <div style="flex:3"><div class="emisor">${escAg(d.descripcion||e.clave)}</div>
       <div class="mut">${escAg(d.proveedor||"—")} · ${escAg(e.pedido_numero||"")} · ${fhAg(e.creado_en)} · decidió <b>${escAg(e.unidad_agente)}</b> por ${escAg(e.fuente)} (${escAg(e.confianza||"—")})${d.requiere_revision?" · ⚠️ requiere revisión":""}</div></div>
       <select id="agev_${i}" style="width:auto;margin:0" onchange="agUnidadCambio(this)">${optsUnidadAg(e.unidad_agente)}</select>
-      <button onclick="agCorregirEv(${i})">Corregir</button></div></div>`;}).join(""):'<div class="vacio">Sin decisiones registradas todavía.</div>';
+      <button onclick="agCorregirEv(${i})">Corregir</button><button class="s" onclick="agQuitarEv(${i})" title="Sacarla de esta lista (no cambia ninguna regla)">Quitar</button></div></div>`;}).join(""):'<div class="vacio">Nada por revisar: todas las decisiones del agente ya se corrigieron, confirmaron o quitaron.</div>';
   // 3) Reglas aprendidas
   const rgs=ag.reglas.map((r,i)=>({r,i})).filter(({r})=>ok(r.producto_norm+" "+r.proveedor_nombre+" "+r.unidad)&&filtraFechaAdmin(r))
     .sort((a,b)=>(Number(b.r.requiere_revision)-Number(a.r.requiere_revision))||0);
