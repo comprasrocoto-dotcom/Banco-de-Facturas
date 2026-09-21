@@ -36,6 +36,10 @@ h1{font-size:16px;margin:0;letter-spacing:.3px;font-weight:700}
 .emisor{font-weight:650;font-size:15px;color:#0f172a}
 .mut{color:var(--mut);font-size:13px}
 .total{font-size:19px;font-weight:750;margin-left:auto;color:#0f172a;letter-spacing:-.3px}
+button.ojo{width:34px;height:34px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;border:1px solid var(--line);background:#fff;color:#475569;cursor:pointer;opacity:0;transition:opacity .15s,background .15s}
+.card:hover button.ojo,button.ojo:focus-visible{opacity:1}
+button.ojo:hover{background:#f0fdfa;color:#0f766e;border-color:#99f6e4}
+@media (hover:none){button.ojo{opacity:1}}
 button{cursor:pointer;border-radius:9px;border:1px solid var(--line);background:#f8fafc;color:#334155;padding:8px 14px;font-size:13px;font-weight:600;transition:.15s}
 button:hover{background:#f1f5f9;border-color:#cbd5e1}
 button.p{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -218,6 +222,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/pdf-subida-web.js"></script>
 <script src="js/conciliacion.js"></script>
 <script src="js/sin-sellar.js"></script>
+<script src="js/resumen-factura.js"></script>
 <script src="js/conversiones.js"></script>
 <script src="js/importacion.js"></script>
 <script src="js/importacion-ui.js"></script>
@@ -1871,7 +1876,7 @@ function pintar(){
       <div class="row">
         <div><div class="emisor">${f.emisor||"—"}</div>
           <div class="mut">${(()=>{const n=f.documento||((f.prefijo||"")+(f.folio||""));return n? "<b style='color:#0f766e'>N° "+n+"</b>" : "<span style='color:#b45309;font-weight:700'>⚠️ sin número en el PDF</span>";})()} · ${fch(f.fecha_emision)} · NIT ${f.nit_emisor||"—"}</div></div>
-        <div class="total">${money(f.total)}</div>
+        ${f.estado==="pool"?`<div style="margin-left:auto;display:flex;align-items:center;gap:12px"><button class="ojo" title="Ver el resumen de la factura" aria-label="Ver el resumen de la factura" onclick="verResumenFactura('${f.cufe}')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button><div class="total" style="margin-left:0">${money(f.total)}</div></div>`:`<div class="total">${money(f.total)}</div>`}
       </div>
       <div class="row" style="margin-top:10px;gap:8px">
         ${`<button onclick="pedirIngreso('${f.cufe}')" style="${f.num_ingreso?'background:#15803d;border-color:#15803d':'background:#1e3a8a;border-color:#1e3a8a'};color:#fff;font-weight:700;padding:10px 18px;font-size:14px;border-radius:8px">${f.num_ingreso?'✅ Ingreso ERP: '+f.num_ingreso:'📝 Poner ingreso ERP (FCRC)'}</button>`}
@@ -1990,6 +1995,87 @@ async function verPdf(cufe){
   const {data,error}=await SB.storage.from("facturas").createSignedUrl(f.archivo_pdf,300);
   if(error||!data){alert("No pude abrir el PDF: "+(error?error.message:"sin enlace"));return;}
   window.open(data.signedUrl,"_blank");
+}
+// ---- EL OJITO: RESUMEN DE LA FACTURA (Sin asignar) ----  datos: js/resumen-factura.js ; vista previa: 1a pagina del PDF con pdf.js
+let resCufe=null;
+function cerrarResumen(){ resCufe=null; $("modalResumen").classList.remove("on"); }
+function resumenHtml(f,R){
+  const fila=(k,v)=>v?`<tr><td class="mut" style="padding:3px 12px 3px 0;white-space:nowrap">${k}</td><td style="padding:3px 0">${v}</td></tr>`:"";
+  const st={pool:"st-pool",asignada:"st-asignada",sellada:"st-sellada",pagada:"st-sellada"}[R.estadoClave]||"";
+  const hace=R.diasDesdeEmision==null?"":(R.diasDesdeEmision<=0?" · hoy":R.diasDesdeEmision===1?" · ayer":" · hace "+R.diasDesdeEmision+" días");
+  let ped="";
+  if(R.pedido){
+    ped=`<div style="margin-top:12px;padding:10px 12px;border-radius:10px;background:#f0fdfa;border:1px solid #99f6e4"><b>🔗 Pedido amarrado:</b> ${escAg(R.pedido.numero||R.pedido.erp||"")}${R.pedido.erp&&R.pedido.numero?" · ERP "+escAg(R.pedido.erp):""}
+      <div class="mut">${escAg([R.pedido.proveedor,R.pedido.sede,R.pedido.fecha?fch(R.pedido.fecha):""].filter(Boolean).join(" · "))}</div>
+      ${R.pedido.id?`<div id="rzv_${R.pedido.id}" class="mut" style="margin-top:6px;font-size:12.5px">🧺 cargando insumos…</div>`:""}</div>`;
+  }else if(R.candidatos.total){
+    ped=`<div style="margin-top:12px;padding:10px 12px;border-radius:10px;background:#fffbeb;border:1px solid #fde68a"><b>Pedidos pendientes de este proveedor (${R.candidatos.total}):</b>
+      ${R.candidatos.lista.map(c=>`<div style="margin-top:6px"><b>${escAg(c.numero||"")}</b> <span class="mut">· ${escAg([c.sede,c.fecha?fch(c.fecha):""].filter(Boolean).join(" · "))}</span>${c.mismo==="parecido"?' <span class="badge st-asignada">≈ proveedor parecido</span>':""}<div id="rzv_${c.id}" class="mut" style="font-size:12.5px">🧺 cargando insumos…</div></div>`).join("")}
+      ${R.candidatos.total>R.candidatos.lista.length?`<div class="mut" style="margin-top:6px">…y ${R.candidatos.total-R.candidatos.lista.length} más en «Buscar pedido».</div>`:""}</div>`;
+  }else{
+    ped=`<div class="mut" style="margin-top:12px">Sin pedido amarrado y sin pedidos pendientes de este proveedor.</div>`;
+  }
+  return `<div style="display:flex;gap:20px;flex-wrap:wrap">
+    <div style="flex:1 1 300px;min-width:0">
+      <h1 style="margin:0 0 6px">🧾 Resumen de la factura</h1>
+      <div class="emisor">${escAg(R.emisor||"—")}</div>
+      <div class="mut">${R.numero?"<b style='color:#0f766e'>N° "+escAg(R.numero)+"</b>":"<span style='color:#b45309;font-weight:700'>⚠️ sin número en el PDF</span>"} · ${fch(R.fechaEmision)}${hace}</div>
+      <div class="total" style="margin:10px 0 6px;text-align:left">${money(R.total)}</div>
+      <table style="margin:0;border:0;width:auto">${fila("Tipo",escAg(R.tipo))}${fila("NIT",escAg(R.nit||"—"))}${fila("Categoría",escAg(R.categoria))}${fila("Estado",`<span class="badge ${st}">${escAg(R.estado)}</span>`)}${fila("Sede",escAg(R.sede||"Sin sede"))}${fila("Ingreso ERP",R.ingreso?escAg(R.ingreso.numero)+(R.ingreso.fecha?" · "+fch(R.ingreso.fecha):""):"")}${fila("CUFE",`<span class="mut" title="${escAg(R.cufe||"")}">${escAg(R.cufeCorto||"—")}</span>`)}</table>
+      ${ped}
+      ${R.avisos.map(a=>`<div style="margin-top:8px;color:#b45309">⚠️ ${escAg(a)}</div>`).join("")}
+      <div class="row" style="margin-top:14px;gap:8px">${R.tienePdf?`<button onclick="verPdf('${escAg(R.cufe)}')">📄 Ver PDF completo</button>`:""}${f.tipo==="factura"?`<button class="s" onclick="cerrarResumen();abrirAmarre('factura','${escAg(R.cufe)}')">🔗 Buscar pedido</button>`:""}</div>
+    </div>
+    <div style="flex:1 1 280px;min-width:0"><div id="resPrev" class="mut" style="text-align:center;padding:30px 0">${R.tienePdf?"⏳ cargando vista previa…":"Sin PDF para mostrar."}</div></div>
+  </div>`;
+}
+async function verResumenFactura(cufe){
+  const f=facturas.find(x=>x.cufe===cufe); if(!f) return;
+  resCufe=cufe; $("modalResumen").classList.add("on");
+  const armar=()=>ResumenFactura.armar(f,{pedidos:pedidos,sedes:sedes,hoy:BancoUtils.hoyColombia(),rol:perfil.rol,sedeId:perfil.sede_id});
+  $("resBody").innerHTML=resumenHtml(f,armar());
+  if(!pedidosCargados){ try{ await cargarPedidos(); }catch(e){} if(resCufe!==cufe) return; $("resBody").innerHTML=resumenHtml(f,armar()); }
+  const R=armar();
+  resumenVistaPrevia(f,cufe);
+  resumenInsumos(R,cufe);
+}
+// Primera pagina del PDF dibujada con pdf.js (no se incrusta el PDF: el almacenamiento lo bloquea en un iframe)
+async function resumenVistaPrevia(f,cufe){
+  if(!f.archivo_pdf) return;
+  const el=()=>(resCufe===cufe?$("resPrev"):null);
+  try{
+    const {data,error}=await SB.storage.from("facturas").createSignedUrl(f.archivo_pdf,120);
+    if(error||!data) throw new Error(error?error.message:"sin enlace");
+    const buf=await (await fetch(data.signedUrl)).arrayBuffer();
+    const doc=await pdfjsLib.getDocument({data:buf}).promise;
+    const page=await doc.getPage(1);
+    const base=page.getViewport({scale:1}), escala=Math.min(2,520/base.width), vp=page.getViewport({scale:escala});
+    const cv=document.createElement("canvas"); cv.width=Math.floor(vp.width); cv.height=Math.floor(vp.height);
+    cv.style.cssText="width:100%;height:auto;border:1px solid var(--line);border-radius:8px;cursor:zoom-in;background:#fff";
+    cv.title="Clic para abrir el PDF completo"; cv.onclick=()=>verPdf(cufe);
+    await page.render({canvasContext:cv.getContext("2d"),viewport:vp}).promise;
+    const dest=el(); if(!dest) return;
+    dest.style.cssText="text-align:center"; dest.innerHTML=""; dest.appendChild(cv);
+    const pie=document.createElement("div"); pie.className="mut"; pie.style.cssText="margin-top:6px;font-size:12px";
+    pie.textContent="Página 1 de "+doc.numPages+" · clic para abrir el PDF completo"; dest.appendChild(pie);
+  }catch(e){
+    const dest=el(); if(!dest) return;
+    dest.style.cssText="text-align:center;padding:30px 0";
+    dest.textContent=/password/i.test(String((e&&e.name)||"")+String((e&&e.message)||""))?"El PDF está protegido: ábrelo con «Ver PDF completo».":"No se pudo mostrar la vista previa. Usa «Ver PDF completo».";
+  }
+}
+// Los insumos del pedido amarrado (o de cada pedido pendiente sugerido): una sola consulta
+async function resumenInsumos(R,cufe){
+  const ids=R.pedido?(R.pedido.id?[R.pedido.id]:[]):R.candidatos.lista.map(c=>c.id);
+  if(!ids.length) return;
+  try{
+    const {data,error}=await SB.from("pedido_lineas").select("pedido_id,insumo,cantidad,unidad").in("pedido_id",ids);
+    if(error) throw new Error(error.message);
+    if(resCufe!==cufe) return;
+    ids.forEach(id=>{ const el=$("rzv_"+id); if(!el) return;
+      const v=SinSellar.vistazoInsumos((data||[]).filter(l=>l.pedido_id===id),4);
+      el.innerHTML="🧺 "+(v.n?"<b>"+v.n+" insumo"+(v.n===1?"":"s")+":</b> ":"")+escAg(v.corto); if(v.completo) el.title="Insumos del pedido:\n"+v.completo; });
+  }catch(e){ ids.forEach(id=>{ const el=$("rzv_"+id); if(el) el.textContent="🧺 No se pudieron cargar los insumos."; }); }
 }
 async function pedirIngreso(cufe){
   const f=facturas.find(x=>x.cufe===cufe)||{};
@@ -2197,6 +2283,11 @@ async function guardarNov(){
     <button onclick="$('modalProd').classList.remove('on')">Cancelar</button>
     <button class="p" onclick="guardarProducto()">Asignar</button>
   </div>
+</div></div>
+
+<div id="modalResumen" class="modal" onclick="if(event.target===this)cerrarResumen()"><div class="card" style="max-width:780px">
+  <div id="resBody"></div>
+  <div class="row" style="margin-top:8px"><span class="sp"></span><button onclick="cerrarResumen()">Cerrar</button></div>
 </div></div>
 
 <div id="modalAmarre" class="modal"><div class="card" style="max-width:640px">
