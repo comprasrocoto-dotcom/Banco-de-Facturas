@@ -230,6 +230,8 @@ tr:hover td{background:#f1f5f9}
 <script src="js/importacion-ui.js"></script>
 <script src="js/precios.js"></script>
 <script src="js/precios-ui.js"></script>
+<script src="js/unidad-nueva.js"></script>
+<script src="js/unidad-nueva-ui.js"></script>
 <script src="js/conciliacion-ui.js"></script>
 <script src="js/cruce-dian-ui.js"></script>
 <script>
@@ -696,8 +698,7 @@ function pintarAdmin(){
 // cuenta en la base (función unidad_registrar_correccion) y sube la confianza de la regla.
 const escAg=s=>String(s==null?"":s).replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
 const fhAg=d=>d?new Date(d).toLocaleString("es-CO",{timeZone:"America/Bogota",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"";
-const UNIDADES_DECISION=[["KG","Kilo (KG)"],["UND","Unidad / presentación (UND)"],["LB","Libra (LB)"]];
-let ag={cargado:false,cargando:false,rev:[],eventos:[],reglas:[],correos:[],dian:[],error:""};
+let ag={cargado:false,cargando:false,rev:[],eventos:[],reglas:[],correos:[],dian:[],error:"",unidades:[],aliasMapa:{}};
 async function cargarAgente(forzar){
   if(ag.cargando||(ag.cargado&&!forzar)) return;
   ag.cargando=true;
@@ -710,10 +711,12 @@ async function cargarAgente(forzar){
       SB.from("dian_descarga").select("*").order("creado_en",{ascending:false}).limit(60)]);
     const e=r1.error||r2.error||r3.error||r4.error||r5.error; ag.error=e?e.message:"";
     ag.rev=r1.data||[]; ag.eventos=r2.data||[]; ag.reglas=r3.data||[]; ag.correos=r4.data||[]; ag.dian=r5.data||[]; ag.cargado=true;
+    await cargarUnidadesAg();
   }catch(e){ ag.error=e.message; }
   ag.cargando=false; if(adminVista==="agente") pintarAdmin();
 }
-const optsUnidadAg=sel=>'<option value="">— unidad —</option>'+UNIDADES_DECISION.map(([v,t])=>`<option value="${v}"${v===sel?" selected":""}>${t}</option>`).join("");
+// Las unidades salen de la base (unidad_catalogo); el administrador ademas ve "Crear unidad nueva…". Ver js/unidad-nueva.js
+const optsUnidadAg=sel=>UnidadNueva.opcionesHtml(ag.unidades,sel,{crear:!!(perfil&&perfil.rol==="admin")});
 function partesClaveAg(k){ const p=String(k||"").split("|"); return {prov:p[0]||"",producto:p[1]||"",pres:(p[2]&&p[2]!=="-")?p[2]:null}; }
 async function registrarUnidadAg(o){   // o: {clave, desc, provNombre, unidadAgente, unidad, admin, revId}
   if(!o.unidad){ alert("Elegí la unidad."); return; }
@@ -757,7 +760,7 @@ function pintarAgente(c,q){
       <div style="flex:3"><div class="emisor">${escAg(r.descripcion_original)}</div>
       <div class="mut">${escAg(r.proveedor_nombre||"—")} · ${escAg(r.pedido_numero||"")} · ${fhAg(r.creado_en)}</div>
       <div class="mut">Motivo: ${escAg(r.motivo)}${r.sugerencia?" · sugerencia: "+escAg(r.sugerencia):""}</div></div>
-      <select id="agrev_${i}" style="width:auto;margin:0">${optsUnidadAg(r.sugerencia)}</select>
+      <select id="agrev_${i}" style="width:auto;margin:0" onchange="agUnidadCambio(this)">${optsUnidadAg(r.sugerencia)}</select>
       <button class="s" onclick="agDecidirRev(${i},false)">Decidir</button>
       ${esAdmin?`<button class="p" title="Queda como regla firme (confianza alta)" onclick="agDecidirRev(${i},true)">Decidir y confirmar</button>`:""}
     </div></div>`).join(""):'<div class="vacio">Nada pendiente. ✅</div>';
@@ -793,7 +796,7 @@ function pintarAgente(c,q){
   h+=evs.length?evs.map(({e,i})=>{const d=e.detalle||{}; return `<div class="card" style="margin:6px 0"><div class="row">
       <div style="flex:3"><div class="emisor">${escAg(d.descripcion||e.clave)}</div>
       <div class="mut">${escAg(d.proveedor||"—")} · ${escAg(e.pedido_numero||"")} · ${fhAg(e.creado_en)} · decidió <b>${escAg(e.unidad_agente)}</b> por ${escAg(e.fuente)} (${escAg(e.confianza||"—")})${d.requiere_revision?" · ⚠️ requiere revisión":""}</div></div>
-      <select id="agev_${i}" style="width:auto;margin:0">${optsUnidadAg(e.unidad_agente)}</select>
+      <select id="agev_${i}" style="width:auto;margin:0" onchange="agUnidadCambio(this)">${optsUnidadAg(e.unidad_agente)}</select>
       <button onclick="agCorregirEv(${i})">Corregir</button></div></div>`;}).join(""):'<div class="vacio">Sin decisiones registradas todavía.</div>';
   // 3) Reglas aprendidas
   const rgs=ag.reglas.map((r,i)=>({r,i})).filter(({r})=>ok(r.producto_norm+" "+r.proveedor_nombre+" "+r.unidad)&&filtraFechaAdmin(r))
@@ -2295,6 +2298,23 @@ async function guardarNov(){
 <div id="modalResumen" class="modal" onclick="if(event.target===this)cerrarResumen()"><div class="card" style="max-width:780px">
   <div id="resBody"></div>
   <div class="row" style="margin-top:8px"><span class="sp"></span><button onclick="cerrarResumen()">Cerrar</button></div>
+</div></div>
+
+<div id="modalUnidad" class="modal"><div class="card" style="max-width:520px">
+  <h1>➕ Crear unidad de medida</h1>
+  <div class="mut" style="margin-bottom:8px">La unidad queda en la base y disponible en todas las listas de unidades. El agente también la reconoce en el texto de las facturas.</div>
+  <label class="mut">Nombre</label><input id="nu_nombre" placeholder="Ej.: Arroba, Tula, Galón de 5 L" oninput="nuNombreCambio()" autocomplete="off">
+  <div class="row" style="gap:12px">
+    <div style="flex:1"><label class="mut">Código (sin espacios)</label><input id="nu_canon" placeholder="ARROBA" oninput="nuCanonEscrito()" autocomplete="off" style="text-transform:uppercase"></div>
+    <div style="flex:1"><label class="mut">Tipo</label><select id="nu_familia" onchange="nuFamiliaCambio()">
+      <option value="masa">Peso</option><option value="volumen">Volumen</option><option value="conteo">Conteo (unidades)</option><option value="empaque" selected>Empaque (caja, bolsa, tula…)</option></select></div>
+  </div>
+  <div id="nu_fila_factor" style="display:none"><label class="mut" id="nu_factor_txt"></label><input id="nu_factor" inputmode="decimal" placeholder="Ej.: 12500" autocomplete="off"></div>
+  <label class="mut">¿Cómo la maneja el ERP? <span title="Al facturar, el robot elige la fila del ERP solo por estas tres clases. Si no sabes, deja Unidad.">ⓘ</span></label>
+  <select id="nu_um"><option value="UND">Unidad / presentación (UND)</option><option value="KG">Kilo (KG)</option><option value="LB">Libra (LB)</option></select>
+  <label class="mut">Otros nombres con que aparece en las facturas (opcional, separados por coma)</label><input id="nu_alias" placeholder="Ej.: ARR, ARROBAS" autocomplete="off">
+  <div id="nu_msg" style="margin-top:8px;font-weight:600"></div>
+  <div class="row" style="margin-top:10px"><span class="sp"></span><button onclick="agUnidadCerrar()">Cancelar</button><button class="p" id="nu_crear" onclick="agUnidadCrear()">Crear unidad</button></div>
 </div></div>
 
 <div id="modalAmarre" class="modal"><div class="card" style="max-width:640px">
