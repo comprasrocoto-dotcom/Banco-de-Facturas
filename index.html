@@ -702,6 +702,9 @@ function pintarAdmin(){
 const escAg=s=>String(s==null?"":s).replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
 const fhAg=d=>d?new Date(d).toLocaleString("es-CO",{timeZone:"America/Bogota",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"";
 let ag={cargado:false,cargando:false,rev:[],eventos:[],validaciones:[],reglas:[],correos:[],dian:[],error:"",unidades:[],aliasMapa:{}};
+// "Descargas de la DIAN" queda plegada (no aporta a diario): se abre solo si uno quiere, y se recuerda en este navegador.
+let agDianAbierto=(()=>{try{return localStorage.getItem("agDianAbierto")==="1";}catch(e){return false;}})();
+function agToggleDian(){agDianAbierto=!agDianAbierto;try{localStorage.setItem("agDianAbierto",agDianAbierto?"1":"0");}catch(e){/* sin storage: solo no se recuerda */}pintarAdmin();}
 async function cargarAgente(forzar){
   if(ag.cargando||(ag.cargado&&!forzar)) return;
   ag.cargando=true;
@@ -797,16 +800,19 @@ function pintarAgente(c,q){
   // 1c) Descargas de la DIAN: facturas que el robot baja de la DIAN y sube al banco
   const dn=ag.dian.map((m,i)=>({m,i})).filter(({m})=>ok((m.documento||"")+" "+(m.emisor||"")+" "+(m.nit_emisor||""))&&filtraFechaAdmin(m));
   const dMalas=dn.filter(({m})=>m.estado==="error").length, dEnCurso=dn.filter(({m})=>m.estado!=="subida"&&m.estado!=="error").length;
-  h+=`<h3 style="margin:18px 0 8px">Descargas de la DIAN <span class="badge ${dMalas?"st-pool":(dEnCurso?"st-asignada":"st-sellada")}">${dMalas?dMalas+" con problema":(dEnCurso?dEnCurso+" esperando el PDF":"todo al día")}</span></h3><div class="mut" style="margin-bottom:6px">Las que preparas en el cruce (Cruce DIAN). La DIAN no deja que un robot baje los PDF: los bajas tú con “Abrir en DIAN” y, cuando el PDF cae en Descargas, el robot lo sube solo al banco como “Sin asignar”. “Esperando el PDF” = todavía no lo has bajado.</div>`;
-  h+=dn.length?dn.map(({m,i})=>{const est={subida:"st-sellada",bajando:"st-asignada",pendiente:"st-asignada",error:"st-pool",agotado:"st-pool"}[m.estado]||"";
-    return `<div class="card" style="margin:6px 0"><div class="row">
-      <div style="flex:3"><div class="emisor">${escAg(m.documento||String(m.cufe||"").slice(0,12))} · ${escAg(m.emisor||"—")}</div>
-      <div class="mut">NIT ${escAg(m.nit_emisor)} · ${m.total!=null?money(m.total):""} · pedida ${fhAg(m.creado_en)}${m.pedido_por?" por "+escAg(m.pedido_por):""}${m.subida_en?" · subida "+fhAg(m.subida_en):""}</div>
-      ${m.estado==="subida"?"":`<div class="mut">NIT que pide la DIAN: <b>${escAg(m.nit_emisor)}</b></div>`}
-      ${m.ultimo_error&&m.estado!=="subida"?`<div class="mut" style="color:#b45309">Aviso: ${escAg(String(m.ultimo_error).slice(0,300))}</div>`:""}</div>
-      <span class="badge ${est}">${escAg(({pendiente:"esperando el PDF",bajando:"esperando el PDF",agotado:"esperando el PDF",subida:"subida al banco",error:"error"})[m.estado]||m.estado)}</span>
-      ${m.estado!=="subida"?`<a href="${escAg(BancoUtils.urlDian(m.cufe))}" target="_blank" rel="noopener noreferrer"><button class="s">Abrir en DIAN ↗</button></a>`:""}${m.estado==="error"?`<button onclick="agReintentarDian(${i})">Reintentar ahora</button>`:""}
-    </div></div>`;}).join(""):'<div class="vacio">Todavía no has pedido ninguna descarga.</div>';
+  h+=`<h3 style="margin:18px 0 8px">Descargas de la DIAN <span class="badge ${dMalas?"st-pool":(dEnCurso?"st-asignada":"st-sellada")}">${dMalas?dMalas+" con problema":(dEnCurso?dEnCurso+" esperando el PDF":"todo al día")}</span> <button class="s" onclick="agToggleDian()">${agDianAbierto?"Ocultar":"Mostrar"}</button></h3>`;
+  if(agDianAbierto){
+    h+=`<div class="mut" style="margin-bottom:6px">Las que preparas en el cruce (Cruce DIAN). La DIAN no deja que un robot baje los PDF: los bajas tú con “Abrir en DIAN” y, cuando el PDF cae en Descargas, el robot lo sube solo al banco como “Sin asignar”. “Esperando el PDF” = todavía no lo has bajado.</div>`;
+    h+=dn.length?dn.map(({m,i})=>{const est={subida:"st-sellada",bajando:"st-asignada",pendiente:"st-asignada",error:"st-pool",agotado:"st-pool"}[m.estado]||"";
+      return `<div class="card" style="margin:6px 0"><div class="row">
+        <div style="flex:3"><div class="emisor">${escAg(m.documento||String(m.cufe||"").slice(0,12))} · ${escAg(m.emisor||"—")}</div>
+        <div class="mut">NIT ${escAg(m.nit_emisor)} · ${m.total!=null?money(m.total):""} · pedida ${fhAg(m.creado_en)}${m.pedido_por?" por "+escAg(m.pedido_por):""}${m.subida_en?" · subida "+fhAg(m.subida_en):""}</div>
+        ${m.estado==="subida"?"":`<div class="mut">NIT que pide la DIAN: <b>${escAg(m.nit_emisor)}</b></div>`}
+        ${m.ultimo_error&&m.estado!=="subida"?`<div class="mut" style="color:#b45309">Aviso: ${escAg(String(m.ultimo_error).slice(0,300))}</div>`:""}</div>
+        <span class="badge ${est}">${escAg(({pendiente:"esperando el PDF",bajando:"esperando el PDF",agotado:"esperando el PDF",subida:"subida al banco",error:"error"})[m.estado]||m.estado)}</span>
+        ${m.estado!=="subida"?`<a href="${escAg(BancoUtils.urlDian(m.cufe))}" target="_blank" rel="noopener noreferrer"><button class="s">Abrir en DIAN ↗</button></a>`:""}${m.estado==="error"?`<button onclick="agReintentarDian(${i})">Reintentar ahora</button>`:""}
+      </div></div>`;}).join(""):'<div class="vacio">Todavía no has pedido ninguna descarga.</div>';
+  }
   // 2) Lo que decidió el agente (para corregirlo si se equivocó)
   const evs=DecisionesAgente.visibles(ag.eventos,ag.validaciones).filter(({e})=>ok(((e.detalle||{}).descripcion||"")+" "+((e.detalle||{}).proveedor||""))&&filtraFechaAdmin(e));
   h+=`<h3 style="margin:18px 0 8px">Decisiones recientes del agente <span class="badge">${evs.length}</span> ${evs.length?'<button class="s" onclick="agQuitarTodasEv()" title="Las saca de esta lista; no cambia ninguna regla">Quitar todas</button>':""}</h3><div class="mut" style="margin-bottom:6px">Corrige la unidad si se equivocó, o pulsa Quitar si está bien: en los dos casos sale de la lista.</div>`;
