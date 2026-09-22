@@ -233,6 +233,8 @@ tr:hover td{background:#f1f5f9}
 <script src="js/unidad-nueva.js"></script>
 <script src="js/unidad-nueva-ui.js"></script>
 <script src="js/decisiones-agente.js"></script>
+<script src="js/nota-credito.js"></script>
+<script src="js/nota-credito-ui.js"></script>
 <script src="js/conciliacion-ui.js"></script>
 <script src="js/cruce-dian-ui.js"></script>
 <script>
@@ -1817,6 +1819,7 @@ async function cargar(){
   facturas=f||[];
   const {data:n}=await SB.from("novedades").select("cufe,motivo,texto,created_at");
   novedades=n||[];
+  await cargarNotaLinks();   // notas credito amarradas a sus facturas (si falla, todo sigue igual)
   pintar();
   if(!pedidosCargados && typeof cargarPedidos==="function") cargarPedidos().then(()=>pintar()).catch(()=>{});   // para saber la sede de las Sin asignar
 }
@@ -1913,6 +1916,7 @@ function pintar(){
         ${f.num_ingreso?`<span class="badge st-sellada" style="font-size:13px;padding:5px 12px;font-weight:700">Ingreso ERP: ${f.num_ingreso}</span>`:""}
         ${SinSellar.esIngresadaSinSellar(f)?badgeSinSellar(f):""}
         ${(f.pedido_erp||f.pedido_num)?`<span class="badge st-asignada">🔗 Pedido ${f.pedido_erp||f.pedido_num}</span>`:""}
+        ${chipsNotaCredito(f)}
         <span class="sp"></span>
         ${(perfil.rol==="sede"&&f.estado=="pool")?`<button class="s" onclick="tomar('${f.cufe}')">Es mía</button>`:""}
         ${((f.estado==="asignada"||f.estado==="sellada")&&(perfil.rol==="sede"||perfil.rol==="admin"||perfil.rol==="pagos"))?`<button class="d" onclick="soltar('${f.cufe}')">↩ ${f.estado==="sellada"?"Quitar el sello":"No es mía"}</button>`:""}
@@ -1922,6 +1926,7 @@ function pintar(){
         ${(f.archivo_pdf_sellado&&(f.estado==="sellada"||f.estado==="pagada"))?`<button class="p" onclick="verPdfArchivo('${f.archivo_pdf_sellado}')">✅ Ver sellada</button>`:""}
         ${f.archivo_recibo?`<button onclick="verPdfArchivo('${f.archivo_recibo}')">📸 Ver recibo</button>`:""}
         ${(f.tipo=="factura")?`<button class="s" onclick="abrirAmarre('factura','${f.cufe}')">🔗 Buscar pedido</button>`:""}
+        ${botonNotaCredito(f)}
         ${(perfil.rol==="admin")?`<button class="d" title="Borrar factura" onclick="borrarFactura('${f.cufe}')">🗑</button>`:""}
         ${(f.estado!="pagada")?`<button onclick="abrirNov('${f.cufe}')">Novedad</button>`:""}
       </div>
@@ -2342,6 +2347,16 @@ async function guardarNov(){
   <div class="err" id="amErr"></div>
   <div class="row"><span class="sp"></span>
     <button onclick="$('modalAmarre').classList.remove('on')">Cerrar</button></div>
+</div></div>
+
+<div id="modalNC" class="modal"><div class="card" style="max-width:640px">
+  <h1 id="ncTitulo">🔗 Amarrar nota crédito</h1>
+  <div class="mut" style="margin-bottom:6px">Una nota crédito corrige facturas del mismo proveedor. Marca la(s) factura(s) que corrige, para la trazabilidad. No cambia ninguna factura.</div>
+  <input id="ncBuscar" placeholder="🔎 Buscar por número, fecha o valor..." oninput="pintarNC()" autocomplete="off">
+  <div id="ncLista" style="max-height:50vh;overflow:auto;margin-top:6px"></div>
+  <div class="err" id="ncErr"></div>
+  <div class="row" style="margin-top:8px"><span class="sp"></span>
+    <button onclick="cerrarNC()">Cerrar</button><button class="p" id="ncGuardar" onclick="guardarNC()" disabled>Elige la(s) factura(s)</button></div>
 </div></div>
 
 <div id="modalEditar" class="modal"><div class="card" style="max-width:520px">
