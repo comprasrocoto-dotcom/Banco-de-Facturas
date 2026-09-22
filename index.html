@@ -233,6 +233,8 @@ tr:hover td{background:#f1f5f9}
 <script src="js/unidad-nueva.js"></script>
 <script src="js/unidad-nueva-ui.js"></script>
 <script src="js/decisiones-agente.js"></script>
+<script src="js/nombres-por-decidir.js"></script>
+<script src="js/nombres-por-decidir-ui.js"></script>
 <script src="js/nota-credito.js"></script>
 <script src="js/nota-credito-ui.js"></script>
 <script src="js/conciliacion-ui.js"></script>
@@ -701,7 +703,7 @@ function pintarAdmin(){
 // cuenta en la base (función unidad_registrar_correccion) y sube la confianza de la regla.
 const escAg=s=>String(s==null?"":s).replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
 const fhAg=d=>d?new Date(d).toLocaleString("es-CO",{timeZone:"America/Bogota",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"";
-let ag={cargado:false,cargando:false,rev:[],eventos:[],validaciones:[],reglas:[],correos:[],dian:[],error:"",unidades:[],aliasMapa:{}};
+let ag={cargado:false,cargando:false,rev:[],eventos:[],validaciones:[],reglas:[],correos:[],dian:[],productos:[],error:"",unidades:[],aliasMapa:{}};
 // "Descargas de la DIAN" queda plegada (no aporta a diario): se abre solo si uno quiere, y se recuerda en este navegador.
 let agDianAbierto=(()=>{try{return localStorage.getItem("agDianAbierto")==="1";}catch(e){return false;}})();
 function agToggleDian(){agDianAbierto=!agDianAbierto;try{localStorage.setItem("agDianAbierto",agDianAbierto?"1":"0");}catch(e){/* sin storage: solo no se recuerda */}pintarAdmin();}
@@ -719,6 +721,7 @@ async function cargarAgente(forzar){
     const e=r1.error||r2.error||r3.error||r4.error||r5.error; ag.error=e?e.message:"";
     ag.rev=r1.data||[]; ag.eventos=r2.data||[]; ag.reglas=r3.data||[]; ag.correos=r4.data||[]; ag.dian=r5.data||[]; ag.validaciones=r6.data||[]; ag.cargado=true;
     await cargarUnidadesAg();
+    await cargarNombresDecidir();
   }catch(e){ ag.error=e.message; }
   ag.cargando=false; if(adminVista==="agente") pintarAdmin();
 }
@@ -783,6 +786,18 @@ function pintarAgente(c,q){
       <select id="agrev_${i}" style="width:auto;margin:0" onchange="agUnidadCambio(this)">${optsUnidadAg(r.sugerencia)}</select>
       <button class="s" onclick="agDecidirRev(${i},false)">Decidir</button>
       ${esAdmin?`<button class="p" title="Queda como regla firme (confianza alta)" onclick="agDecidirRev(${i},true)">Decidir y confirmar</button>`:""}
+    </div></div>`).join(""):'<div class="vacio">Nada pendiente. ✅</div>';
+  // 1a-bis) Nombres por decidir: el texto de la factura no se parecia a ninguna linea del pedido (por proveedor; homologacion de nombres)
+  const pnd=(ag.productos||[]).map((r,i)=>({r,i})).filter(({r})=>ok(r.texto_factura+" "+(r.proveedor_nombre||""))&&filtraFechaAdmin(r));
+  h+=`<h3 style="margin:18px 0 8px">Nombres por decidir <span class="badge st-pool">${pnd.length}</span></h3><div class="mut" style="margin-bottom:6px">El agente no inventa el nombre: si el texto de la factura no se parece a ninguna línea del pedido, queda aquí. Elige (o escribe) a qué nombre EXACTO del pedido/ERP corresponde — queda aprendido para ese proveedor (y de paso la presentación: el nombre ya dice si son 2 KILOS o UNDX2270). Si de verdad es otro insumo, dale "No es lo mismo".</div>`;
+  h+=pnd.length?pnd.map(({r,i})=>`<div class="card" style="margin:6px 0"><div class="row">
+      <div style="flex:3"><div class="emisor">${escAg(r.texto_factura)}</div>
+      <div class="mut">${escAg(r.proveedor_nombre||"—")} · ${escAg(r.pedido_numero||"")} · ${fhAg(r.creado_en)}</div>
+      ${(r.sugerencias||[]).length?`<div class="mut" style="margin-top:4px">¿Es alguno de estos? ${r.sugerencias.map(s=>`<button class="s" style="margin:2px 4px 0 0;padding:3px 8px;font-size:12px" onclick="agProductoElegir(${i},'${escAg(s.nombre).replace(/'/g,"&#39;")}')">${escAg(NombresPorDecidir.textoSugerencia(s))}</button>`).join("")}</div>`:""}
+      <input id="agpn_${i}" placeholder="Nombre exacto en el pedido/ERP" style="margin-top:6px" autocomplete="off">
+      <div class="mut" id="agpm_${i}" style="color:#991b1b"></div></div>
+      <button class="p" id="agpb_${i}" onclick="agProductoEnsenar(${i})">Enseñar</button>
+      <button class="d" onclick="agProductoDescartar(${i})">No es lo mismo</button>
     </div></div>`).join(""):'<div class="vacio">Nada pendiente. ✅</div>';
   // 1b) Correos del agente: estado, intentos y último error (se reintentan solos)
   const cor=ag.correos.map((m,i)=>({m,i})).filter(({m})=>ok(m.asunto+" "+m.destinatario+" "+(m.pedido_numero||""))&&filtraFechaAdmin(m));
