@@ -235,6 +235,8 @@ tr:hover td{background:#f1f5f9}
 <script src="js/decisiones-agente.js"></script>
 <script src="js/nombres-por-decidir.js"></script>
 <script src="js/nombres-por-decidir-ui.js"></script>
+<script src="js/envio-pedido.js"></script>
+<script src="js/envio-pedido-ui.js"></script>
 <script src="js/nota-credito.js"></script>
 <script src="js/nota-credito-ui.js"></script>
 <script src="js/conciliacion-ui.js"></script>
@@ -329,13 +331,14 @@ async function nuevoPedido(){
   $("np_fecha").value=hoy; $("np_entrega").value=""; $("np_obs").value=""; $("np_resp").value="";
   if(!provs.length){
     // Se pide por paginas: la API corta en 1.000 filas y maximos_minimos ya tiene mas.
-    provs=await traerTodo("proveedores","id,nit,razon_social,nombre_comercial",["razon_social","id"]);
+    provs=await traerTodo("proveedores","id,nit,razon_social,nombre_comercial,correo,telefono1,asesor",["razon_social","id"]);
     arts=await traerTodo("articulos","codigo_barras,articulo_hiopos,articulo_comercial,unimedida_compra,subfamilia",["articulo_comercial","id"]);
     cat=await traerTodo("catalogo_compras","codigo_barras,id_proveedor,precio_negociado",["id"]);
     minmax=await traerTodo("maximos_minimos","articulo,almacen,subarticulo,minimo,maximo",["id"]);
     await prepararConversiones();
   }
   $("np_prov").innerHTML='<option value="">— elegí proveedor —</option>'+provs.map(x=>`<option value="${x.id}">${x.razon_social||x.nombre_comercial}</option>`).join("");
+  if(typeof pintarContactoProv==="function") pintarContactoProv();
   if(perfil.rol==="sede"){
     $("np_sede").innerHTML=`<option value="${perfil.sede_id}">${(perfil.sedes&&perfil.sedes.nombre)||"mi sede"}</option>`;
     $("np_sede").disabled=true;
@@ -362,6 +365,7 @@ async function nuevoPedido(){
 async function filtrarArticulos(){
   const id=Number($("np_prov").value||0);
   provArts=[];
+  if(typeof pintarContactoProv==="function") pintarContactoProv();   // tarjeta con NIT / correo / WhatsApp del proveedor elegido (js/envio-pedido-ui.js)
   if(id){
     const pv=provs.find(x=>x.id===id)||{};
     const nom=pv.razon_social||pv.nombre_comercial||"";
@@ -1055,8 +1059,10 @@ function pintarPedidos(){
     </div>`;
   }).join("") + (l.length>300?'<div class="vacio">Mostrando 300 de '+l.length+' — usá el buscador para afinar.</div>':"");
 }
-async function ordenCompra(id){
-  const p=pedidos.find(x=>x.id===id); if(!p){return;}
+// opciones.soloBlob: en vez de descargar, devuelve el PDF (Blob) para adjuntarlo al enviar el pedido al proveedor (mismo documento que el boton "⬇ PDF").
+async function ordenCompra(id, opciones){
+  const soloBlob=!!(opciones&&opciones.soloBlob);
+  const p=pedidos.find(x=>x.id===id); if(!p){return null;}
   const sede=sedes.find(s=>s.id===p.sede_id)||{};
   let prov={};
   if(p.proveedor_id){ const r=await SB.from("proveedores").select("*").eq("id",p.proveedor_id).single(); prov=r.data||{}; }
@@ -1139,6 +1145,7 @@ async function ordenCompra(id){
        <div>Total artículos: ${total}</div>
        ${hayPrecios?`<div>Total compra: ${money(totalPlata)}</div>`:""}
      </div>
+     ${p.observacion_pedido?`<h3>Observaciones</h3><div class="f">${String(p.observacion_pedido).replace(/&/g,"&amp;").replace(/</g,"&lt;")}</div>`:""}
      <h3>Información de Factura / Documento</h3>
      <div class="f">N° Factura: ${p.numero_factura||"—"}<br>Tipo: ${p.forma_pago||p.tipo||"—"}<br>N° Pedido Sistema: ${p.pedido_erp||"—"}</div>
      <div class="pie"><span>Banco de Facturas · ${p.sede_texto||sede.nombre||""}</span><span>Generado el ${hoy}</span></div>
@@ -1155,9 +1162,11 @@ async function ordenCompra(id){
     rest-=ph;
     while(rest>2){ y-=ph; pdf.addPage(); pdf.addImage(img,"JPEG",0,y,iw,ih); rest-=ph; }
     const nombre="Orden_"+(p.numero||"")+"_"+((p.proveedor_texto||"proveedor").split(" ").slice(0,2).join("_"))+".pdf";
+    if(soloBlob){ const blob=pdf.output("blob"); cont.remove(); return {blob,nombre}; }
     pdf.save(nombre);
-  }catch(e){ alert("No pude generar el PDF: "+(e.message||e)); }
+  }catch(e){ cont.remove(); if(soloBlob) throw e; alert("No pude generar el PDF: "+(e.message||e)); return null; }
   cont.remove();
+  return null;
 }
 async function ponerErp(id){
   const p=pedidos.find(x=>x.id===id)||{};
@@ -1390,6 +1399,7 @@ async function abrirPedido(id){
          <div><div class="mut" style="font-weight:700">NOTA DE CRÉDITO</div><div>${p.numero_nota_credito||"—"}</div></div>
        </div>
      </div>
+     <div id="env_${p.id}"></div>
      <div class="row" style="margin-top:14px">
        ${!p.factura_cufe?`<button class="s" onclick="abrirAmarre('pedido',${p.id})">🔗 Amarrar a factura</button>`:""}
        ${p.factura_cufe?`<span class="badge st-sellada">Amarrado a ${numFacturaDe(p)||"factura"}</span>`:""}
@@ -1399,6 +1409,7 @@ async function abrirPedido(id){
        ${p.factura_cufe?`<button onclick="pedirIngresoPedido(${p.id})" style="${(facturas.find(x=>x.cufe===p.factura_cufe)||{}).num_ingreso?'background:#15803d;border-color:#15803d':'background:#1e3a8a;border-color:#1e3a8a'};color:#fff;font-weight:700;padding:10px 18px;font-size:14px;border-radius:8px">${(facturas.find(x=>x.cufe===p.factura_cufe)||{}).num_ingreso?'✅ Ingreso ERP: '+(facturas.find(x=>x.cufe===p.factura_cufe)||{}).num_ingreso:'📝 Poner ingreso ERP (FCRC)'}</button>`:""}
      </div>
    </div>`;
+  if(typeof pintarEstadoEnvio==="function") pintarEstadoEnvio(p.id);   // panel "Envío al proveedor" (js/envio-pedido-ui.js)
 }
 // Poner el N° de ingreso ERP (factura de compra) desde el detalle del pedido.
 // Actualiza num_ingreso en la FACTURA amarrada al pedido y marca el pedido como facturado.
@@ -2396,6 +2407,7 @@ async function guardarNov(){
       <select id="np_tipo"><option>Requisicion</option><option>Pedido</option><option>Traslado</option></select></div>
   </div>
   <label class="mut">Proveedor</label><select id="np_prov" onchange="filtrarArticulos()"></select>
+  <div id="np_contacto"></div>
   <div class="row">
     <div style="flex:1"><label class="mut">Fecha</label><input type="date" id="np_fecha"></div>
     <div style="flex:1"><label class="mut">Fecha de entrega</label><input type="date" id="np_entrega"></div>
@@ -2424,6 +2436,11 @@ async function guardarNov(){
     <button onclick="$('modalPedido').classList.remove('on')">Cancelar</button>
     <button class="p" onclick="guardarPedido()">Guardar pedido</button></div>
   <div class="err" id="np_err"></div>
+</div></div>
+
+<div id="modalEnvio" class="modal"><div class="card" style="max-width:560px;width:96vw">
+  <h1>📤 ENVIAR PEDIDO</h1>
+  <div id="env_cuerpo"></div>
 </div></div>
 
 <div id="modalSello" class="modal"><div class="card">
