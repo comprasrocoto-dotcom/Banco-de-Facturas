@@ -194,6 +194,7 @@ tr:hover td{background:#f1f5f9}
         <input id="qp" placeholder="🔎 N° de orden, proveedor o factura" style="width:260px;margin:0" oninput="pintarPedidos()">
       </div>
       <div id="estadoOrden" style="display:none;margin-bottom:10px"></div>
+      <div id="erroresIngreso" style="display:none;margin-bottom:10px"></div>
       <div id="listaped"></div>
     </div>
   </div>
@@ -236,6 +237,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/decisiones-agente.js"></script>
 <script src="js/nombres-por-decidir.js"></script>
 <script src="js/nombres-por-decidir-ui.js"></script>
+<script src="js/ingreso-panel.js"></script>
 <script src="js/usuarios.js"></script>
 <script src="js/usuarios-ui.js"></script>
 <script src="js/envio-pedido.js"></script>
@@ -1683,16 +1685,47 @@ function numeroFactura(f){
 // ---- ORDENES PARA EL VIGILANTE LOCAL (el bot corre en tu PC, sin tokens) ----
 let ordenesUlt=[], ordEstadoPrev=null, ordenOculta=null;
 async function cargarOrdenes(){
-  const {data}=await SB.from("ordenes").select("id,estado,pedida_en,tomada_en,terminada_en,resultado,log").order("id",{ascending:false}).limit(3);
+  const {data}=await SB.from("ordenes").select("id,estado,pedida_en,tomada_en,terminada_en,resultado,log,progreso,detener").order("id",{ascending:false}).limit(3);
   ordenesUlt=data||[]; pintarEstadoOrden();
+  await cargarErroresIngreso();
   const e=(ordenesUlt[0]||{}).estado||null;
   if(ordEstadoPrev!==null && ordEstadoPrev!==e && (e==="hecho"||e==="terminado"||e==="error")){
     ordEstadoPrev=e;
     pedidosCargados=false; await cargarPedidos();     // recargar pedidos cuando el bot termina
   } else { ordEstadoPrev=e; }
 }
-// refresco liviano del estado del bot (cada 15s)
-setInterval(()=>{ if(typeof usuario!=="undefined" && usuario) cargarOrdenes().catch(()=>{}); }, 15000);
+// refresco liviano del estado del bot (cada 8s: el progreso se ve casi en vivo)
+setInterval(()=>{ if(typeof usuario!=="undefined" && usuario) cargarOrdenes().catch(()=>{}); }, 8000);
+// (26/09/2026) COLA DE INGRESOS: documentos en ERROR / pendientes de reintento (tabla ingreso_documento), con su etapa y el motivo. Los COMPLETADOS no se vuelven a procesar.
+let ingresoDocs=[];
+async function cargarErroresIngreso(){
+  const c=$("erroresIngreso"); if(!c) return;
+  try{
+    if(typeof can!=="function" || !(perfil && (perfil.rol==="admin"||perfil.rol==="pagos"))){ c.style.display="none"; return; }
+    const r=await SB.from("ingreso_documento").select("pedido_id,numero,estado,etapa,error_etapa,error").in("estado",["ERROR","PENDIENTE_REINTENTO"]).order("actualizado_en",{ascending:false}).limit(50);
+    ingresoDocs=r.data||[];
+  }catch(e){ ingresoDocs=[]; }
+  const h=IngresoPanel.bloqueErrores(ingresoDocs,{puede:can("ingresos.iniciar")});
+  c.innerHTML=h; c.style.display=h?"block":"none";
+}
+// DETENER: el agente termina el documento en curso y se para (nada a medias)
+async function detenerIngreso(id){
+  if(!confirm("¿Detener el proceso?\n\nEl agente termina el documento que está procesando ahora (no deja pedidos a medias) y se detiene. Lo que falte queda pendiente para la próxima orden.")) return;
+  const r=await SB.rpc("orden_detener",{p_id:id});
+  if(r.error){ alert("No se pudo detener: "+r.error.message); return; }
+  await cargarOrdenes();
+}
+// REINTENTAR ERRORES: solo los documentos en ERROR vuelven a la cola; los COMPLETADOS no se tocan
+async function reintentarErroresIngreso(){
+  const n=ingresoDocs.filter(d=>d.estado==="ERROR").length;
+  if(!confirm("Se van a reintentar "+n+" documento(s) que quedaron en ERROR.\n\nLos COMPLETADOS no se vuelven a procesar. ¿Pedimos la orden?")) return;
+  const r=await SB.rpc("ingreso_reintentar_errores");
+  if(r.error){ alert("No se pudo: "+r.error.message); return; }
+  const o=await SB.from("ordenes").insert({tipo:"ingresos",estado:"pendiente",pedida_por:usuario.id});
+  if(o.error){ alert(msgPedirOrden(o.error)); return; }
+  await cargarOrdenes();
+  alert("✅ Orden de reintento enviada.\n\nEl VIGILANTE la toma en menos de 30 segundos y procesa solo los documentos en error.");
+}
 function pintarEstadoOrden(){
   const c=$("estadoOrden"), o=ordenesUlt[0];
   if(!c) return;
@@ -1712,6 +1745,7 @@ function pintarEstadoOrden(){
   c.innerHTML=`<div class="card" style="border-left:5px solid ${col}">
     <div style="font-weight:700;color:${col}">${txt}</div>
     <div class="mut">Orden #${o.id} · ${cuando}${o.resultado? " · "+o.resultado : ""}</div>
+    ${IngresoPanel.bloqueProgreso(o,{puede:(typeof can==="function"&&can("ingresos.iniciar"))})}
     <div class="row" style="margin-top:10px">
       ${conProblema?`<button class="p" onclick="relanzar()">🔁 Relanzar este ingreso</button>`:""}
       ${acabada?`<button class="s" onclick="enviarResumen()">📧 Mandar el resumen al correo</button>
