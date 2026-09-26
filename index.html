@@ -1296,6 +1296,14 @@ function confirmarSiYaAmarrado(p){
   if(!p || !p.factura_cufe) return true;
   return confirm("⚠️ El pedido "+(p.numero||"")+" YA está amarrado a la factura "+(p.numero_factura||p.factura_cufe)+".\n\n¿Seguro que querés amarrarlo a OTRA factura? La anterior quedará sin pedido.");
 }
+function confirmarSiOtroProveedor(f,p){
+  // (25/09/2026) La factura tiene que ser del proveedor del pedido. Si NO lo es, el agente le anexaria al pedido de un proveedor los productos de OTRO
+  // (paso con PED-0149: aguacate de TORRES CORREA facturado con la factura de LACTEOS BUENOS AIRES) y ademas se dañan los precios y unidades que aprende.
+  // Aviso claro y hay que confirmar; el agente tambien se niega a procesarlo si el proveedor no coincide.
+  if(!f||!p) return true;
+  if(SinSellar.mismoProveedor(f,p)) return true;      // 'igual' o 'parecido'
+  return confirm("⛔ OJO: la factura es de\n   "+(f.emisor||"?")+"\ny el pedido "+(p.numero||"")+" es de\n   "+(p.proveedor_texto||"?")+"\n\nNo parecen el mismo proveedor. Si los amarras, el agente NO lo ingresará al ERP (queda como novedad) y habrá que desamarrarlos.\n\n¿Amarrar de todos modos?");
+}
 function bloquearSiYaAmarrado(p){
   // TAREA (14/09): dos facturas por pedido requieren validacion humana, asi que
   // desde estos flujos NO se deja amarrar una segunda factura encima de la que
@@ -1309,6 +1317,7 @@ function bloquearSiYaAmarrado(p){
 async function amarrarConFactura(cufe){
   const pAntes=pedidos.find(x=>x.id===amId);
   if(bloquearSiYaAmarrado(pAntes)) return;
+  if(!confirmarSiOtroProveedor(facturas.find(x=>x.cufe===cufe),pAntes)) return;
   const up=await SB.from("pedidos").update({factura_cufe:cufe}).eq("id",amId);
   if(up.error){$("amErr").textContent="No se pudo: "+up.error.message;return;}
   const f=facturas.find(x=>x.cufe===cufe)||{};
@@ -1320,6 +1329,7 @@ async function amarrarConFactura(cufe){
 async function amarrarConPedido(pid){
   const pAntes=pedidos.find(x=>x.id===pid);
   if(bloquearSiYaAmarrado(pAntes)) return;
+  if(!confirmarSiOtroProveedor(facturas.find(x=>x.cufe===amId),pAntes)) return;
   const up=await SB.from("pedidos").update({factura_cufe:amId}).eq("id",pid);
   if(up.error){$("amErr").textContent="No se pudo: "+up.error.message;return;}
   await SB.from("historial").insert({cufe:amId,accion:"pedido amarrado",detalle:"pedido "+(pedidos.find(x=>x.id===pid)||{}).numero,usuario:usuario.id}).then(()=>{},()=>{});
