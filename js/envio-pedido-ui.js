@@ -9,7 +9,7 @@
 //    - Cada intento (canal, destinatario, estado, error, usuario) queda en pedido_envio; nada se actualiza, siempre se agrega. Sin secretos.
 //  Logica pura: js/envio-pedido.js. Usa las globales de index.html: $, SB, perfil, usuario, pedidos, sedes, provs, ordenCompra, escAg, fhAg.
 // ============================================================
-const EPC = { enCurso: {}, ctx: null };
+const EPC = { enCurso: {}, ctx: null, compartir: {} };   // compartir[id] = { archivo, texto }: el PDF y el mensaje listos para el boton "Compartir PDF adjunto"
 const escE = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const envioPuede = () => !!(perfil && (perfil.rol === 'admin' || perfil.rol === 'pagos') && can('pedidos.enviar_proveedor'));   // encolar correos es de admin/pagos (regla del servidor) y ademas del permiso del perfil
 const envioMsgErr = (e) => String((e && e.message) || e || 'error desconocido').replace(/\s+/g, ' ').slice(0, 300);
@@ -61,7 +61,7 @@ async function pintarEstadoEnvio(id) {
     const malo = s.estado === 'error';
     let acciones = '';
     if (puede && malo) acciones += `<button class="s" onclick="envioReintentar(${id},'${canal}')">REINTENTAR ENVÍO</button>`;
-    if (canal === 'whatsapp' && s.estado === 'enlace_generado') acciones += `<button class="s" onclick="envioConfirmarWhatsapp(${id})">Ya lo envié por WhatsApp</button><button class="s" onclick="envioReabrirWhatsapp(${id})">Abrir WhatsApp otra vez</button>`;
+    if (canal === 'whatsapp' && s.estado === 'enlace_generado') acciones += `<button class="s" onclick="envioConfirmarWhatsapp(${id})">Ya lo envié por WhatsApp</button><button class="s" onclick="envioReabrirWhatsapp(${id})">Abrir WhatsApp otra vez</button>${envioPuedeCompartir() ? `<button class="s" onclick="envioCompartirPdf(${id})">📎 Compartir PDF adjunto</button>` : ''}`;
     return `<div style="margin:4px 0">${icono} <b>${nombre}:</b> <span style="font-weight:700;color:${malo ? '#b91c1c' : (s.estado === 'enviado' || s.estado === 'confirmado_manual' ? '#166534' : '#b45309')}">${escE(s.etiqueta)}</span>
       <span class="mut">· ${escE(s.destinatario)} · ${fhAg(s.fecha)}${s.intentos > 1 ? ' · ' + s.intentos + ' intentos' : ''}</span>
       ${malo && s.error ? `<div class="mut" style="color:#b91c1c">Motivo: ${escE(s.error)}</div>` : ''} ${acciones}</div>`;
@@ -141,7 +141,7 @@ function envioConfirmar(reenviar) {
 }
 
 // datos reales del pedido para armar los mensajes (mismas fuentes que el detalle y el PDF: pedido_lineas + articulos.unimedida_compra)
-async function envioDatos(x, intento) {
+async function envioDatos(x, intento, enlacePdf) {
   const l = await SB.from('pedido_lineas').select('codigo,insumo,cantidad,unidad').eq('pedido_id', x.id);
   if (l.error) throw new Error('No pude leer los productos del pedido: ' + l.error.message);
   const lineas = l.data || [];
@@ -153,7 +153,29 @@ async function envioDatos(x, intento) {
   }
   const sede = (typeof sedes !== 'undefined' ? sedes : []).find((s) => s.id === x.p.sede_id) || {};
   const empresa = [x.p.sede_texto || sede.nombre].filter(Boolean).join(' ');
-  return EnvioPedido.armarMensajes({ pedido: x.p, proveedor: x.prov, lineas, unidades, empresa, intento });
+  const base = { pedido: x.p, proveedor: x.prov, lineas, unidades, empresa, intento };
+  const m = EnvioPedido.armarMensajes({ ...base, enlacePdf });
+  m.textoSinPdf = EnvioPedido.armarMensajes(base).textoWhatsapp;
+  return m;
+}
+
+// PDF de la orden (el MISMO de "⬇ PDF", con los codigos de producto) guardado en el bucket privado: sirve de ADJUNTO del correo y de ENLACE en WhatsApp.
+async function envioPdf(x) {
+  if (x.pdf) return x.pdf;
+  const pdf = await ordenCompra(x.id, { soloBlob: true });
+  if (!pdf) throw new Error('No se pudo generar el PDF del pedido.');
+  const ruta = EnvioPedido.rutaPdf(x.p.numero);
+  const up = await SB.storage.from('facturas').upload(ruta, pdf.blob, { upsert: true, contentType: 'application/pdf' });
+  if (up.error) throw new Error('No se pudo guardar el PDF: ' + up.error.message);
+  x.pdf = { ruta, blob: pdf.blob, nombre: pdf.nombre || ruta.split('/').pop() };
+  return x.pdf;
+}
+// WhatsApp no deja adjuntar un archivo desde una pagina (wa.me solo lleva texto): se manda un enlace directo al PDF, valido 30 dias.
+const DIAS_ENLACE_PDF = 30;
+async function envioEnlacePdf(ruta) {
+  const r = await SB.storage.from('facturas').createSignedUrl(ruta, 60 * 60 * 24 * DIAS_ENLACE_PDF);
+  if (r.error || !r.data || !r.data.signedUrl) throw new Error('No se pudo crear el enlace del PDF' + (r.error ? ': ' + r.error.message : ''));
+  return r.data.signedUrl;
 }
 
 async function envioRegistrar(x, canal, destinatario, estado, colaId, error) {
@@ -165,7 +187,7 @@ async function envioEjecutar(x, canales, reenviar, win) {
   const cerrarWin = () => { try { if (win) win.close(); } catch (_) { /* nada */ } };
   // Estado fresco (otra pestaña/persona pudo enviarlo hace un momento)
   const fresco = await envioCargar(x.id);
-  x.estado = fresco;
+  x.estado = fresco; x.pdf = null;   // el PDF se genera de nuevo en cada envio (el pedido pudo cambiar)
   if (EnvioPedido.canalesYaEnviados(fresco.porCanal, canales).length && !reenviar) {
     cerrarWin(); $('env_dup').style.display = 'block'; envioMsg('', true); return;
   }
@@ -184,11 +206,7 @@ async function envioEjecutar(x, canales, reenviar, win) {
 async function envioCorreo(x, fresco) {
   const dest = x.c.correo.valor;
   try {
-    const pdf = await ordenCompra(x.id, { soloBlob: true });
-    if (!pdf) throw new Error('No se pudo generar el PDF del pedido.');
-    const ruta = EnvioPedido.rutaPdf(x.p.numero);
-    const up = await SB.storage.from('facturas').upload(ruta, pdf.blob, { upsert: true, contentType: 'application/pdf' });
-    if (up.error) throw new Error('No se pudo guardar el PDF: ' + up.error.message);
+    const ruta = (await envioPdf(x)).ruta;
     const m = await envioDatos(x, EnvioPedido.proximoIntento(fresco.envios, 'correo'));
     const r = await SB.rpc('correo_encolar', { p_para: dest, p_asunto: m.asunto, p_cuerpo: m.cuerpoCorreo, p_pedido: String(x.p.numero), p_archivo_pdf: ruta });
     if (r.error) throw new Error(r.error.message);
@@ -207,12 +225,16 @@ async function envioCorreo(x, fresco) {
 async function envioWhatsapp(x, fresco, win) {
   const dest = x.c.whatsapp.valor;
   try {
-    const m = await envioDatos(x, EnvioPedido.proximoIntento(fresco.envios, 'whatsapp'));
+    let enlace = null, aviso = '';
+    try { const pdf = await envioPdf(x); enlace = await envioEnlacePdf(pdf.ruta); }
+    catch (e) { aviso = ' ⚠️ Sin enlace al PDF (' + envioMsgErr(e) + '): el mensaje sale igual; adjunta el PDF con “⬇ PDF”.'; }
+    const m = await envioDatos(x, EnvioPedido.proximoIntento(fresco.envios, 'whatsapp'), enlace);
+    if (x.pdf) EPC.compartir[x.id] = { archivo: x.pdf, texto: m.textoSinPdf };
     const url = EnvioPedido.enlaceWhatsapp(dest, m.textoWhatsapp);
     let abierto = false;
     if (win && !win.closed) { win.location.href = url; abierto = true; }
     await envioRegistrar(x, 'whatsapp', dest, 'enlace_generado', null, abierto ? null : 'El navegador bloqueó la ventana: usa "Abrir WhatsApp otra vez".');
-    return { ok: true, texto: '💬 WhatsApp: ' + (abierto ? 'se abrió con el mensaje listo — falta que des “enviar” allá.' : 'el navegador bloqueó la ventana; usa “Abrir WhatsApp otra vez” en el detalle del pedido.') };
+    return { ok: !aviso, texto: '💬 WhatsApp: ' + (abierto ? 'se abrió con el mensaje listo' + (enlace ? ' (con el enlace al PDF)' : '') + ' — falta que des “enviar” allá.' + aviso : 'el navegador bloqueó la ventana; usa “Abrir WhatsApp otra vez” en el detalle del pedido.') };
   } catch (e) {
     try { if (win) win.close(); } catch (_) { /* nada */ }
     const msg = envioMsgErr(e);
@@ -260,8 +282,28 @@ async function envioReabrirWhatsapp(id) {
     const p = pedidos.find((y) => y.id === id); const rv = await SB.from('proveedores').select('id,nit,razon_social,nombre_comercial,correo,telefono1,asesor').eq('id', p.proveedor_id).single();
     const prov = rv.data || {}, c = EnvioPedido.contacto(prov); if (!c.whatsapp.ok) throw new Error(c.whatsapp.motivo);
     const e = await envioCargar(id);
-    const m = await envioDatos({ id, p, prov }, Math.max(1, EnvioPedido.proximoIntento(e.envios, 'whatsapp') - 1));
+    const x = { id, p, prov }; let enlace = null;
+    try { try { enlace = await envioEnlacePdf(EnvioPedido.rutaPdf(p.numero)); } catch (_) { enlace = await envioEnlacePdf((await envioPdf(x)).ruta); } } catch (_) { /* sin enlace: el mensaje sale igual */ }
+    const m = await envioDatos(x, Math.max(1, EnvioPedido.proximoIntento(e.envios, 'whatsapp') - 1), enlace);
     const url = EnvioPedido.enlaceWhatsapp(c.whatsapp.valor, m.textoWhatsapp);
     if (win) win.location.href = url; else window.open(url, '_blank');
   } catch (er) { try { if (win) win.close(); } catch (_) { /* nada */ } alert('No pude abrir WhatsApp: ' + envioMsgErr(er)); }
+}
+
+// ---------- PDF como ARCHIVO ADJUNTO en WhatsApp (menu "Compartir" del navegador) ----------
+// wa.me no puede adjuntar archivos; el menu Compartir del sistema si (celulares y algunos equipos): se elige WhatsApp y el chat, y el PDF va adjunto con el mensaje.
+const envioPuedeCompartir = () => { try { return typeof navigator !== 'undefined' && !!navigator.canShare && navigator.canShare({ files: [new File([new Blob(['x'])], 'x.pdf', { type: 'application/pdf' })] }); } catch (_) { return false; } };
+async function envioCompartirPdf(id) {
+  const c = EPC.compartir[id];
+  if (!c) {   // pagina recargada: se prepara el PDF y se pide otro toque (el navegador solo deja compartir justo despues de un clic)
+    try {
+      const p = pedidos.find((y) => y.id === id); const rv = await SB.from('proveedores').select('id,nit,razon_social,nombre_comercial,correo,telefono1,asesor').eq('id', p.proveedor_id).single();
+      const x = { id, p, prov: rv.data || {} }; const pdf = await envioPdf(x); const m = await envioDatos(x, 1, null);
+      EPC.compartir[id] = { archivo: pdf, texto: m.textoSinPdf };
+      alert('El PDF ya está listo: pulsa otra vez “📎 Compartir PDF adjunto”.');
+    } catch (e) { alert('No pude preparar el PDF: ' + envioMsgErr(e)); }
+    return;
+  }
+  try { await navigator.share({ files: [new File([c.archivo.blob], c.archivo.nombre || 'pedido.pdf', { type: 'application/pdf' })], title: 'Pedido', text: c.texto || '' }); }
+  catch (e) { if (!e || e.name !== 'AbortError') alert('No se pudo compartir: ' + envioMsgErr(e)); }
 }
