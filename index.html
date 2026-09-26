@@ -1068,13 +1068,12 @@ function amarrarMarca(codigo){
   const mSel=Number($("admCatalogo").value)||0; if(!codigo||!mSel) return;
   const provsM=MarcaProv.proveedoresDeAdmin(adminProv,adminVinc,mSel);
   if(!provsM.length){ alert("Esta marca todavía no tiene proveedores."); return; }
-  const el=prompt("¿A qué proveedor le amarrás "+codigo+"?\n(Escribí el número)\n\n"+provsM.map((x,i)=>(i+1)+". "+(x.razon_social||x.nombre_comercial)+(x.nit?"  (NIT "+x.nit+")":"  (sin NIT)")).join("\n"));
-  const n=Number(el); if(!n||!provsM[n-1]) return;
-  const pv=provsM[n-1], pr=prompt("Precio negociado (opcional):")||null;
-  SB.from("marca_catalogo").upsert({marca_id:mSel, codigo_barras:codigo, id_proveedor:pv.id, prioridad:1, precio_negociado:pr?Number(String(pr).replace(/[^0-9.]/g,"")):null, estado:"Aprobado"},{onConflict:"marca_id,codigo_barras,id_proveedor"})
-    .then(async r=>{ if(r.error){ alert("No se pudo: "+r.error.message); return; }
-      adminMarcaCat=await traerTodo("marca_catalogo","*",["id"]); marcaCat=[]; provs=[]; pintarAdmin();
-      alert("¡Listo! "+codigo+" quedó con "+(pv.razon_social||"")+(pr?" a $"+pr:" (sin precio)")); });
+  abrirElegirProveedor("¿A qué proveedor le amarrás "+codigo+"?", provsM, (pv,pr)=>{
+    SB.from("marca_catalogo").upsert({marca_id:mSel, codigo_barras:codigo, id_proveedor:pv.id, prioridad:1, precio_negociado:pr?Number(String(pr).replace(/[^0-9.]/g,"")):null, estado:"Aprobado"},{onConflict:"marca_id,codigo_barras,id_proveedor"})
+      .then(async r=>{ if(r.error){ alert("No se pudo: "+r.error.message); return; }
+        adminMarcaCat=await traerTodo("marca_catalogo","*",["id"]); marcaCat=[]; provs=[]; pintarAdmin();
+        alert("¡Listo! "+codigo+" quedó con "+(pv.razon_social||"")+(pr?" a $"+pr:" (sin precio)")); });
+  });
 }
 async function guardarProveedorAdmin(id){
   const p=adminProv.find(x=>x.id===id); if(!p) return;
@@ -1097,19 +1096,44 @@ async function guardarProveedorAdmin(id){
 }
 function amarrarA(codigo){
   if(!codigo) return;
-  const lista=adminProv.slice(0,40).map((x,i)=>(i+1)+". "+(x.razon_social||x.nombre_comercial)+"  (NIT "+(x.nit||"—")+")").join("\n");
-  const el=prompt("¿A qué proveedor le amarrás "+codigo+"?\n(Escribí el número)\n\n"+lista);
-  const n=Number(el); if(!n||!adminProv[n-1]) return;
-  const pid=adminProv[n-1].id;
-  const pr=prompt("Precio negociado (opcional):")||null;
-  // upsert: si el articulo YA esta amarrado a ese proveedor, actualiza el precio en vez de fallar
-  SB.from("catalogo_compras").upsert({codigo_barras:codigo, id_proveedor:pid, prioridad:1,
-      precio_negociado:pr?Number(String(pr).replace(/[^0-9.]/g,"")):null, estado:"Aprobado"},
-      {onConflict:"codigo_barras,id_proveedor"})
-    .then(async r=>{ if(r.error){alert("No se pudo: "+r.error.message);return;}
-      adminCargado=false; await cargarAdmin();
-      alert("¡Listo! "+codigo+" quedó con "+(adminProv[n-1].razon_social||"")+(pr?" a $"+pr:" (sin precio)")); });
+  abrirElegirProveedor("¿A qué proveedor le amarrás "+codigo+"?", MarcaProv.proveedoresDelGeneral(adminProv,adminVinc,adminMarcas), (pv,pr)=>{
+    // upsert: si el articulo YA esta amarrado a ese proveedor, actualiza el precio en vez de fallar
+    SB.from("catalogo_compras").upsert({codigo_barras:codigo, id_proveedor:pv.id, prioridad:1,
+        precio_negociado:pr?Number(String(pr).replace(/[^0-9.]/g,"")):null, estado:"Aprobado"},
+        {onConflict:"codigo_barras,id_proveedor"})
+      .then(async r=>{ if(r.error){alert("No se pudo: "+r.error.message);return;}
+        adminCargado=false; await cargarAdmin();
+        alert("¡Listo! "+codigo+" quedó con "+(pv.razon_social||"")+(pr?" a $"+pr:" (sin precio)")); });
+  });
 }
+// Ventana para elegir un proveedor: buscador por nombre o NIT, lista y precio opcional (reemplaza el cuadro que pedía el número)
+let provModal=null;
+function abrirElegirProveedor(titulo, provs, alElegir){
+  provModalCerrar();
+  provModal={provs:provs||[], sel:null, cb:alElegir};
+  const d=document.createElement("div"); d.className="modal on"; d.id="modalElegirProv";
+  d.innerHTML='<div class="card" style="max-width:560px"><h1 style="margin:0 0 6px">'+MarcaProv.esc(titulo)+'</h1>'+
+    '<input id="provModalQ" placeholder="🔎 Buscar proveedor por nombre o NIT..." oninput="provModalFiltrar()" autocomplete="off">'+
+    '<div id="provModalLista" style="max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:9px"></div>'+
+    '<div id="provModalPie" class="mut" style="margin-top:8px">Elegí un proveedor de la lista.</div>'+
+    '<div id="provModalPrecio" style="display:none;margin-top:8px"><label class="mut">Precio negociado (opcional)</label><input id="provModalP" inputmode="decimal" placeholder="sin precio" autocomplete="off"></div>'+
+    '<div class="row" style="margin-top:12px"><span class="sp"></span><button onclick="provModalCerrar()">Cancelar</button><button class="p" id="provModalOk" disabled onclick="provModalOk()">Amarrar</button></div></div>';
+  document.body.appendChild(d);
+  provModalFiltrar(); setTimeout(()=>{ const q=$("provModalQ"); if(q) q.focus(); },80);
+}
+function provModalFiltrar(){ if(!provModal) return; $("provModalLista").innerHTML=MarcaProv.filasProveedores(provModal.provs,$("provModalQ").value,provModal.sel); }
+function provModalSel(id){
+  if(!provModal) return; provModal.sel=id; provModalFiltrar();
+  const p=provModal.provs.find(x=>x.id===id)||{};
+  $("provModalPie").innerHTML="Elegido: <b>"+MarcaProv.esc(p.razon_social||p.nombre_comercial||"")+"</b>";
+  $("provModalPrecio").style.display="block"; $("provModalOk").disabled=false; $("provModalP").focus();
+}
+function provModalOk(){
+  if(!provModal||!provModal.sel) return;
+  const pv=provModal.provs.find(x=>x.id===provModal.sel), pr=($("provModalP").value||"").trim()||null, cb=provModal.cb;
+  provModalCerrar(); if(pv&&cb) cb(pv,pr);
+}
+function provModalCerrar(){ const d=document.getElementById("modalElegirProv"); if(d) d.remove(); provModal=null; }
 function adminNuevo(){
   if(adminVista==="prov"){
     const rz=prompt("Razón social del nuevo proveedor:"); if(!rz) return;
