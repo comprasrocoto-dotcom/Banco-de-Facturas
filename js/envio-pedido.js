@@ -105,8 +105,9 @@
   const ETIQUETAS = {
     pendiente: 'PENDIENTE', enviando: 'ENVIANDO', enviado: 'ENVIADO', error: 'ERROR',
     enlace_generado: 'ENLACE ABIERTO — falta confirmar el envío en WhatsApp', confirmado_manual: 'ENVIADO (confirmado por el usuario)',
+    aceptado: 'ENVIADO POR WHATSAPP BUSINESS (aceptado)',   // API oficial: WhatsApp acepto el mensaje con el PDF adjunto
   };
-  const EXITO = new Set(['enviado', 'confirmado_manual']);
+  const EXITO = new Set(['enviado', 'confirmado_manual', 'aceptado']);
   const mas = (a, b) => (String(b.creado_en || '').localeCompare(String(a.creado_en || '')) || (Number(b.id) || 0) - (Number(a.id) || 0));
 
   // El estado REAL de un correo lo dice la cola (el envio es asincrono: lo despacha el vigilante); agotado = error.

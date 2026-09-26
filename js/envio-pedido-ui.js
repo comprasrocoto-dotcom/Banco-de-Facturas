@@ -9,7 +9,7 @@
 //    - Cada intento (canal, destinatario, estado, error, usuario) queda en pedido_envio; nada se actualiza, siempre se agrega. Sin secretos.
 //  Logica pura: js/envio-pedido.js. Usa las globales de index.html: $, SB, perfil, usuario, pedidos, sedes, provs, ordenCompra, escAg, fhAg.
 // ============================================================
-const EPC = { enCurso: {}, ctx: null, compartir: {} };   // compartir[id] = { archivo, texto }: el PDF y el mensaje listos para el boton "Compartir PDF adjunto"
+const EPC = { enCurso: {}, ctx: null, compartir: {}, wa: null };   // wa: ¿esta configurada la API oficial de WhatsApp Business? (null = aun no se pregunto)   // compartir[id] = { archivo, texto }: el PDF y el mensaje listos para el boton "Compartir PDF adjunto"
 const escE = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const envioPuede = () => !!(perfil && (perfil.rol === 'admin' || perfil.rol === 'pagos') && can('pedidos.enviar_proveedor'));   // encolar correos es de admin/pagos (regla del servidor) y ademas del permiso del perfil
 const envioMsgErr = (e) => String((e && e.message) || e || 'error desconocido').replace(/\s+/g, ' ').slice(0, 300);
@@ -61,6 +61,7 @@ async function pintarEstadoEnvio(id) {
     const malo = s.estado === 'error';
     let acciones = '';
     if (puede && malo) acciones += `<button class="s" onclick="envioReintentar(${id},'${canal}')">REINTENTAR ENVÍO</button>`;
+    if (canal === 'whatsapp' && malo && EPC.wa) acciones += `<button class="s" onclick="envioReabrirWhatsapp(${id})">Abrir WhatsApp manual</button>`;
     if (canal === 'whatsapp' && s.estado === 'enlace_generado') acciones += `<button class="s" onclick="envioConfirmarWhatsapp(${id})">Ya lo envié por WhatsApp</button><button class="s" onclick="envioReabrirWhatsapp(${id})">Abrir WhatsApp otra vez</button>${envioPuedeCompartir() ? `<button class="s" onclick="envioCompartirPdf(${id})">📎 Compartir PDF adjunto</button>` : ''}`;
     return `<div style="margin:4px 0">${icono} <b>${nombre}:</b> <span style="font-weight:700;color:${malo ? '#b91c1c' : (s.estado === 'enviado' || s.estado === 'confirmado_manual' ? '#166534' : '#b45309')}">${escE(s.etiqueta)}</span>
       <span class="mut">· ${escE(s.destinatario)} · ${fhAg(s.fecha)}${s.intentos > 1 ? ' · ' + s.intentos + ' intentos' : ''}</span>
@@ -98,6 +99,7 @@ async function abrirEnvio(id) {
     const prov = r.data || {};
     const estado = await envioCargar(id);
     const c = EnvioPedido.contacto(prov);
+    const waApi = await envioWaConfigurado();
     EPC.ctx = { id, p, prov, c, estado };
     const opcion = (canal, icono, titulo, ayuda, v) => `<label style="display:flex;gap:8px;align-items:flex-start;margin:8px 0;${v.ok ? '' : 'opacity:.75'}">
         <input type="checkbox" id="env_ck_${canal}" style="width:auto;margin-top:4px" ${v.ok ? 'checked' : 'disabled'}>
@@ -109,7 +111,7 @@ async function abrirEnvio(id) {
         <div><div class="mut" style="font-weight:700">FECHA</div><div style="font-weight:700">${escE(EnvioPedido.fechaCorta(p.fecha))}</div></div>
       </div>
       ${opcion('correo', '✉️', 'Enviar por correo', 'Sale automático desde el sistema, con el PDF del pedido adjunto.', c.correo)}
-      ${opcion('whatsapp', '💬', 'Enviar por WhatsApp', 'Se abre WhatsApp con el mensaje escrito; <b>tú das “enviar”</b> (no es automático).', c.whatsapp)}
+      ${opcion('whatsapp', '💬', 'Enviar por WhatsApp', waApi ? 'Se envía <b>automáticamente</b> por WhatsApp Business, con el PDF del pedido adjunto.' : 'Se abre WhatsApp con el mensaje escrito y se descarga el PDF; <b>tú das “enviar”</b> y pones el PDF con el clip (no es automático).', c.whatsapp)}
       <div id="env_dup" style="display:none;background:#fffbeb;border:1px solid #f59e0b;border-radius:10px;padding:10px 14px;margin:10px 0">
         <b>Este pedido ya fue enviado al proveedor. ¿Desea reenviarlo?</b>
         <div class="row" style="margin-top:8px"><span class="sp"></span>
@@ -135,7 +137,7 @@ function envioConfirmar(reenviar) {
   EPC.enCurso[x.id] = true; envioBloquear(true); envioMsg('Enviando...', true);
   $('env_dup').style.display = 'none';
   let win = null;
-  if (canales.includes('whatsapp')) { try { win = window.open('', '_blank'); } catch (_) { win = null; } }
+  if (canales.includes('whatsapp') && !EPC.wa) { try { win = window.open('', '_blank'); } catch (_) { win = null; } }
   envioEjecutar(x, canales, !!reenviar, win).catch((e) => envioMsg('No se pudo enviar: ' + envioMsgErr(e), false))
     .finally(() => { EPC.enCurso[x.id] = false; envioBloquear(false); });
 }
@@ -223,6 +225,7 @@ async function envioCorreo(x, fresco) {
 // WHATSAPP (sin API oficial): enlace wa.me con el mensaje SIN detalle (los productos van en el PDF) y el PDF descargado listo para ponerlo en el chat.
 // Queda "enlace abierto" hasta que la persona confirme a mano. Si el PDF no se pudo generar, el mensaje lleva el detalle (nunca sale un pedido vacio).
 async function envioWhatsapp(x, fresco, win) {
+  if (EPC.wa) return envioWhatsappApi(x);
   const dest = x.c.whatsapp.valor;
   try {
     let pdf = null, aviso = '';
@@ -245,6 +248,38 @@ async function envioWhatsapp(x, fresco, win) {
   }
 }
 
+// ---------- WhatsApp Business (API OFICIAL de Meta): el PDF llega SOLO, como archivo adjunto ----------
+// La Edge Function `enviar-whatsapp` lo manda (plantilla aprobada con el PDF de encabezado). Si aun no esta configurada, todo sigue con el metodo manual de arriba.
+async function envioWaConfigurado() {
+  if (EPC.wa !== null) return EPC.wa;
+  try { const r = await SB.functions.invoke('enviar-whatsapp', { body: { accion: 'estado' } }); EPC.wa = !!(r && r.data && r.data.configurado); } catch (_) { EPC.wa = false; }
+  return EPC.wa;
+}
+async function envioWaLlamar(body) {
+  const r = await SB.functions.invoke('enviar-whatsapp', { body });
+  if (r.error) {
+    let m = r.error.message, codigo = null;
+    try { const j = await r.error.context.json(); if (j && j.error) m = j.error; if (j && j.codigo) codigo = j.codigo; } catch (_) { /* mensaje generico */ }
+    const e = new Error(m); e.codigo = codigo; throw e;
+  }
+  if (r.data && r.data.error) throw new Error(r.data.error);
+  return r.data;
+}
+async function envioWhatsappApi(x) {
+  const dest = x.c.whatsapp.valor;
+  try {
+    const pdf = await envioPdf(x);
+    const r = await envioWaLlamar({ accion: 'enviar', pedido_id: x.id, ruta: pdf.ruta });
+    await envioRegistrar(x, 'whatsapp', (r && r.destinatario) || dest, 'aceptado', null, null);
+    return { ok: true, texto: '💬 WhatsApp: enviado con el PDF adjunto (aceptado por WhatsApp Business).' };
+  } catch (e) {
+    if (e && e.codigo === 'sin_configurar') EPC.wa = false;
+    const msg = envioMsgErr(e);
+    try { await envioRegistrar(x, 'whatsapp', dest, 'error', null, msg); } catch (_) { /* nada */ }
+    return { ok: false, texto: '💬 WhatsApp NO enviado: ' + msg + (EPC.wa === false ? ' — vuelve a intentarlo: se usará el método manual.' : '') };
+  }
+}
+
 // ---------- acciones sobre un envio ya hecho ----------
 // REINTENTAR ENVÍO: solo vuelve a avisar al proveedor por ese canal; jamas toca el pedido ni sus productos.
 async function envioReintentar(id, canal) {
@@ -262,7 +297,8 @@ async function envioReintentar(id, canal) {
       const rv = await SB.from('proveedores').select('id,nit,razon_social,nombre_comercial,correo,telefono1,asesor').eq('id', p.proveedor_id).single();
       const prov = rv.data || {}, c = EnvioPedido.contacto(prov), x = { id, p, prov, c, estado: e };
       if (!c[canal].ok) { alert(c[canal].motivo); return; }
-      let win = null; if (canal === 'whatsapp') { try { win = window.open('', '_blank'); } catch (_) { win = null; } }
+      const api = canal === 'whatsapp' ? await envioWaConfigurado() : false;
+      let win = null; if (canal === 'whatsapp' && !api) { try { win = window.open('', '_blank'); } catch (_) { win = null; } }
       const r = canal === 'correo' ? await envioCorreo(x, e) : await envioWhatsapp(x, e, win);
       if (!r.ok) alert(r.texto);
     }
