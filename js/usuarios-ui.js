@@ -7,7 +7,7 @@
 //  Logica pura: js/usuarios.js. Usa las globales de index.html: $, SB, perfil, usuario, sedes, escAg, fhAg, pintarAdmin, setModulo.
 // ============================================================
 let USR_PUEDE = null;                      // (permiso) => boolean
-const USR = { cargado: false, cargando: false, error: null, sub: 'usuarios', usuarios: [], perfiles: [], permisosPorPerfil: {}, catalogo: [] };
+const USR = { cargado: false, cargando: false, error: null, sub: 'usuarios', usuarios: [], perfiles: [], permisosPorPerfil: {}, catalogo: [], sedesAnalista: {} };   // sedesAnalista: { user_id: [sede ids] } (perfil_sede)
 
 function can(p) { return USR_PUEDE ? USR_PUEDE(p) : UsuariosLib.crearPuede(UsuariosLib.DEFECTO[(perfil && perfil.rol) || 'sede'])(p); }
 
@@ -37,7 +37,8 @@ async function usrCargar(forzar) {
   if (USR.cargando || (USR.cargado && !forzar)) return;
   USR.cargando = true; USR.error = null;
   try {
-    const [u, p, pp, c] = await Promise.all([SB.rpc('usuarios_listar'), SB.from('perfil_acceso').select('*').order('id'), SB.from('perfil_permiso').select('perfil_id,permiso'), SB.from('permiso_catalogo').select('*').order('orden')]);
+    const [u, p, pp, c, sa] = await Promise.all([SB.rpc('usuarios_listar'), SB.from('perfil_acceso').select('*').order('id'), SB.from('perfil_permiso').select('perfil_id,permiso'), SB.from('permiso_catalogo').select('*').order('orden'), SB.rpc('analista_sedes_listar')]);
+    USR.sedesAnalista = sa && !sa.error ? AnalistaSedes.porUsuario(sa.data) : {};   // si la funcion aun no existe, todo sigue como antes
     const err = u.error || p.error || pp.error || c.error; if (err) throw new Error(err.message);
     USR.usuarios = u.data || []; USR.perfiles = p.data || []; USR.catalogo = c.data || [];
     USR.permisosPorPerfil = {}; (pp.data || []).forEach((x) => { (USR.permisosPorPerfil[x.perfil_id] = USR.permisosPorPerfil[x.perfil_id] || []).push(x.permiso); });
@@ -47,6 +48,11 @@ async function usrCargar(forzar) {
 }
 
 // ---------------- pantalla (dentro de Admin) ----------------
+// Lo que se muestra bajo el perfil: su sede (usuarios de sede) o, en los analistas, las sedes asignadas
+function usrSedesTexto(u) {
+  if (u.rol === 'pagos') { const ids = USR.sedesAnalista[u.user_id] || []; return ids.length ? 'Sedes: ' + escAg(AnalistaSedes.resumen(typeof sedes !== 'undefined' ? sedes : [], ids)) : 'sin sedes asignadas: ve todas'; }
+  return u.sede ? escAg((u.marca ? u.marca + ' · ' : '') + u.sede) : 'todas las sedes';
+}
 function pintarUsuarios(c, q) {
   if (!can('admin.usuarios')) { c.innerHTML = '<div class="vacio">No tienes permiso para gestionar usuarios.</div>'; return; }
   if (!USR.cargado) { c.innerHTML = USR.error ? `<div class="card" style="border-color:#b45309">⚠️ No pude cargar: ${escAg(USR.error)} <button onclick="usrCargar(true)">Reintentar</button></div>` : '<div class="vacio">⏳ Cargando usuarios y perfiles...</div>'; usrCargar(); return; }
@@ -59,7 +65,7 @@ function pintarUsuarios(c, q) {
     h += l.map((u) => `<div class="card" style="margin:6px 0;${u.activo ? '' : 'opacity:.6'}"><div class="row">
         <div style="flex:2"><div class="emisor">${escAg(u.nombre)} ${u.activo ? '' : '<span class="badge" style="color:#991b1b;border-color:#fca5a5;background:#fef2f2">DESACTIVADO</span>'}${u.debe_cambiar_clave ? ' <span class="badge st-asignada">debe cambiar la contraseña</span>' : ''}</div>
           <div class="mut">${escAg(u.email || '—')} · ${u.ultimo_ingreso ? 'último ingreso ' + fhAg(u.ultimo_ingreso) : 'nunca ha ingresado'}</div></div>
-        <div style="flex:1.2"><span class="badge st-sellada">${escAg(u.perfil || u.rol)}</span><div class="mut">${u.sede ? escAg((u.marca ? u.marca + ' · ' : '') + u.sede) : 'todas las sedes'}</div></div>
+        <div style="flex:1.2"><span class="badge st-sellada">${escAg(u.perfil || u.rol)}</span><div class="mut">${usrSedesTexto(u)}</div></div>
         <div class="row" style="gap:6px"><button class="s" onclick="usrAbrir('${u.user_id}')">✎ Editar</button><button class="s" onclick="usrClaveAbrir('${u.user_id}')">🔑 Contraseña</button>
           ${u.user_id === (usuario && usuario.id) ? '' : `<button class="${u.activo ? 'd' : 'p'}" onclick="usrEstado('${u.user_id}',${!u.activo})">${u.activo ? 'Desactivar' : 'Activar'}</button>`}</div></div></div>`).join('') || '<div class="vacio">Sin resultados.</div>';
   } else {
@@ -89,9 +95,13 @@ let usrEditando = null;
 function usrPerfilElegido() { const id = Number($('usr_perfil').value || 0); return USR.perfiles.find((p) => p.id === id) || null; }
 function usrPintarSede() {
   const pf = usrPerfilElegido(); const box = $('usr_sede_box'); if (!box) return;
-  box.style.display = pf ? 'block' : 'none';
+  const analista = AnalistaSedes.esAnalista(pf);
+  box.style.display = pf && !analista ? 'block' : 'none';   // el analista no tiene UNA sede: tiene varias (casillas de abajo)
+  const sb = $('usr_sedes_box'); if (sb) sb.style.display = analista ? 'block' : 'none';
+  if (analista) usrSedesAviso();
   $('usr_sede_ayuda').textContent = pf && pf.nivel === 'sede' ? 'Obligatoria: este usuario solo verá lo de esta sede.' : 'Opcional: los perfiles de administración y pagos ven todas las sedes.';
 }
+function usrSedesAviso() { const ids = AnalistaSedes.marcadas(typeof sedes !== 'undefined' ? sedes : [], 'usr_sd', (i) => { const e = $(i); return !!(e && e.checked); }); const a = $('usr_sedes_aviso'); if (a) a.textContent = AnalistaSedes.aviso(ids); }
 function usrAbrir(id) {
   usrEditando = id ? USR.usuarios.find((u) => u.user_id === id) : null;
   const u = usrEditando, nuevo = !u;
@@ -101,6 +111,7 @@ function usrAbrir(id) {
   $('usr_perfil').value = u && u.perfil_id ? u.perfil_id : '';
   $('usr_sede').innerHTML = '<option value="">— todas las sedes —</option>' + (typeof sedes !== 'undefined' ? sedes : []).map((s) => `<option value="${s.id}">${escAg((s.marcas && s.marcas.nombre ? s.marcas.nombre + ' · ' : '') + s.nombre)}</option>`).join('');
   $('usr_sede').value = u && u.sede_id ? u.sede_id : '';
+  $('usr_sedes_lista').innerHTML = AnalistaSedes.casillas(typeof sedes !== 'undefined' ? sedes : [], u ? (USR.sedesAnalista[u.user_id] || []) : [], 'usr_sd');
   $('usr_clave_box').style.display = nuevo ? 'block' : 'none'; if (nuevo) $('usr_clave').value = UsuariosLib.generarClave(usrRng());
   $('usr_activo_box').style.display = (!nuevo && u.user_id !== (usuario && usuario.id)) ? 'block' : 'none'; $('usr_activo').checked = u ? !!u.activo : true;
   usrMsg('usr_err', ''); usrPintarSede(); $('modalUsuario').classList.add('on');
@@ -112,8 +123,16 @@ async function usrGuardar() {
   if (!v.ok) { usrMsg('usr_err', v.errores.join(' '), false); return; }
   const b = $('usr_guardar'); b.disabled = true; usrMsg('usr_err', 'Guardando...', true);
   try {
-    if (nuevo) await usrLlamar({ accion: 'crear', email: d.email.trim(), clave: d.clave, nombre: d.nombre.trim(), perfil_id: pf.id, sede_id: sedeId });
+    let creado = null;
+    if (nuevo) creado = await usrLlamar({ accion: 'crear', email: d.email.trim(), clave: d.clave, nombre: d.nombre.trim(), perfil_id: pf.id, sede_id: sedeId });
     else { const r = await usrLlamar({ accion: 'actualizar', user_id: usrEditando.user_id, nombre: d.nombre.trim(), perfil_id: pf.id, sede_id: sedeId, activo: $('usr_activo_box').style.display === 'none' ? usrEditando.activo : $('usr_activo').checked }); if (r && r.aviso) alert(r.aviso); }
+    // sedes asignadas del analista (regla real en la base: perfil_sede); si deja de ser analista, se limpian
+    const uid = nuevo ? (creado && creado.user_id) : usrEditando.user_id;
+    const marc = AnalistaSedes.esAnalista(pf) ? AnalistaSedes.marcadas(typeof sedes !== 'undefined' ? sedes : [], 'usr_sd', (i) => { const e = $(i); return !!(e && e.checked); }) : [];
+    if (uid && AnalistaSedes.cambio(nuevo ? [] : (USR.sedesAnalista[uid] || []), marc)) {
+      const g = await SB.rpc('analista_sedes_guardar', { p_user: uid, p_sedes: marc });
+      if (g.error) throw new Error('El usuario se guardó, pero no sus sedes: ' + UsuariosLib.mensajeError(g.error.message));
+    }
     $('modalUsuario').classList.remove('on');
     if (nuevo) alert('Usuario creado.\n\nEntrégale su correo y esta contraseña temporal (solo se muestra ahora):\n\n' + d.clave + '\n\nEn su primer ingreso el sistema le pedirá cambiarla.');
     await usrCargar(true);
