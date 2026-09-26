@@ -118,6 +118,7 @@
       <div class="row" style="gap:10px;margin-top:6px;flex-wrap:wrap">${campo('razon_social', 'Razón social *', 2)}${campo('nombre_comercial', 'Nombre comercial', 2)}</div>
       <div class="row" style="gap:10px;margin-top:6px;flex-wrap:wrap">${campo('nit', 'NIT (sin dígito de verificación)', 1, 'inputmode="numeric"')}${campo('asesor', 'Asesor / contacto', 1)}</div>
       <div class="row" style="gap:10px;margin-top:6px;flex-wrap:wrap">${campo('telefono1', 'Teléfono / WhatsApp', 1, 'inputmode="tel"')}${campo('telefono2', 'Teléfono 2', 1, 'inputmode="tel"')}${campo('correo', 'Correo', 2, 'type="text"')}</div>
+      ${opciones.marcasHtml ? `<div style="margin-top:8px"><span class="mut">Marcas que lo manejan (definen en qué marcas aparece al hacer pedidos)</span><div style="margin-top:4px">${opciones.marcasHtml}</div></div>` : ''}
       <div class="row" style="margin-top:10px;gap:8px"><button class="p" onclick="guardarProveedorAdmin(${Number(p.id)})">💾 Guardar cambios</button><button onclick="cancelarEdicionAdmin()">Cancelar</button></div>
       <div class="mut" style="margin-top:6px">El teléfono es el WhatsApp al que se envían los pedidos; el correo, donde llegan. Cambiar el NIT o la razón social afecta cómo se reconoce a este proveedor en facturas y pedidos nuevos.</div>
       ${opciones.error ? `<div style="color:#b91c1c;margin-top:6px">${esc(opciones.error)}</div>` : ''}</div>`;

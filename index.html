@@ -168,6 +168,10 @@ tr:hover td{background:#f1f5f9}
         <input type="date" id="fadm_hasta" style="width:auto;margin:0" onchange="pintarAdmin()">
         <button class="mut" style="padding:4px 10px" onclick="$('fadm_desde').value='';$('fadm_hasta').value='';pintarAdmin()">limpiar</button>
       </div>
+      <div id="filtroMarcaAdm" class="row" style="display:flex;margin-bottom:12px">
+        <span class="mut">Marca:</span>
+        <select id="admMarca" style="width:auto;margin:0;min-width:220px" onchange="adminMarcaTocada=true;pintarAdmin()"></select>
+      </div>
       <div id="filtroCat" class="row" style="display:none;margin-bottom:12px">
         <span class="mut">Proveedor:</span>
         <select id="catProv" style="width:auto;margin:0;min-width:320px" onchange="pintarAdmin()"></select>
@@ -239,6 +243,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/nombres-por-decidir-ui.js"></script>
 <script src="js/ingreso-panel.js"></script>
 <script src="js/admin-editar.js"></script>
+<script src="js/marca-proveedores.js"></script>
 <script src="js/usuarios.js"></script>
 <script src="js/usuarios-ui.js"></script>
 <script src="js/envio-pedido.js"></script>
@@ -298,6 +303,8 @@ async function entrar(){
 async function salir(){await SB.auth.signOut();location.reload();}
 
 let arts=[], provs=[], cat=[], minmax=[], provArts=[], npLineas=0;
+// PROVEEDORES POR MARCA (js/marca-proveedores.js): artsGlobal/catGlobal son los de siempre (Rocoto/Arrebatao); las marcas con productos propios (Sin Par) usan marca_articulo / marca_catalogo
+let artsGlobal=null, catGlobal=null, vinculosProv=[], marcaArts=[], marcaCat=[], npMarcaPropia=false;
 // Trae TODAS las filas de una tabla (por paginas de 1.000). Si algo falla devuelve lo que alcanzo a traer (como antes: la pantalla sigue).
 async function traerTodo(tabla, cols, orden){
   const out=[];
@@ -345,6 +352,10 @@ async function nuevoPedido(){
     provs=await traerTodo("proveedores","id,nit,razon_social,nombre_comercial,correo,telefono1,asesor",["razon_social","id"]);
     arts=await traerTodo("articulos","codigo_barras,articulo_hiopos,articulo_comercial,unimedida_compra,subfamilia",["articulo_comercial","id"]);
     cat=await traerTodo("catalogo_compras","codigo_barras,id_proveedor,precio_negociado",["id"]);
+    artsGlobal=arts; catGlobal=cat;
+    vinculosProv=await traerTodo("proveedor_marca","proveedor_id,marca_id",["proveedor_id"]);   // si la tabla no existe/falla: queda vacío y todo se ve como antes
+    marcaArts=await traerTodo("marca_articulo","marca_id,codigo_barras,articulo,unidad_compra,subfamilia",["id"]);
+    marcaCat=await traerTodo("marca_catalogo","marca_id,codigo_barras,id_proveedor,precio_negociado",["id"]);
     minmax=await traerTodo("maximos_minimos","articulo,almacen,subarticulo,minimo,maximo",["id"]);
     await prepararConversiones();
   }
@@ -370,8 +381,33 @@ async function nuevoPedido(){
     }).join("");
   }
   npCant={}; $("np_q").value=""; $("np_sub").innerHTML='<option value="">Todas las subfamilias</option>';
+  aplicarMarcaNP();      // proveedores (y productos) de la marca de la sede elegida
   pintarProductos();
   $("modalPedido").classList.add("on");
+}
+// La marca de la sede elegida decide qué proveedores se listan (y, si la marca tiene productos propios, cuáles). Una marca sin base cargada ve todo, como antes.
+function marcaDeSedeNP(){
+  const sedeId = perfil.rol==="sede" ? perfil.sede_id : Number($("np_sede").value);
+  return ((sedes.find(s=>s.id===sedeId)||{}).marca_id) || (perfil.sedes&&perfil.sedes.marca_id) || null;
+}
+function aplicarMarcaNP(){
+  if(artsGlobal===null) return;
+  const marca=marcaDeSedeNP();
+  npMarcaPropia=MarcaProv.tieneCatalogoPropio(marcaArts,marca);
+  arts=npMarcaPropia?MarcaProv.articulosDeMarca(marcaArts,marca):artsGlobal;
+  cat=npMarcaPropia?MarcaProv.catalogoDeMarca(marcaCat,marca):catGlobal;
+  const antes=Number($("np_prov").value||0);
+  const vis=MarcaProv.proveedoresVisibles(provs,vinculosProv,marca);
+  $("np_prov").innerHTML='<option value="">— elegí proveedor —</option>'+vis.map(x=>`<option value="${x.id}">${x.razon_social||x.nombre_comercial}</option>`).join("");
+  $("np_prov").value=(antes && vis.some(x=>x.id===antes))?String(antes):"";   // conserva el proveedor elegido solo si esta marca lo maneja
+}
+async function cambiarSedeNP(){
+  const antes=Number($("np_prov").value||0);
+  aplicarMarcaNP();
+  if(antes && Number($("np_prov").value||0)!==antes){ provArts=[]; npCant={}; if(typeof pintarContactoProv==="function") pintarContactoProv(); }
+  else if(antes) await filtrarArticulos();
+  $("np_sub").innerHTML='<option value="">Todas las subfamilias</option>';
+  pintarProductos();
 }
 async function filtrarArticulos(){
   const id=Number($("np_prov").value||0);
@@ -381,14 +417,14 @@ async function filtrarArticulos(){
     const pv=provs.find(x=>x.id===id)||{};
     const nom=pv.razon_social||pv.nombre_comercial||"";
     $("np_arts_info").textContent="Buscando lo que se le compra a "+nom+"...";
-    const {data}=await SB.from("proveedor_articulos")
+    const {data}=npMarcaPropia?{data:[]}:await SB.from("proveedor_articulos")
         .select("codigo,insumo,veces").eq("proveedor_id",id).order("veces",{ascending:false}).limit(500);
     provArts=data||[];
-    if(!provArts.length){
+    if(!provArts.length && !npMarcaPropia){
       const alt=await SB.from("proveedor_articulos").select("codigo,insumo,veces").ilike("proveedor",nom.split(" ")[0]+"%").order("veces",{ascending:false}).limit(500);
       provArts=alt.data||[];
     }
-    const cc=await SB.from("catalogo_compras").select("codigo_barras").eq("id_proveedor",id);
+    const cc=npMarcaPropia?{data:cat.filter(c=>c.id_proveedor===id)}:await SB.from("catalogo_compras").select("codigo_barras").eq("id_proveedor",id);
     const existentes=new Set(provArts.map(a=>a.codigo||a.insumo));
     for(const c of (cc.data||[])){
       const cod=c.codigo_barras;
@@ -627,10 +663,12 @@ async function guardarPedido(){
   else alert("Pedido "+nums[0]+" guardado.");
 }
 let adminCargado=false, adminVista="prov", adminProv=[], adminArt=[], adminCat=[];
+let adminMarcas=[], adminVinc=[], adminMarcaTocada=false;   // marcas y proveedor_marca (js/marca-proveedores.js)
 let adminEdit=null;   // {tipo:"prov"|"art", id, error} = la tarjeta que se está editando (ver js/admin-editar.js)
 function setAdmin(v){ adminVista=v; adminEdit=null;
   ["prov","art","cat","agente","import","usuarios"].forEach(x=>$("ad-"+x).classList.toggle("on", x==v));
   $("filtroCat").style.display = (v=="cat")?"flex":"none";
+  $("filtroMarcaAdm").style.display = (v=="prov")?"flex":"none";
   $("btnAdmNuevo").style.display = (v=="agente"||v=="import"||v=="usuarios")?"none":"";
   $("qa").style.display = (v=="import")?"none":"";
   $("vistaAdmin").classList.toggle("adm-import", v=="import");
@@ -643,6 +681,8 @@ async function cargarAdmin(){
   adminArt=b.data||[];
   const c=await SB.from("catalogo_compras").select("*").limit(5000);
   adminCat=c.data||[];
+  adminMarcas=(await SB.from("marcas").select("id,nombre").order("nombre")).data||[];
+  adminVinc=await traerTodo("proveedor_marca","proveedor_id,marca_id",["proveedor_id"]);
   $("catProv").innerHTML='<option value="">— elegí proveedor —</option>'+adminProv.map(x=>`<option value="${x.id}">${x.razon_social||x.nombre_comercial||""}</option>`).join("");
   adminCargado=true; pintarAdmin();
 }
@@ -659,12 +699,16 @@ function pintarAdmin(){
   const q=($("qa").value||"").trim().toLowerCase();
   const c=$("listaAdmin");
   if(adminVista==="prov"){
-    let l=adminProv.filter(x=>!q||((x.razon_social||"")+" "+(x.nit||"")+" "+(x.nombre_comercial||"")).toLowerCase().includes(q)).filter(filtraFechaAdmin);
-    c.innerHTML = l.slice(0,400).map(x=>{ if(adminEdit&&adminEdit.tipo==="prov"&&adminEdit.id===x.id) return AdminEditar.editorProveedor(x,{error:adminEdit.error});
+    { const sel=$("admMarca"); let cur=sel.value;
+      if(!adminMarcaTocada){ const fs=Number(($("fSede")||{}).value||0); const mm=fs?((sedes.find(s=>s.id===fs)||{}).marca_id):null; cur=mm?String(mm):""; }   // si el encabezado tiene una sede elegida, la marca de esa sede
+      sel.innerHTML=MarcaProv.opcionesMarca(adminMarcas,cur); }
+    let l=MarcaProv.proveedoresDeAdmin(adminProv,adminVinc,$("admMarca").value).filter(x=>!q||((x.razon_social||"")+" "+(x.nit||"")+" "+(x.nombre_comercial||"")).toLowerCase().includes(q)).filter(filtraFechaAdmin);
+    c.innerHTML = l.slice(0,400).map(x=>{ if(adminEdit&&adminEdit.tipo==="prov"&&adminEdit.id===x.id) return AdminEditar.editorProveedor(x,{error:adminEdit.error, marcasHtml:MarcaProv.casillasMarcas(adminMarcas,MarcaProv.marcasDe(adminVinc,x.id),"ep_"+x.id)});
       return `<div class="card" style="margin:6px 0"><div class="row">
         <div><div class="emisor">${x.razon_social||x.nombre_comercial||"—"}</div>
         <div class="mut">NIT ${x.nit||"—"} · Tel ${x.telefono1||"—"} · ${x.correo||"—"}${x.asesor?" · "+x.asesor:""}</div></div>
         <span class="sp"></span>
+        ${MarcaProv.etiquetasMarcas(adminMarcas,adminVinc,x.id)}
         <span class="badge">${adminCat.filter(k=>k.id_proveedor===x.id).length} artículos en el catálogo</span>
         <button class="p" onclick="asignarA(${x.id})">＋ Asignar producto</button>
         <button onclick="verCatalogo(${x.id})">Ver catálogo</button>
@@ -966,15 +1010,15 @@ async function guardarArticuloAdmin(id){
     const viejo=a.codigo_barras, nuevo=(r.data&&r.data.codigo)||v.codigo.valor;
     a.codigo_barras=nuevo;
     adminCat.forEach(k=>{ if(k.codigo_barras===viejo) k.codigo_barras=nuevo; });
-    (typeof arts!=="undefined"&&arts||[]).forEach(x=>{ if(x.codigo_barras===viejo) x.codigo_barras=nuevo; });   // listas ya cargadas de "Nuevo pedido"
-    (typeof cat!=="undefined"&&cat||[]).forEach(x=>{ if(x.codigo_barras===viejo) x.codigo_barras=nuevo; });
+    (artsGlobal||arts||[]).forEach(x=>{ if(x.codigo_barras===viejo) x.codigo_barras=nuevo; });   // listas ya cargadas de "Nuevo pedido"
+    (catGlobal||cat||[]).forEach(x=>{ if(x.codigo_barras===viejo) x.codigo_barras=nuevo; });
     adminProvArts={};   // lo que se le compra a cada proveedor se vuelve a leer con el código nuevo
   }
   if(v.unidad.cambio){
     const r=await SB.from("articulos").update({unimedida_compra:v.unidad.valor}).eq("id",id).select("id");
     if(r.error||!(r.data&&r.data.length)) return fallo((v.codigo.cambio?"El código ya se cambió, pero la unidad no: ":"No se pudo guardar la unidad: ")+(r.error?r.error.message:"sin permiso"));
     a.unimedida_compra=v.unidad.valor;
-    const g=(typeof arts!=="undefined"&&arts||[]).find(x=>x.codigo_barras===a.codigo_barras); if(g) g.unimedida_compra=v.unidad.valor;
+    const g=(artsGlobal||arts||[]).find(x=>x.codigo_barras===a.codigo_barras); if(g) g.unimedida_compra=v.unidad.valor;
   }
   adminEdit=null; pintarAdmin();
 }
@@ -984,11 +1028,16 @@ async function guardarProveedorAdmin(id){
   const v=AdminEditar.validarProveedor(d,{id,otros:adminProv});
   if(!v.ok){ adminEdit={tipo:"prov",id,error:v.errores.join(" ")}; pintarAdmin(); return; }
   const cambios=AdminEditar.cambiosProveedor(p,v.valores);
-  if(!Object.keys(cambios).length){ adminEdit=null; pintarAdmin(); return; }
+  const marcasElegidas=adminMarcas.filter(mm=>{ const el=$("ep_"+id+"_m"+mm.id); return el&&el.checked; }).map(mm=>mm.id);
+  const cm=MarcaProv.cambiosMarcas(MarcaProv.marcasDe(adminVinc,id),marcasElegidas);
+  if(!Object.keys(cambios).length && !cm.agregar.length && !cm.quitar.length){ adminEdit=null; pintarAdmin(); return; }
   if(AdminEditar.cambiaIdentidad(cambios) && !confirm("Vas a cambiar el NIT o la razón social de "+(p.razon_social||p.nombre_comercial)+".\n\nAsí se reconoce a este proveedor en facturas y pedidos nuevos. ¿Continuar?")) return;
-  const r=await SB.from("proveedores").update(cambios).eq("id",id).select("id");
+  const r=Object.keys(cambios).length?await SB.from("proveedores").update(cambios).eq("id",id).select("id"):{data:[{id}],error:null};
   if(r.error||!(r.data&&r.data.length)){ const dup=r.error&&/duplicate|unique|proveedores_nit_key/i.test(r.error.message); adminEdit={tipo:"prov",id,error:dup?"Ese NIT ya lo tiene otro proveedor.":"No se pudo guardar"+(r.error?": "+r.error.message:" (sin permiso)")}; pintarAdmin(); return; }
   Object.assign(p,cambios);
+  if(cm.agregar.length){ const ri=await SB.from("proveedor_marca").insert(cm.agregar.map(mid=>({proveedor_id:id,marca_id:mid,origen:"admin"}))); if(!ri.error) cm.agregar.forEach(mid=>adminVinc.push({proveedor_id:id,marca_id:mid})); else { adminEdit={tipo:"prov",id,error:"Se guardaron los datos, pero no las marcas: "+ri.error.message}; pintarAdmin(); return; } }
+  if(cm.quitar.length){ const rd=await SB.from("proveedor_marca").delete().eq("proveedor_id",id).in("marca_id",cm.quitar); if(!rd.error) adminVinc=adminVinc.filter(v=>!(v.proveedor_id===id&&cm.quitar.includes(v.marca_id))); else { adminEdit={tipo:"prov",id,error:"Se guardaron los datos, pero no se pudieron quitar marcas: "+rd.error.message}; pintarAdmin(); return; } }
+  if(cm.agregar.length||cm.quitar.length) vinculosProv=adminVinc.slice();   // la lista de "Nuevo pedido" ya cargada
   const g=(typeof provs!=="undefined"&&provs||[]).find(x=>x.id===id); if(g) Object.assign(g,cambios);   // la lista de "Nuevo pedido" ya cargada
   adminEdit=null; pintarAdmin();
 }
@@ -1014,9 +1063,12 @@ function adminNuevo(){
     const nc=prompt("Nombre comercial (opcional):")||null;
     const t1=prompt("Teléfono (opcional):")||null;
     const co=prompt("Correo (opcional):")||null;
+    const marcaSel=Number($("admMarca").value||0);   // el proveedor nuevo queda en la marca que estás viendo (si estás en "Todas", queda sin marca y se ve en todas hasta que se la asignes con ✏️ Editar)
     SB.from("proveedores").insert({razon_social:rz.trim(), nit:nit?nit.replace(/[^0-9]/g,""):null,
-      nombre_comercial:nc?nc.trim():null, telefono1:t1?t1.trim():null, correo:co?co.trim():null})
-      .then(async r=>{ if(r.error){alert("No se pudo: "+r.error.message);return;} adminCargado=false; await cargarAdmin(); });
+      nombre_comercial:nc?nc.trim():null, telefono1:t1?t1.trim():null, correo:co?co.trim():null}).select("id").single()
+      .then(async r=>{ if(r.error){alert("No se pudo: "+r.error.message);return;}
+        if(marcaSel && r.data) await SB.from("proveedor_marca").insert({proveedor_id:r.data.id,marca_id:marcaSel,origen:"admin"});
+        adminCargado=false; await cargarAdmin(); });
   } else if(adminVista==="art"){
     const cb=prompt("Código (ej: ORD900 / código de barras):"); if(!cb) return;
     const no=prompt("Nombre del insumo (como en Hiopos):")||cb;
@@ -2509,7 +2561,7 @@ async function guardarNov(){
 <div id="modalPedido" class="modal"><div class="card" style="max-width:1080px;width:96vw">
   <h1>➕ Nuevo pedido</h1>
   <div class="row">
-    <div style="flex:1"><label class="mut">Sede</label><select id="np_sede" onchange="pintarProductos()"></select></div>
+    <div style="flex:1"><label class="mut">Sede</label><select id="np_sede" onchange="cambiarSedeNP()"></select></div>
     <div style="flex:1"><label class="mut">Tipo</label>
       <select id="np_tipo"><option>Requisicion</option><option>Pedido</option><option>Traslado</option></select></div>
   </div>
