@@ -111,7 +111,7 @@ async function abrirEnvio(id) {
         <div><div class="mut" style="font-weight:700">FECHA</div><div style="font-weight:700">${escE(EnvioPedido.fechaCorta(p.fecha))}</div></div>
       </div>
       ${opcion('correo', '✉️', 'Enviar por correo', 'Sale automático desde el sistema, con el PDF del pedido adjunto.', c.correo)}
-      ${opcion('whatsapp', '💬', 'Enviar por WhatsApp', waApi ? 'Se envía <b>automáticamente</b> por WhatsApp Business, con el PDF del pedido adjunto.' : 'Se abre WhatsApp con el mensaje escrito y se descarga el PDF; <b>tú das “enviar”</b> y pones el PDF con el clip (no es automático).', c.whatsapp)}
+      ${opcion('whatsapp', '💬', 'Enviar por WhatsApp', waApi ? 'Se envía <b>automáticamente</b> por WhatsApp Business, con el PDF del pedido adjunto.' : 'Se abre WhatsApp con el mensaje escrito y el enlace para abrir el PDF; <b>tú das “enviar”</b> (no es automático).', c.whatsapp)}
       <div id="env_dup" style="display:none;background:#fffbeb;border:1px solid #f59e0b;border-radius:10px;padding:10px 14px;margin:10px 0">
         <b>Este pedido ya fue enviado al proveedor. ¿Desea reenviarlo?</b>
         <div class="row" style="margin-top:8px"><span class="sp"></span>
@@ -155,7 +155,7 @@ async function envioDatos(x, intento, opciones) {
   }
   const sede = (typeof sedes !== 'undefined' ? sedes : []).find((s) => s.id === x.p.sede_id) || {};
   const empresa = [x.p.sede_texto || sede.nombre].filter(Boolean).join(' ');
-  return EnvioPedido.armarMensajes({ pedido: x.p, proveedor: x.prov, lineas, unidades, empresa, intento, detalleWhatsapp: !(opciones && opciones.detalle === false) });
+  return EnvioPedido.armarMensajes({ pedido: x.p, proveedor: x.prov, lineas, unidades, empresa, intento, detalleWhatsapp: !(opciones && opciones.detalle === false), enlacePdf: opciones && opciones.enlacePdf });
 }
 
 // PDF de la orden (el MISMO de "⬇ PDF", con los codigos de producto): es el ADJUNTO del correo y el archivo que se pone en el chat de WhatsApp.
@@ -169,14 +169,15 @@ async function envioPdf(x) {
   x.pdf = { ruta, blob: pdf.blob, nombre: pdf.nombre || ruta.split('/').pop() };
   return x.pdf;
 }
-// wa.me solo lleva TEXTO (WhatsApp no deja adjuntar un archivo desde una pagina): para que el PDF quede a un gesto, se DESCARGA al mandar por WhatsApp (carpeta Descargas)
-// y en el chat se pone con el clip (📎 > Documento) o arrastrandolo. Adjuntarlo solo, sin tocar nada, exige la API oficial de WhatsApp Business.
-function envioDescargar(pdf) {
-  try {
-    const a = document.createElement('a'); a.href = URL.createObjectURL(pdf.blob); a.download = pdf.nombre || 'pedido.pdf';
-    document.body.appendChild(a); a.click(); setTimeout(() => { try { URL.revokeObjectURL(a.href); a.remove(); } catch (_) { /* nada */ } }, 4000);
-    return true;
-  } catch (_) { return false; }
+// ENLACE CORTO al PDF de la orden: https://<dominio>/p/<codigo>. vercel.json lo reenvia a la funcion `p` de Supabase, que abre el PDF PRIVADO con un enlace temporal:
+// el archivo nunca queda publico y el enlace vence a los 30 dias (y se puede revocar).
+const envioRng = () => { if (typeof crypto !== 'undefined' && crypto.getRandomValues) { const a = new Uint32Array(1); return () => { crypto.getRandomValues(a); return a[0] / 4294967296; }; } return Math.random; };
+async function envioEnlaceCorto(x) {
+  const pdf = await envioPdf(x);
+  const codigo = EnvioPedido.codigoPdf(envioRng());
+  const r = await SB.rpc('pedido_pdf_enlace_crear', { p_pedido_id: x.id, p_ruta: pdf.ruta, p_codigo: codigo, p_dias: 30 });
+  if (r.error) throw new Error('No se pudo crear el enlace del PDF: ' + r.error.message);
+  return EnvioPedido.enlaceCorto(location.origin, codigo);
 }
 
 async function envioRegistrar(x, canal, destinatario, estado, colaId, error) {
@@ -222,24 +223,21 @@ async function envioCorreo(x, fresco) {
   }
 }
 
-// WHATSAPP (sin API oficial): enlace wa.me con el mensaje SIN detalle (los productos van en el PDF) y el PDF descargado listo para ponerlo en el chat.
-// Queda "enlace abierto" hasta que la persona confirme a mano. Si el PDF no se pudo generar, el mensaje lleva el detalle (nunca sale un pedido vacio).
+// WHATSAPP (sin API oficial): enlace wa.me con el mensaje escrito (con el detalle de los productos). Queda "enlace abierto" hasta que la persona confirme a mano:
+// WhatsApp NO deja adjuntar archivos desde una pagina ni enviar solo sin la API oficial.
 async function envioWhatsapp(x, fresco, win) {
   if (EPC.wa) return envioWhatsappApi(x);
   const dest = x.c.whatsapp.valor;
   try {
-    let pdf = null, aviso = '';
-    try { pdf = await envioPdf(x); }
-    catch (e) { aviso = ' ⚠️ No se pudo generar el PDF (' + envioMsgErr(e) + '): el mensaje lleva el detalle de los productos.'; }
-    const m = await envioDatos(x, EnvioPedido.proximoIntento(fresco.envios, 'whatsapp'), { detalle: !pdf });
-    let descargado = false;
-    if (pdf) { descargado = envioDescargar(pdf); EPC.compartir[x.id] = { archivo: pdf, texto: m.textoWhatsapp }; }
+    let enlace = null, aviso = '';
+    try { enlace = await envioEnlaceCorto(x); }
+    catch (e) { aviso = ' ⚠️ Sin enlace al PDF (' + envioMsgErr(e) + '): el mensaje sale igual; adjunta el PDF con “⬇ PDF”.'; }
+    const m = await envioDatos(x, EnvioPedido.proximoIntento(fresco.envios, 'whatsapp'), { enlacePdf: enlace });
     const url = EnvioPedido.enlaceWhatsapp(dest, m.textoWhatsapp);
     let abierto = false;
     if (win && !win.closed) { win.location.href = url; abierto = true; }
     await envioRegistrar(x, 'whatsapp', dest, 'enlace_generado', null, abierto ? null : 'El navegador bloqueó la ventana: usa "Abrir WhatsApp otra vez".');
-    const pasoPdf = pdf ? (descargado ? ' El PDF se descargó (carpeta Descargas): en el chat pulsa 📎 → Documento y elígelo (o arrástralo).' : ' Descarga el PDF con “⬇ PDF” y adjúntalo en el chat.') : '';
-    return { ok: !aviso, texto: '💬 WhatsApp: ' + (abierto ? 'se abrió con el mensaje listo.' + pasoPdf + ' Falta que des “enviar” allá.' + aviso : 'el navegador bloqueó la ventana; usa “Abrir WhatsApp otra vez” en el detalle del pedido.') };
+    return { ok: !aviso, texto: '💬 WhatsApp: ' + (abierto ? 'se abrió con el mensaje listo' + (enlace ? ' (con el enlace al PDF)' : '') + ' — falta que des “enviar” allá.' + aviso : 'el navegador bloqueó la ventana; usa “Abrir WhatsApp otra vez” en el detalle del pedido.') };
   } catch (e) {
     try { if (win) win.close(); } catch (_) { /* nada */ }
     const msg = envioMsgErr(e);
@@ -320,9 +318,9 @@ async function envioReabrirWhatsapp(id) {
     const p = pedidos.find((y) => y.id === id); const rv = await SB.from('proveedores').select('id,nit,razon_social,nombre_comercial,correo,telefono1,asesor').eq('id', p.proveedor_id).single();
     const prov = rv.data || {}, c = EnvioPedido.contacto(prov); if (!c.whatsapp.ok) throw new Error(c.whatsapp.motivo);
     const e = await envioCargar(id);
-    const x = { id, p, prov }; let pdf = null;
-    try { pdf = await envioPdf(x); envioDescargar(pdf); } catch (_) { /* sin PDF: el mensaje lleva el detalle */ }
-    const m = await envioDatos(x, Math.max(1, EnvioPedido.proximoIntento(e.envios, 'whatsapp') - 1), { detalle: !pdf });
+    const x = { id, p, prov }; let enlace = null;
+    try { enlace = await envioEnlaceCorto(x); } catch (_) { /* sin enlace: el mensaje sale igual */ }
+    const m = await envioDatos(x, Math.max(1, EnvioPedido.proximoIntento(e.envios, 'whatsapp') - 1), { enlacePdf: enlace });
     const url = EnvioPedido.enlaceWhatsapp(c.whatsapp.valor, m.textoWhatsapp);
     if (win) win.location.href = url; else window.open(url, '_blank');
   } catch (er) { try { if (win) win.close(); } catch (_) { /* nada */ } alert('No pude abrir WhatsApp: ' + envioMsgErr(er)); }
