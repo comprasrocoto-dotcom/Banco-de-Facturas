@@ -250,6 +250,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/ingreso-panel.js"></script>
 <script src="js/admin-editar.js"></script>
 <script src="js/marca-proveedores.js"></script>
+<script src="js/dian-abierto.js"></script>
 <script src="js/exportar.js"></script>
 <script src="js/exportar-ui.js"></script>
 <script src="js/analista-sedes.js"></script>
@@ -957,7 +958,7 @@ function pintarAgente(c,q){
         ${m.estado==="subida"?"":`<div class="mut">NIT que pide la DIAN: <b>${escAg(m.nit_emisor)}</b></div>`}
         ${m.ultimo_error&&m.estado!=="subida"?`<div class="mut" style="color:#b45309">Aviso: ${escAg(String(m.ultimo_error).slice(0,300))}</div>`:""}</div>
         <span class="badge ${est}">${escAg(({pendiente:"esperando el PDF",bajando:"esperando el PDF",agotado:"esperando el PDF",subida:"subida al banco",error:"error"})[m.estado]||m.estado)}</span>
-        ${m.estado!=="subida"?`<a href="${escAg(BancoUtils.urlDian(m.cufe))}" target="_blank" rel="noopener noreferrer"><button class="s">Abrir en DIAN ↗</button></a>`:""}${m.estado==="error"?`<button onclick="agReintentarDian(${i})">Reintentar ahora</button>`:""}
+        ${m.estado!=="subida"?`${dianBotonHtml(m.cufe)}`:""}${m.estado==="error"?`<button onclick="agReintentarDian(${i})">Reintentar ahora</button>`:""}
       </div></div>`;}).join(""):'<div class="vacio">Todavía no has pedido ninguna descarga.</div>';
   }
   // 2) Lo que decidió el agente (para corregirlo si se equivocó)
@@ -1854,7 +1855,7 @@ function pintarListaDian(){
   el.innerHTML=`<div style="margin-top:10px"><b>Lista para bajar de la DIAN</b> <span class="mut">(el PDF que bajes queda en Descargas y se sube solo)</span></div>`+
     c.itemsCola.map(it=>{ const e=est[it.cufe]; const hecho=e==="subida";
       return `<div class="row" style="border-bottom:1px solid var(--line);padding:6px 0;gap:10px"><div style="flex:3"><b>${escAg(it.documento||"—")}</b> · ${escAg(it.emisor||"—")} <span class="mut">· NIT ${escAg(it.nit_emisor)}</span></div>
-        ${hecho?`<span class="badge st-sellada">✅ subida al banco</span>`:`<button title="Copiar el NIT" onclick="copiarTexto('${escAg(it.nit_emisor)}',this)">📋 NIT</button><a href="${escAg(BancoUtils.urlDian(it.cufe))}" target="_blank" rel="noopener noreferrer"><button class="s">Abrir en DIAN ↗</button></a><span class="badge st-asignada">esperando el PDF</span>`}</div>`; }).join("");
+        ${hecho?`<span class="badge st-sellada">✅ subida al banco</span>`:`<button title="Copiar el NIT" onclick="copiarTexto('${escAg(it.nit_emisor)}',this)">📋 NIT</button>${dianBotonHtml(it.cufe)}<span class="badge st-asignada">esperando el PDF</span>`}</div>`; }).join("");
 }
 async function enviarADian(){
   const c=cr; if(!c||c.enviando) return;
