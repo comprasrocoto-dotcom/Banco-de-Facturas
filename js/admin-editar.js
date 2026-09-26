@@ -32,6 +32,31 @@
     return { ok: true, unidad: u, cambio: u !== normalizarUnidad(actual) };
   }
 
+  // ---- codigo del articulo (articulos.codigo_barras): mayusculas y sin espacios, como todos los que ya existen; unico
+  function normalizarCodigo(s) { return limpio(s).replace(/\s+/g, '').toUpperCase(); }
+  function validarCodigo(actual, nuevo, articulos, id) {
+    const c = normalizarCodigo(nuevo);
+    if (!c) return { ok: false, error: 'El código no puede quedar vacío.' };
+    if (c.length > 40) return { ok: false, error: 'El código es demasiado largo (máx. 40 caracteres).' };
+    if (/[^A-Z0-9_\-.]/.test(c)) return { ok: false, error: 'El código solo puede tener letras, números, guion y punto.' };
+    const otro = (articulos || []).find((a) => a && a.id !== id && normalizarCodigo(a.codigo_barras) === c);
+    if (otro) return { ok: false, error: 'Ya existe otro artículo con ese código: ' + (otro.articulo_hiopos || otro.articulo_comercial || c) + '.' };
+    return { ok: true, codigo: c, cambio: c !== normalizarCodigo(actual) };
+  }
+
+  // Valida lo escrito en el editor del articulo. Una unidad que no se toco no se valida (hay articulos sin unidad y solo se quiere cambiar el codigo).
+  function validarArticulo(a, escrito, articulos) {
+    const errores = [], r = { ok: false, errores, codigo: { cambio: false }, unidad: { cambio: false } };
+    const vc = validarCodigo(a.codigo_barras, escrito.codigo, articulos, a.id);
+    if (!vc.ok) errores.push(vc.error); else r.codigo = { cambio: vc.cambio, valor: vc.codigo };
+    if (normalizarUnidad(escrito.unidad) !== normalizarUnidad(a.unimedida_compra)) {
+      const vu = validarUnidad(a.unimedida_compra, escrito.unidad);
+      if (!vu.ok) errores.push(vu.error); else r.unidad = { cambio: true, valor: vu.unidad };
+    }
+    r.ok = errores.length === 0;
+    return r;
+  }
+
   // ---- proveedor
   const CAMPOS_PROV = ['razon_social', 'nombre_comercial', 'nit', 'telefono1', 'telefono2', 'correo', 'asesor'];
   const soloDigitos = (s) => String(s == null ? '' : s).replace(/[^0-9]/g, '');
@@ -66,19 +91,20 @@
   const cambiaIdentidad = (cambios) => 'nit' in cambios || 'razon_social' in cambios;
 
   // ---- HTML de los editores (van dentro de la tarjeta de la lista de Admin)
-  function editorUnidad(a, conocidas, opciones) {
+  function editorArticulo(a, conocidas, opciones) {
     opciones = opciones || {};
-    const id = 'eu_' + Number(a.id);
+    const id = 'ea_' + Number(a.id);
     return `<div class="card" style="margin:6px 0;border-left:5px solid #0f766e">
-      <div class="emisor">${esc(a.articulo_hiopos || a.articulo_comercial || '—')}</div>
-      <div class="mut">Código ${esc(a.codigo_barras || '—')} · unidad de compra actual: <b>${esc(a.unimedida_compra || a.unimedida_hiopos || '—')}</b></div>
-      <div class="row" style="margin-top:8px;gap:8px;align-items:center">
-        <span class="mut">Nueva unidad</span>
-        <input id="${id}" list="${id}_l" value="${esc(a.unimedida_compra || '')}" placeholder="KILO, UNIDADES, UNDX500G…" style="width:220px;margin:0;text-transform:uppercase" autocomplete="off">
+      <div class="emisor">✏️ Editar artículo · ${esc(a.articulo_hiopos || a.articulo_comercial || '—')}</div>
+      <div class="row" style="margin-top:8px;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <label style="display:block;min-width:160px"><span class="mut">Código</span>
+          <input id="${id}_codigo" value="${esc(a.codigo_barras || '')}" style="margin:2px 0 0;width:100%;text-transform:uppercase" autocomplete="off"></label>
+        <label style="display:block;min-width:220px"><span class="mut">Unidad de medida (compra)</span>
+          <input id="${id}_unidad" list="${id}_l" value="${esc(a.unimedida_compra || '')}" placeholder="KILO, UNIDADES, UNDX500G…" style="margin:2px 0 0;width:100%;text-transform:uppercase" autocomplete="off"></label>
         <datalist id="${id}_l">${(conocidas || []).slice(0, 300).map((u) => `<option value="${esc(u)}">`).join('')}</datalist>
-        <button class="p" onclick="guardarUnidadArticulo(${Number(a.id)})">💾 Guardar</button>
+        <button class="p" onclick="guardarArticuloAdmin(${Number(a.id)})">💾 Guardar</button>
         <button onclick="cancelarEdicionAdmin()">Cancelar</button></div>
-      <div class="mut" style="margin-top:6px">Es la unidad en la que se compra y se pide este artículo (formato del ERP). Los pedidos ya creados no cambian; los nuevos usan la unidad nueva.</div>
+      <div class="mut" style="margin-top:6px">La unidad es en la que se compra y se pide (formato del ERP). Si cambias el código, se actualiza también en los amarres a proveedores (con sus precios), el historial de precios y las líneas de los pedidos; debe ser el código que tiene el ERP. Queda registrado quién y cuándo.</div>
       ${opciones.error ? `<div style="color:#b91c1c;margin-top:6px">${esc(opciones.error)}</div>` : ''}</div>`;
   }
 
@@ -97,5 +123,5 @@
       ${opciones.error ? `<div style="color:#b91c1c;margin-top:6px">${esc(opciones.error)}</div>` : ''}</div>`;
   }
 
-  return { esc, normalizarUnidad, unidadesConocidas, validarUnidad, validarProveedor, cambiosProveedor, cambiaIdentidad, editorUnidad, editorProveedor, CAMPOS_PROV };
+  return { esc, normalizarUnidad, normalizarCodigo, unidadesConocidas, validarUnidad, validarCodigo, validarArticulo, validarProveedor, cambiosProveedor, cambiaIdentidad, editorArticulo, editorProveedor, CAMPOS_PROV };
 });
