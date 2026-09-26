@@ -7,7 +7,7 @@
 //  Logica pura: js/usuarios.js. Usa las globales de index.html: $, SB, perfil, usuario, sedes, escAg, fhAg, pintarAdmin, setModulo.
 // ============================================================
 let USR_PUEDE = null;                      // (permiso) => boolean
-const USR = { cargado: false, cargando: false, error: null, sub: 'usuarios', usuarios: [], perfiles: [], permisosPorPerfil: {}, catalogo: [], sedesAnalista: {} };   // sedesAnalista: { user_id: [sede ids] } (perfil_sede)
+const USR = { cargado: false, cargando: false, error: null, sub: 'usuarios', usuarios: [], perfiles: [], permisosPorPerfil: {}, catalogo: [], sedesAnalista: {}, avisos: {} };   // avisos: { user_id: 'correo1, correo2' } (correo de avisos del agente)   // sedesAnalista: { user_id: [sede ids] } (perfil_sede)
 
 function can(p) { return USR_PUEDE ? USR_PUEDE(p) : UsuariosLib.crearPuede(UsuariosLib.DEFECTO[(perfil && perfil.rol) || 'sede'])(p); }
 
@@ -37,7 +37,8 @@ async function usrCargar(forzar) {
   if (USR.cargando || (USR.cargado && !forzar)) return;
   USR.cargando = true; USR.error = null;
   try {
-    const [u, p, pp, c, sa] = await Promise.all([SB.rpc('usuarios_listar'), SB.from('perfil_acceso').select('*').order('id'), SB.from('perfil_permiso').select('perfil_id,permiso'), SB.from('permiso_catalogo').select('*').order('orden'), SB.rpc('analista_sedes_listar')]);
+    const [u, p, pp, c, sa, av] = await Promise.all([SB.rpc('usuarios_listar'), SB.from('perfil_acceso').select('*').order('id'), SB.from('perfil_permiso').select('perfil_id,permiso'), SB.from('permiso_catalogo').select('*').order('orden'), SB.rpc('analista_sedes_listar'), SB.rpc('analista_avisos_listar')]);
+    USR.avisos = {}; if (av && !av.error) (av.data || []).forEach((x) => { USR.avisos[x.user_id] = x.correo; });
     USR.sedesAnalista = sa && !sa.error ? AnalistaSedes.porUsuario(sa.data) : {};   // si la funcion aun no existe, todo sigue como antes
     const err = u.error || p.error || pp.error || c.error; if (err) throw new Error(err.message);
     USR.usuarios = u.data || []; USR.perfiles = p.data || []; USR.catalogo = c.data || [];
@@ -65,7 +66,7 @@ function pintarUsuarios(c, q) {
     h += l.map((u) => `<div class="card" style="margin:6px 0;${u.activo ? '' : 'opacity:.6'}"><div class="row">
         <div style="flex:2"><div class="emisor">${escAg(u.nombre)} ${u.activo ? '' : '<span class="badge" style="color:#991b1b;border-color:#fca5a5;background:#fef2f2">DESACTIVADO</span>'}${u.debe_cambiar_clave ? ' <span class="badge st-asignada">debe cambiar la contraseña</span>' : ''}</div>
           <div class="mut">${escAg(u.email || '—')} · ${u.ultimo_ingreso ? 'último ingreso ' + fhAg(u.ultimo_ingreso) : 'nunca ha ingresado'}</div></div>
-        <div style="flex:1.2"><span class="badge st-sellada">${escAg(u.perfil || u.rol)}</span><div class="mut">${usrSedesTexto(u)}</div></div>
+        <div style="flex:1.2"><span class="badge st-sellada">${escAg(u.perfil || u.rol)}</span><div class="mut">${usrSedesTexto(u)}</div>${u.rol === 'pagos' ? `<div class="mut">Avisos del agente: ${escAg(AnalistaSedes.textoAvisos(USR.avisos[u.user_id]))}</div>` : ''}</div>
         <div class="row" style="gap:6px"><button class="s" onclick="usrAbrir('${u.user_id}')">✎ Editar</button><button class="s" onclick="usrClaveAbrir('${u.user_id}')">🔑 Contraseña</button>
           ${u.user_id === (usuario && usuario.id) ? '' : `<button class="${u.activo ? 'd' : 'p'}" onclick="usrEstado('${u.user_id}',${!u.activo})">${u.activo ? 'Desactivar' : 'Activar'}</button>`}</div></div></div>`).join('') || '<div class="vacio">Sin resultados.</div>';
   } else {
@@ -98,6 +99,7 @@ function usrPintarSede() {
   const analista = AnalistaSedes.esAnalista(pf);
   box.style.display = pf && !analista ? 'block' : 'none';   // el analista no tiene UNA sede: tiene varias (casillas de abajo)
   const sb = $('usr_sedes_box'); if (sb) sb.style.display = analista ? 'block' : 'none';
+  const ab = $('usr_avisos_box'); if (ab) ab.style.display = analista ? 'block' : 'none';
   if (analista) usrSedesAviso();
   $('usr_sede_ayuda').textContent = pf && pf.nivel === 'sede' ? 'Obligatoria: este usuario solo verá lo de esta sede.' : 'Opcional: los perfiles de administración y pagos ven todas las sedes.';
 }
@@ -111,6 +113,7 @@ function usrAbrir(id) {
   $('usr_perfil').value = u && u.perfil_id ? u.perfil_id : '';
   $('usr_sede').innerHTML = '<option value="">— todas las sedes —</option>' + (typeof sedes !== 'undefined' ? sedes : []).map((s) => `<option value="${s.id}">${escAg((s.marcas && s.marcas.nombre ? s.marcas.nombre + ' · ' : '') + s.nombre)}</option>`).join('');
   $('usr_sede').value = u && u.sede_id ? u.sede_id : '';
+  $('usr_avisos').value = u ? (USR.avisos[u.user_id] || '') : '';
   $('usr_sedes_lista').innerHTML = AnalistaSedes.casillas(typeof sedes !== 'undefined' ? sedes : [], u ? (USR.sedesAnalista[u.user_id] || []) : [], 'usr_sd');
   $('usr_clave_box').style.display = nuevo ? 'block' : 'none'; if (nuevo) $('usr_clave').value = UsuariosLib.generarClave(usrRng());
   $('usr_activo_box').style.display = (!nuevo && u.user_id !== (usuario && usuario.id)) ? 'block' : 'none'; $('usr_activo').checked = u ? !!u.activo : true;
@@ -121,6 +124,8 @@ async function usrGuardar() {
   const d = { nombre: $('usr_nombre').value, email: $('usr_email').value, clave: $('usr_clave').value, perfil: pf, sedeId };
   const v = nuevo ? UsuariosLib.validarNuevoUsuario(d) : UsuariosLib.validarEdicion(d);
   if (!v.ok) { usrMsg('usr_err', v.errores.join(' '), false); return; }
+  const analistaAv = AnalistaSedes.esAnalista(pf), av = analistaAv ? AnalistaSedes.validarCorreos($('usr_avisos').value) : { ok: true, texto: '', correos: [] };
+  if (!av.ok) { usrMsg('usr_err', av.error, false); return; }
   const b = $('usr_guardar'); b.disabled = true; usrMsg('usr_err', 'Guardando...', true);
   try {
     let creado = null;
@@ -132,6 +137,11 @@ async function usrGuardar() {
     if (uid && AnalistaSedes.cambio(nuevo ? [] : (USR.sedesAnalista[uid] || []), marc)) {
       const g = await SB.rpc('analista_sedes_guardar', { p_user: uid, p_sedes: marc });
       if (g.error) throw new Error('El usuario se guardó, pero no sus sedes: ' + UsuariosLib.mensajeError(g.error.message));
+    }
+    // correo de avisos del agente (siempre con copia a compras)
+    if (uid && (av.texto || '') !== (nuevo ? '' : (USR.avisos[uid] || ''))) {
+      const g2 = await SB.rpc('analista_avisos_guardar', { p_user: uid, p_correo: av.texto || '' });
+      if (g2.error) throw new Error('El usuario se guardó, pero no su correo de avisos: ' + UsuariosLib.mensajeError(g2.error.message));
     }
     $('modalUsuario').classList.remove('on');
     if (nuevo) alert('Usuario creado.\n\nEntrégale su correo y esta contraseña temporal (solo se muestra ahora):\n\n' + d.clave + '\n\nEn su primer ingreso el sistema le pedirá cambiarla.');
