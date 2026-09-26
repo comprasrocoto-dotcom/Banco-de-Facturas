@@ -248,6 +248,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/ingreso-panel.js"></script>
 <script src="js/admin-editar.js"></script>
 <script src="js/marca-proveedores.js"></script>
+<script src="js/analista-sedes.js"></script>
 <script src="js/usuarios.js"></script>
 <script src="js/usuarios-ui.js"></script>
 <script src="js/envio-pedido.js"></script>
@@ -258,6 +259,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/cruce-dian-ui.js"></script>
 <script>
 const SB = supabase.createClient("https://egzggxwfyqeihzgpjgmp.supabase.co", "sb_publishable_3rzP6pCef1S5nRzFkG-eHw_-BF73n91");
+let alcanceUsuario=null;   // { restringido, sedes } del usuario (mi_alcance): un analista con sedes asignadas solo ve/pide las suyas
 let usuario=null, perfil=null, facturas=[], novedades=[], sedes=[], pedidos=[], pedidosCargados=false, pedVista="pendiente", modulo="banco";
 let tipo="factura", vista="pool", novActual=null;
 const $=id=>document.getElementById(id);
@@ -275,6 +277,7 @@ async function sesion(u){
   // (25/09/2026) Usuario desactivado: no entra (el servidor tambien lo bloquea: mi_rol() devuelve 'inactivo')
   if(perfil.activo===false){ await SB.auth.signOut(); usuario=null; perfil=null; $("lerr").textContent="Tu usuario está desactivado. Habla con el administrador."; return; }
   await cargarPermisos();     // permisos del perfil (js/usuarios-ui.js); si falla, los de origen de su nivel
+  try{ const ra=await SB.rpc("mi_alcance"); alcanceUsuario=ra.error?null:ra.data; }catch(e){ alcanceUsuario=null; }   // sedes del analista (la base ya filtra; esto solo acota los selectores)
   $("login").style.display="none"; $("app").style.display="block";
   if(perfil.debe_cambiar_clave) await exigirCambioClave();     // contraseña temporal: hay que cambiarla antes de seguir
   const s=perfil.sedes;
@@ -285,7 +288,7 @@ async function sesion(u){
   if(perfil.rol==="admin"||perfil.rol==="pagos"){
     $("fSede").style.display="inline-block";
     const porMarca={};
-    sedes.forEach(s=>{
+    AnalistaSedes.permitidas(sedes,alcanceUsuario).forEach(s=>{
       const marca=(s.marcas&&s.marcas.nombre)||"Sin marca";
       (porMarca[marca]=porMarca[marca]||[]).push(s);
     });
@@ -373,7 +376,7 @@ async function nuevoPedido(){
     $("np_sede").disabled=true;
   }else{
     $("np_sede").disabled=false;
-    $("np_sede").innerHTML=sedes.map(s=>{
+    $("np_sede").innerHTML=AnalistaSedes.permitidas(sedes,alcanceUsuario).map(s=>{
       // La marca viene EN LA MISMA fila de la sede (marcas(nombre)): no depende de
       // ninguna variable global. Se agregan respaldos por si viniera de otro lado.
       let et="";
@@ -2237,7 +2240,7 @@ function pintar(){
         <span class="sp"></span>
         ${(perfil.rol==="sede"&&f.estado=="pool")?`<button class="s" onclick="tomar('${f.cufe}')">Es mía</button>`:""}
         ${((f.estado==="asignada"||f.estado==="sellada")&&(perfil.rol==="sede"||perfil.rol==="admin"||perfil.rol==="pagos"))?`<button class="d" onclick="soltar('${f.cufe}')">↩ ${f.estado==="sellada"?"Quitar el sello":"No es mía"}</button>`:""}
-        ${((perfil.rol==="admin"||perfil.rol==="pagos")&&f.estado!=="sellada"&&f.estado!=="pagada")?`<select id="sel_${f.cufe}" style="width:auto;margin:0">${sedes.filter(s=>s.marca_id===f.marca_id).map(s=>`<option value="${s.id}"${f.sede_id===s.id?" selected":""}>${s.nombre}</option>`).join("")}</select><button class="s" onclick="asignar('${f.cufe}')">Asignar</button>`:""}
+        ${((perfil.rol==="admin"||perfil.rol==="pagos")&&f.estado!=="sellada"&&f.estado!=="pagada")?`<select id="sel_${f.cufe}" style="width:auto;margin:0">${AnalistaSedes.permitidas(sedes,alcanceUsuario).filter(s=>s.marca_id===f.marca_id).map(s=>`<option value="${s.id}"${f.sede_id===s.id?" selected":""}>${s.nombre}</option>`).join("")}</select><button class="s" onclick="asignar('${f.cufe}')">Asignar</button>`:""}
         ${f.estado=="asignada"?`<button class="p" onclick="sellar('${f.cufe}')">✔ Sellar y aprobar</button>`:""}
         ${f.archivo_pdf?`<button onclick="verPdf('${f.cufe}')">📄 Ver PDF</button>`:""}
         ${(f.archivo_pdf_sellado&&(f.estado==="sellada"||f.estado==="pagada"))?`<button class="p" onclick="verPdfArchivo('${f.archivo_pdf_sellado}')">✅ Ver sellada</button>`:""}
@@ -2735,6 +2738,8 @@ async function guardarNov(){
   <label class="mut">Correo (con el que ingresa)</label><input id="usr_email" type="email" placeholder="correo@ejemplo.com" autocomplete="off">
   <label class="mut">Perfil</label><select id="usr_perfil" onchange="usrPintarSede()"></select>
   <div id="usr_sede_box" style="display:none"><label class="mut">Sede</label><select id="usr_sede"></select><div class="mut" id="usr_sede_ayuda"></div></div>
+  <div id="usr_sedes_box" style="display:none"><label class="mut">Sedes asignadas (el analista solo trabaja con estas sedes y con las facturas que todavía no tienen sede)</label>
+    <div id="usr_sedes_lista" onchange="usrSedesAviso()" style="border:1px solid var(--line);border-radius:9px;padding:6px 10px;max-height:240px;overflow:auto"></div><div class="mut" id="usr_sedes_aviso"></div></div>
   <div id="usr_clave_box"><label class="mut">Contraseña temporal (se muestra ahora; la persona la cambia en su primer ingreso)</label>
     <div class="row"><input id="usr_clave" style="flex:1;margin:0" autocomplete="off"><button onclick="$('usr_clave').value=UsuariosLib.generarClave(usrRng())">Generar otra</button></div></div>
   <label id="usr_activo_box" style="display:none;margin-top:8px"><input type="checkbox" id="usr_activo" style="width:auto"> Usuario activo</label>
