@@ -154,3 +154,9 @@ begin
     where d.estado = 'ERROR' and (not analista_restringido() or not pedido_de_otra_sede(d.pedido_id));
   get diagnostics v_n = row_count; return v_n;
 end $$;
+
+-- (26/09/2026) CORRECCION aplicada en produccion: con PRIMARY KEY (user_id, sede_id) PostgREST trataba perfil_sede como tabla puente y la consulta de perfil de la web
+-- (perfiles?select=...,sedes(...)) fallaba con PGRST201 (dos caminos entre perfiles y sedes). Se le dio llave propia y UNIQUE:
+--   alter table perfil_sede drop constraint perfil_sede_pkey; alter table perfil_sede add column id bigserial; alter table perfil_sede add primary key (id);
+--   alter table perfil_sede add constraint perfil_sede_user_sede_key unique (user_id, sede_id);
+-- REGLA: una tabla nueva con llaves foraneas a DOS tablas y su PK sobre ambas queda como "puente" y puede volver ambiguos los embeds existentes: probar siempre las consultas de la web.

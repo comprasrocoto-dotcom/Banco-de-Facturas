@@ -272,8 +272,14 @@ async function init(){
 }
 async function sesion(u){
   usuario=u;
-  const {data:p}=await SB.from("perfiles").select("nombre,rol,sede_id,activo,perfil_id,debe_cambiar_clave,sedes(nombre,marca_id,marcas(nombre))").eq("user_id",u.id).single();
-  perfil=p||{nombre:u.email,rol:"sede"};
+  // "sedes!sede_id" = la sede PROPIA del usuario (perfiles.sede_id). Sin la pista, si aparece otro camino entre perfiles y sedes (p. ej. la tabla perfil_sede) la base responde PGRST201 y nadie podia entrar.
+  const {data:p,error:errPerfil}=await SB.from("perfiles").select("nombre,rol,sede_id,activo,perfil_id,debe_cambiar_clave,sedes!sede_id(nombre,marca_id,marcas(nombre))").eq("user_id",u.id).single();
+  if(!p){   // nunca se inventa un perfil de "sede" sin sede: se avisa y no se entra
+    try{ await SB.auth.signOut(); }catch(e){}
+    $("login").style.display="block"; $("app").style.display="none"; $("lerr").textContent="No pude cargar tu perfil"+(errPerfil?": "+errPerfil.message:"")+". Recarga la página o avisa al administrador.";
+    return;
+  }
+  perfil=p;
   // (25/09/2026) Usuario desactivado: no entra (el servidor tambien lo bloquea: mi_rol() devuelve 'inactivo')
   if(perfil.activo===false){ await SB.auth.signOut(); usuario=null; perfil=null; $("lerr").textContent="Tu usuario está desactivado. Habla con el administrador."; return; }
   await cargarPermisos();     // permisos del perfil (js/usuarios-ui.js); si falla, los de origen de su nivel
