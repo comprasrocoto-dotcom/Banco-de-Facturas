@@ -308,6 +308,7 @@ async function salir(){await SB.auth.signOut();location.reload();}
 
 let arts=[], provs=[], cat=[], minmax=[], provArts=[], npLineas=0;
 // PROVEEDORES POR MARCA (js/marca-proveedores.js): artsGlobal/catGlobal son los de siempre (Rocoto/Arrebatao); las marcas con productos propios (Sin Par) usan marca_articulo / marca_catalogo
+let npProvVis=[], npProvIdx=0;   // proveedores que ofrece el buscador de "Nuevo pedido" y la fila resaltada
 let artsGlobal=null, catGlobal=null, vinculosProv=[], marcaArts=[], marcaCat=[], npMarcaPropia=false;
 // Trae TODAS las filas de una tabla (por paginas de 1.000). Si algo falla devuelve lo que alcanzo a traer (como antes: la pantalla sigue).
 async function traerTodo(tabla, cols, orden){
@@ -363,7 +364,9 @@ async function nuevoPedido(){
     minmax=await traerTodo("maximos_minimos","articulo,almacen,subarticulo,minimo,maximo",["id"]);
     await prepararConversiones();
   }
+  npProvVis=provs;
   $("np_prov").innerHTML='<option value="">— elegí proveedor —</option>'+provs.map(x=>`<option value="${x.id}">${x.razon_social||x.nombre_comercial}</option>`).join("");
+  if(typeof npProvSync==="function") npProvSync();
   if(typeof pintarContactoProv==="function") pintarContactoProv();
   if(perfil.rol==="sede"){
     $("np_sede").innerHTML=`<option value="${perfil.sede_id}">${(perfil.sedes&&perfil.sedes.nombre)||"mi sede"}</option>`;
@@ -404,9 +407,38 @@ function aplicarMarcaNP(){
   const vis=MarcaProv.proveedoresVisibles(provs,vinculosProv,marca);
   $("np_prov").innerHTML='<option value="">— elegí proveedor —</option>'+vis.map(x=>`<option value="${x.id}">${x.razon_social||x.nombre_comercial}</option>`).join("");
   $("np_prov").value=(antes && vis.some(x=>x.id===antes))?String(antes):"";
+  npProvVis=vis; if(typeof npProvSync==="function") npProvSync();
   // aviso a quien administra: los proveedores sin marca no se listan (se les asigna la marca en Admin > Proveedores)
   const hint=$("np_sinmarca"); if(hint){ const n=(vis!==provs)?MarcaProv.sinMarca(provs,vinculosProv).length:0; hint.textContent=(n&&(perfil.rol==="admin"||perfil.rol==="pagos"))?"ℹ️ "+n+" proveedor(es) sin marca no se listan aquí: asígnales una marca en Admin > Proveedores.":""; }   // conserva el proveedor elegido solo si esta marca lo maneja
 }
+// BUSCADOR DE PROVEEDOR de "Nuevo pedido": el <select id="np_prov"> queda oculto y sigue siendo la fuente del valor (nada más cambia); esto lo llena y lo lee.
+function npProvNombre(id){ const p=(npProvVis||[]).find(x=>x.id===id)||(provs||[]).find(x=>x.id===id); return p?(p.razon_social||p.nombre_comercial||""):""; }
+function npProvSync(){ const q=$("np_prov_q"); if(!q) return; q.value=npProvNombre(Number($("np_prov").value||0)); }
+function npProvPintar(texto){
+  const l=$("np_prov_lista"); if(!l) return;
+  const r=MarcaProv.filasBuscadorPedido(npProvVis,texto,Number($("np_prov").value||0),npProvIdx);
+  l.innerHTML=r.html; l.style.display="block"; return r;
+}
+function npProvAbrir(){ const q=$("np_prov_q"); if(!q) return; npProvIdx=0; npProvPintar(""); if(q.select) q.select(); }   // al entrar se ven todos; el texto queda seleccionado para escribir encima
+function npProvFiltrar(){ npProvIdx=1; const r=npProvPintar($("np_prov_q").value); if(r&&!r.cantidad) npProvIdx=0; }   // al escribir se resalta la primera coincidencia
+function npProvCerrar(){ const l=$("np_prov_lista"); if(l) l.style.display="none"; npProvSync(); }
+function npProvElegir(id){
+  $("np_prov").value=id?String(id):"";
+  npProvCerrar();
+  filtrarArticulos();      // lo mismo que hacía el desplegable al cambiar
+}
+function npProvTecla(e){
+  const l=$("np_prov_lista"); if(!l) return;
+  const abierta=l.style.display==="block", r=abierta?MarcaProv.filasBuscadorPedido(npProvVis,$("np_prov_q").value,Number($("np_prov").value||0),npProvIdx):null;
+  if(e.key==="ArrowDown"||e.key==="ArrowUp"){
+    e.preventDefault(); if(!abierta){ npProvAbrir(); return; }
+    npProvIdx=Math.max(0,Math.min(r.ids.length-1,npProvIdx+(e.key==="ArrowDown"?1:-1))); npProvPintar($("np_prov_q").value);
+    const fila=l.querySelector&&l.querySelector('[data-i="'+npProvIdx+'"]'); if(fila&&fila.scrollIntoView) fila.scrollIntoView({block:"nearest"});
+  } else if(e.key==="Enter"){
+    e.preventDefault(); if(abierta&&r&&r.ids[npProvIdx]!=null) npProvElegir(r.ids[npProvIdx]);
+  } else if(e.key==="Escape"){ if(abierta){ e.preventDefault(); e.stopPropagation(); npProvCerrar(); } }
+}
+document.addEventListener("mousedown",e=>{ const w=document.getElementById("np_prov_wrap"); if(w && !w.contains(e.target)) npProvCerrar(); });
 async function cambiarSedeNP(){
   const antes=Number($("np_prov").value||0);
   aplicarMarcaNP();
@@ -2659,7 +2691,12 @@ async function guardarNov(){
     <div style="flex:1"><label class="mut">Tipo</label>
       <select id="np_tipo"><option>Requisicion</option><option>Pedido</option><option>Traslado</option></select></div>
   </div>
-  <label class="mut">Proveedor</label><select id="np_prov" onchange="filtrarArticulos()"></select>
+  <label class="mut">Proveedor</label>
+  <div id="np_prov_wrap" style="position:relative">
+    <input id="np_prov_q" placeholder="🔎 Escribí para buscar o elegir proveedor…" autocomplete="off" onfocus="npProvAbrir()" oninput="npProvFiltrar()" onkeydown="npProvTecla(event)">
+    <div id="np_prov_lista" style="display:none;position:absolute;left:0;right:0;top:100%;margin-top:-6px;z-index:40;max-height:300px;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:9px;box-shadow:0 10px 30px rgba(15,23,42,.18)"></div>
+  </div>
+  <select id="np_prov" onchange="filtrarArticulos()" style="display:none"></select>
   <div id="np_sinmarca" class="mut" style="margin-top:2px"></div>
   <div id="np_contacto"></div>
   <div class="row">

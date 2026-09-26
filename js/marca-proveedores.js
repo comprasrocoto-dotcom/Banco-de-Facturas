@@ -101,6 +101,16 @@
     });
   }
 
+  // Lista del buscador de proveedores de "Nuevo pedido": primera fila "sin proveedor", luego las coincidencias; resalta la fila `idx` (0 = la de "sin proveedor")
+  function filasBuscadorPedido(provs, q, seleccionadoId, idx) {
+    const l = buscarProveedores(provs, q).slice(0, 200);
+    const fila = (id, html, i, sel) => `<div data-i="${i}" onclick="npProvElegir(${id})" style="padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer;${i === idx ? 'background:#e0f2fe;' : ''}${sel ? 'font-weight:700;' : ''}">${html}</div>`;
+    let h = fila(0, '<span class="mut">— sin proveedor —</span>', 0, false);
+    l.forEach((p, k) => { h += fila(p.id, esc(p.razon_social || p.nombre_comercial || '—') + (p.nit ? ' <span class="mut">· NIT ' + esc(p.nit) + '</span>' : ''), k + 1, p.id === seleccionadoId); });
+    if (!l.length) h += '<div class="mut" style="padding:10px 12px">Ningún proveedor coincide con "' + esc(q) + '".</div>';
+    return { html: h, cantidad: l.length, ids: [0].concat(l.map((p) => p.id)) };
+  }
+
   // proveedores que pueden recibir productos del catalogo GENERAL (Rocoto/Arrebatao): los de esas marcas o sin marca
   function proveedoresDelGeneral(provs, vinculos, marcas) {
     const gen = new Set((marcas || []).filter(esGeneral).map((x) => x.id)), con = new Set((vinculos || []).map((v) => v.proveedor_id)), enGen = new Set((vinculos || []).filter((v) => gen.has(v.marca_id)).map((v) => v.proveedor_id));
@@ -130,5 +140,5 @@
     return (marcas || []).map((m) => `<label style="display:inline-flex;gap:4px;align-items:center;margin-right:12px"><input type="checkbox" id="${esc(idBase)}_m${Number(m.id)}" ${s.has(m.id) ? 'checked' : ''} style="width:auto;margin:0"> ${esc(m.nombre)}</label>`).join('');
   }
 
-  return { esc, buscarArticulos, buscarProveedores, filasProveedores, proveedoresDelGeneral, esGeneral, marcasPropias, opcionesCatalogo, articulosAdmin, preguntaMarcaArticulo, marcaDeRespuesta, proveedoresVisibles, sinMarca, proveedoresDeAdmin, marcasDe, tieneCatalogoPropio, articulosDeMarca, catalogoDeMarca, cambiosMarcas, opcionesMarca, etiquetasMarcas, casillasMarcas };
+  return { esc, filasBuscadorPedido, buscarArticulos, buscarProveedores, filasProveedores, proveedoresDelGeneral, esGeneral, marcasPropias, opcionesCatalogo, articulosAdmin, preguntaMarcaArticulo, marcaDeRespuesta, proveedoresVisibles, sinMarca, proveedoresDeAdmin, marcasDe, tieneCatalogoPropio, articulosDeMarca, catalogoDeMarca, cambiosMarcas, opcionesMarca, etiquetasMarcas, casillasMarcas };
 });
