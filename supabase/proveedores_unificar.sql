@@ -1,0 +1,6 @@
+-- (26/09/2026) UNIFICACION DE PROVEEDORES DUPLICADOS y CAMBIO DE CODIGO DE ARTICULOS DE MARCA. Aplicado en produccion; guardado aqui como referencia.
+--  * proveedor_fusion: bitacora de lo unificado (foto del duplicado: datos, marcas, productos). OJO: `proveedor_alias` YA existia (homologacion de nombres del ERP por NIT): NO se toca.
+--  * proveedores_unificar_duplicados(aplicar): une los proveedores con el MISMO NOMBRE EXACTO (sin puntos ni tildes) cuando solo uno tiene NIT y el duplicado no tiene NIT, pedidos ni catalogo general;
+--    pasa sus marcas y productos de marca al proveedor con NIT y borra el duplicado. Lo demas se omite y se reporta. aplicar=false = vista previa (se deshace).
+--  * marca_articulo_cambiar_codigo(id, nuevo): cambia el codigo de un articulo de una marca en marca_articulo + marca_catalogo + lineas de pedidos de ESA marca (no toca `articulos` ni otras marcas).
+-- El texto completo de las funciones esta en las migraciones proveedores_unificar_duplicados y marca_articulo_cambiar_codigo de Supabase.

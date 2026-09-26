@@ -49,6 +49,30 @@
   const catalogoDeMarca = (marcaCat, marcaId) => (marcaCat || []).filter((c) => c.marca_id === marcaId).map((c) => ({
     codigo_barras: c.codigo_barras, id_proveedor: c.id_proveedor, precio_negociado: c.precio_negociado }));
 
+  // ---- Admin > Articulos por marca. Rocoto y Arrebatao comparten ERP (y por eso el catalogo general `articulos`); las demas marcas tienen su propio POS/ERP y sus codigos propios (marca_articulo).
+  const esGeneral = (m) => ['rocoto', 'arrebatao'].indexOf(String((m && m.nombre) || '').trim().toLowerCase()) >= 0;
+  const marcasPropias = (marcas) => (marcas || []).filter((m) => !esGeneral(m));
+  // selector del catalogo: 'general' + las marcas que YA tienen articulos propios
+  function opcionesCatalogo(marcas, marcaArts, seleccion) {
+    const o = (v, t) => `<option value="${esc(v)}"${String(seleccion == null ? 'general' : seleccion) === String(v) ? ' selected' : ''}>${esc(t)}</option>`;
+    return o('general', 'Rocoto y Arrebatao (catálogo general)') + marcasPropias(marcas).filter((m) => (marcaArts || []).some((a) => a.marca_id === m.id)).map((m) => o(m.id, m.nombre + ' (catálogo propio)')).join('');
+  }
+  // articulos propios de una marca con la forma de `articulos` (y su id) para reutilizar las tarjetas y el editor de Admin
+  const articulosAdmin = (marcaArts, marcaId) => (marcaArts || []).filter((a) => a.marca_id === marcaId).map((a) => ({
+    id: a.id, codigo_barras: a.codigo_barras, articulo_hiopos: a.articulo, articulo_comercial: a.articulo, unimedida_compra: a.unidad_compra || '', unimedida_hiopos: '', subfamilia: a.subfamilia || '' }));
+  // texto de la pregunta "¿para que marca es el articulo?"
+  function preguntaMarcaArticulo(marcas, porDefecto) {
+    return '¿Para qué marca es el artículo?\n\n0. Rocoto y Arrebatao (catálogo general: comparten el mismo ERP)\n' + marcasPropias(marcas).map((m) => m.id + '. ' + m.nombre + ' (su propio ERP: códigos propios)').join('\n') + '\n\nEscribe el número' + (porDefecto != null ? ' (Enter = ' + porDefecto + ')' : '') + ':';
+  }
+  // 0 = general; id = marca con catalogo propio; null = respuesta invalida
+  function marcaDeRespuesta(texto, marcas, porDefecto) {
+    const t = String(texto == null ? '' : texto).trim();
+    const n = t === '' ? Number(porDefecto || 0) : Number(t);
+    if (!Number.isInteger(n) || n < 0) return null;
+    if (n === 0) return 0;
+    return marcasPropias(marcas).some((m) => m.id === n) ? n : null;
+  }
+
   // ---- Admin: cambios de marcas de un proveedor { agregar:[ids], quitar:[ids] }
   function cambiosMarcas(actuales, elegidas) {
     const a = new Set(actuales || []), e = new Set(elegidas || []);
@@ -72,5 +96,5 @@
     return (marcas || []).map((m) => `<label style="display:inline-flex;gap:4px;align-items:center;margin-right:12px"><input type="checkbox" id="${esc(idBase)}_m${Number(m.id)}" ${s.has(m.id) ? 'checked' : ''} style="width:auto;margin:0"> ${esc(m.nombre)}</label>`).join('');
   }
 
-  return { proveedoresVisibles, sinMarca, proveedoresDeAdmin, marcasDe, tieneCatalogoPropio, articulosDeMarca, catalogoDeMarca, cambiosMarcas, opcionesMarca, etiquetasMarcas, casillasMarcas };
+  return { esGeneral, marcasPropias, opcionesCatalogo, articulosAdmin, preguntaMarcaArticulo, marcaDeRespuesta, proveedoresVisibles, sinMarca, proveedoresDeAdmin, marcasDe, tieneCatalogoPropio, articulosDeMarca, catalogoDeMarca, cambiosMarcas, opcionesMarca, etiquetasMarcas, casillasMarcas };
 });
