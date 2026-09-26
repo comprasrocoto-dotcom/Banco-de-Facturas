@@ -113,6 +113,7 @@ const CRUCE_VACIO = { factura: 'No hay facturas pendientes de ingreso. ✅', not
 function cruceDianTabla() {
   const el = $('cruceLista'); if (!el || !conc.res) return;
   const lista = cruceFiltrar(concFilasDeTab(conc.tab)), total = concFilasDeTab(conc.tab).length;
+  EXPORTAR.actual.cruce = lista;   // lo que se ve (con filtros y busqueda) es lo que baja en Excel/CSV
   el.innerHTML = `<div class="mut" style="margin:6px 0">${lista.length === total ? total + ' documento(s)' : lista.length + ' de ' + total + ' documento(s) con los filtros'}</div>` + cruceTablaHtml(lista, CRUCE_VACIO[conc.tab] || 'Nada por aquí.', false);
   const btn = $('cruceBtnSubir');
   if (btn) { const n = Conciliacion.seleccionarParaCarga(lista, conc.tab).length; btn.textContent = '⬆ SUBIR ' + (conc.tab === 'nota_credito' ? 'NOTAS CRÉDITO' : 'FACTURAS') + ' (' + n + ')'; }
@@ -151,7 +152,7 @@ function cruceDianPintar() {
       <input placeholder="🔎 Proveedor o NIT" value="${escAg(F.proveedor)}" style="width:190px;margin:0" oninput="cruceCambiaFiltro('proveedor',this.value)">
       <select style="width:auto;margin:0" onchange="cruceCambiaFiltro('sede',this.value)"><option value="">Todas las sedes</option><option value="none" ${F.sede === 'none' ? 'selected' : ''}>Sin sede</option>${(conc.sedes || []).filter((x) => sedesPresentes.includes(x.id)).map((x) => `<option value="${x.id}" ${String(F.sede) === String(x.id) ? 'selected' : ''}>${escAg(x.nombre)}</option>`).join('')}</select>
       <input placeholder="🔎 Buscar documento" value="${escAg(F.q)}" style="width:170px;margin:0" oninput="cruceCambiaFiltro('q',this.value)">
-      <button class="mut" style="padding:4px 10px" onclick="cruceLimpiarFiltros()">limpiar</button><span class="sp"></span><button onclick="concDescargarCsv()">⬇ CSV</button></div>
+      <button class="mut" style="padding:4px 10px" onclick="cruceLimpiarFiltros()">limpiar</button><span class="sp"></span>${exportarBotones('cruce')}</div>
     <div id="cruceLista"></div></div>`;
   // Lo que NO requiere accion: cerrado por defecto
   const nIng = concFilasDeTab('ingresadas').length, nOtras = concFilasDeTab('otras').length, na = res.noAplica;

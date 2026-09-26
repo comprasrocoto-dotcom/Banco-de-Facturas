@@ -60,9 +60,10 @@ function pintarUsuarios(c, q) {
   const cnt = UsuariosLib.contarPorPerfil(USR.usuarios);
   const tab = (id, txt) => `<button class="chip ${USR.sub === id ? 'on' : ''}" onclick="USR.sub='${id}';pintarAdmin()">${txt}</button>`;
   let h = `<div class="row" style="margin-bottom:8px;gap:8px">${tab('usuarios', '👤 Usuarios (' + USR.usuarios.length + ')')}${tab('perfiles', '🛡 Perfiles y permisos (' + USR.perfiles.length + ')')}<span class="sp"></span>
-    ${USR.sub === 'usuarios' ? '<button class="p" onclick="usrAbrir(null)">➕ Nuevo usuario</button>' : '<button class="p" onclick="perfilAbrir(null)">➕ Nuevo perfil</button>'}</div>`;
+    ${exportarBotones(USR.sub === 'usuarios' ? 'usuarios' : 'perfiles')} ${USR.sub === 'usuarios' ? '<button class="p" onclick="usrAbrir(null)">➕ Nuevo usuario</button>' : '<button class="p" onclick="perfilAbrir(null)">➕ Nuevo perfil</button>'}</div>`;
   if (USR.sub === 'usuarios') {
     const l = USR.usuarios.filter((u) => !q || `${u.nombre} ${u.email} ${u.perfil} ${u.sede} ${u.marca}`.toLowerCase().includes(q));
+    EXPORTAR.actual.usuarios = l;
     h += l.map((u) => `<div class="card" style="margin:6px 0;${u.activo ? '' : 'opacity:.6'}"><div class="row">
         <div style="flex:2"><div class="emisor">${escAg(u.nombre)} ${u.activo ? '' : '<span class="badge" style="color:#991b1b;border-color:#fca5a5;background:#fef2f2">DESACTIVADO</span>'}${u.debe_cambiar_clave ? ' <span class="badge st-asignada">debe cambiar la contraseña</span>' : ''}</div>
           <div class="mut">${escAg(u.email || '—')} · ${u.ultimo_ingreso ? 'último ingreso ' + fhAg(u.ultimo_ingreso) : 'nunca ha ingresado'}</div></div>
@@ -70,7 +71,8 @@ function pintarUsuarios(c, q) {
         <div class="row" style="gap:6px"><button class="s" onclick="usrAbrir('${u.user_id}')">✎ Editar</button><button class="s" onclick="usrClaveAbrir('${u.user_id}')">🔑 Contraseña</button>
           ${u.user_id === (usuario && usuario.id) ? '' : `<button class="${u.activo ? 'd' : 'p'}" onclick="usrEstado('${u.user_id}',${!u.activo})">${u.activo ? 'Desactivar' : 'Activar'}</button>`}</div></div></div>`).join('') || '<div class="vacio">Sin resultados.</div>';
   } else {
-    h += USR.perfiles.filter((p) => !q || `${p.nombre} ${p.descripcion}`.toLowerCase().includes(q)).map((p) => {
+    EXPORTAR.actual.perfiles = USR.perfiles.filter((p) => !q || `${p.nombre} ${p.descripcion}`.toLowerCase().includes(q));
+    h += EXPORTAR.actual.perfiles.map((p) => {
       const n = (USR.permisosPorPerfil[p.id] || []).length, us = cnt[p.id] || 0;
       return `<div class="card" style="margin:6px 0"><div class="row"><div style="flex:2"><div class="emisor">${escAg(p.nombre)} ${p.sistema ? '<span class="badge">de origen</span>' : ''}</div><div class="mut">${escAg(p.descripcion || '')}</div></div>
         <div style="flex:1.2"><span class="badge">nivel de datos: ${escAg(p.nivel)}</span><div class="mut">${n} de ${USR.catalogo.length} permisos · ${us} usuario${us === 1 ? '' : 's'}</div></div>

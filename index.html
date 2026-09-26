@@ -115,6 +115,7 @@ tr:hover td{background:#f1f5f9}
         <span class="sp"></span>
         <button class="chip" id="btnFiltrosFac" style="display:none" onclick="toggleFiltros('Fac')">Filtros ▾</button>
         <button class="s" id="btnsubir" style="display:none" onclick="abrirSubir()">⬆ Subir PDFs</button>
+        <span data-exp="facturas"></span>
       </div>
       <div id="panelFiltrosFac" class="row filtros-panel" style="display:flex">
         <select id="fcat" style="width:auto" onchange="pintar()">
@@ -159,7 +160,7 @@ tr:hover td{background:#f1f5f9}
         <span class="sp"></span>
         <input id="qa" placeholder="🔎 buscar..." style="width:240px;margin:0" oninput="adminLimite=400;pintarAdmin()">
         <button class="chip" id="btnFiltrosAdm" style="display:none" onclick="toggleFiltros('Adm')">Filtros ▾</button>
-        <button class="p" id="btnAdmNuevo" onclick="adminNuevo()">➕ Nuevo</button>
+        <button class="p" id="btnAdmNuevo" onclick="adminNuevo()">➕ Nuevo</button><span id="admExportar"></span>
       </div>
       <div id="panelFiltrosAdm" class="row filtros-panel" style="display:flex;margin-bottom:12px">
         <span class="mut">Fecha:</span>
@@ -190,6 +191,7 @@ tr:hover td{background:#f1f5f9}
         <button class="chip"    id="pe-todos" onclick="setPedVista('todos')">Todos</button>
         <button class="p" id="btnNuevoPedido" onclick="nuevoPedido()">➕ Nuevo pedido</button>
         <button class="p" id="btnIngresos" style="display:none;background:#1e3a8a;border-color:#1e3a8a" onclick="pedirIngresos()">🚀 Iniciar ingresos al ERP</button>
+        <span data-exp="pedidos"></span><span data-exp="pedidos_detalle" data-etiqueta="Con artículos:"></span>
         <span class="sp"></span>
         <button class="chip" id="btnFiltrosPed" style="display:none" onclick="toggleFiltros('Ped')">Filtros ▾</button>
       </div>
@@ -248,6 +250,8 @@ tr:hover td{background:#f1f5f9}
 <script src="js/ingreso-panel.js"></script>
 <script src="js/admin-editar.js"></script>
 <script src="js/marca-proveedores.js"></script>
+<script src="js/exportar.js"></script>
+<script src="js/exportar-ui.js"></script>
 <script src="js/analista-sedes.js"></script>
 <script src="js/usuarios.js"></script>
 <script src="js/usuarios-ui.js"></script>
@@ -749,12 +753,14 @@ function filtraFechaAdmin(x){
 }
 function pintarAdmin(){
   const q=($("qa").value||"").trim().toLowerCase();
+  { const ex=$("admExportar"); if(ex){ const k={prov:"admin_prov",art:"admin_art",cat:"admin_cat"}[adminVista]; ex.innerHTML=k?exportarBotones(k):""; } }   // descargar lo que se ve (Excel / CSV); Agente y Usuarios llevan sus botones en su propia pantalla
   const c=$("listaAdmin");
   if(adminVista==="prov"){
     { const sel=$("admMarca"); let cur=sel.value;
       if(!adminMarcaTocada){ const fs=Number(($("fSede")||{}).value||0); const mm=fs?((sedes.find(s=>s.id===fs)||{}).marca_id):null; cur=mm?String(mm):""; }   // si el encabezado tiene una sede elegida, la marca de esa sede
       sel.innerHTML=MarcaProv.opcionesMarca(adminMarcas,cur); }
     let l=MarcaProv.proveedoresDeAdmin(adminProv,adminVinc,$("admMarca").value).filter(x=>!q||((x.razon_social||"")+" "+(x.nit||"")+" "+(x.nombre_comercial||"")).toLowerCase().includes(q)).filter(filtraFechaAdmin);
+    EXPORTAR.actual.admin_prov=l;
     c.innerHTML = l.slice(0,400).map(x=>{ if(adminEdit&&adminEdit.tipo==="prov"&&adminEdit.id===x.id) return AdminEditar.editorProveedor(x,{error:adminEdit.error, marcasHtml:MarcaProv.casillasMarcas(adminMarcas,MarcaProv.marcasDe(adminVinc,x.id),"ep_"+x.id)});
       return `<div class="card" style="margin:6px 0"><div class="row">
         <div><div class="emisor">${x.razon_social||x.nombre_comercial||"—"}</div>
@@ -771,6 +777,8 @@ function pintarAdmin(){
     const fuenteArt=mSel?MarcaProv.articulosAdmin(adminMarcaArts,mSel):adminArt;
     let l=MarcaProv.buscarArticulos(fuenteArt,$("qa").value).filter(filtraFechaAdmin);   // busca en código, ambos nombres, subfamilia y unidad
     const conocidas=AdminEditar.unidadesConocidas(fuenteArt,[]);
+    EXPORTAR.catalogoArt = mSel ? ((adminMarcas.find(m=>m.id===mSel)||{}).nombre||"")+" (catálogo propio)" : "Rocoto y Arrebatao (general)";
+    EXPORTAR.actual.admin_art = ()=>l.map(x=>{ const del=mSel?adminMarcaCat.filter(k=>k.marca_id===mSel&&k.codigo_barras===x.codigo_barras):adminCat.filter(k=>k.codigo_barras===x.codigo_barras); const pr=del.filter(k=>k.precio_negociado!=null).map(k=>Number(k.precio_negociado)); return {...x,_prov:del.length,_pmin:pr.length?Math.min(...pr):null,_pmax:pr.length?Math.max(...pr):null}; });
     c.innerHTML = (l.slice(0,adminLimite).map(x=>{
       if(adminEdit&&adminEdit.tipo==="art"&&adminEdit.id===x.id) return AdminEditar.editorArticulo(x,conocidas,{error:adminEdit.error});
       const delArt=mSel?adminMarcaCat.filter(k=>k.marca_id===mSel&&k.codigo_barras===x.codigo_barras):adminCat.filter(k=>k.codigo_barras===x.codigo_barras);
@@ -807,6 +815,7 @@ function pintarAdmin(){
     let l=lista;
     if(q) l=l.filter(x=>((x.nombre||"")+" "+(x.codigo||"")).toLowerCase().includes(q));
     l=l.filter(x=>filtraFechaAdmin(x.k||{}));
+    { const nomProv=(adminProv.find(p=>p.id===pid)||{}); EXPORTAR.actual.admin_cat=l.map(x=>({...x,_prov:nomProv.razon_social||nomProv.nombre_comercial||""})); }
     const nomDe=cd=>(adminArt.find(a=>a.codigo_barras===cd)||{}).articulo_hiopos||cd;
     c.innerHTML = '<div class="card">'+( l.length? l.map(x=>{
         const k=x.k||{}, precio=k.precio_negociado, iid="pp_"+pid+"_"+x.codigo;
@@ -901,7 +910,7 @@ function pintarAgente(c,q){
   if(ag.error) h+=`<div class="card" style="border-color:#b45309">⚠️ No pude leer todo: ${escAg(ag.error)} <button onclick="cargarAgente(true)">Reintentar</button></div>`;
   // 1) Pendientes: el agente NO inventó la unidad y espera que una persona decida
   const rev=ag.rev.map((r,i)=>({r,i})).filter(({r})=>ok(r.descripcion_original+" "+r.proveedor_nombre)&&filtraFechaAdmin(r));
-  h+=`<h3 style="margin:8px 0">Unidades por decidir <span class="badge st-pool">${rev.length}</span></h3><div class="mut" style="margin-bottom:6px">El agente no inventa la unidad: si no está seguro, la línea NO se anexa y queda aquí.</div>`;
+  h+=`<h3 style="margin:8px 0">Unidades por decidir <span class="badge st-pool">${rev.length}</span>${(EXPORTAR.actual.agente_pend=rev.map(x=>x.r),"")} ${exportarBotones("agente_pend")}</h3><div class="mut" style="margin-bottom:6px">El agente no inventa la unidad: si no está seguro, la línea NO se anexa y queda aquí.</div>`;
   h+=rev.length?rev.map(({r,i})=>`<div class="card" style="margin:6px 0"><div class="row">
       <div style="flex:3"><div class="emisor">${escAg(r.descripcion_original)}</div>
       <div class="mut">${escAg(r.proveedor_nombre||"—")} · ${escAg(r.pedido_numero||"")} · ${fhAg(r.creado_en)}</div>
@@ -912,7 +921,7 @@ function pintarAgente(c,q){
     </div></div>`).join(""):'<div class="vacio">Nada pendiente. ✅</div>';
   // 1a-bis) Nombres por decidir: el texto de la factura no se parecia a ninguna linea del pedido (por proveedor; homologacion de nombres)
   const pnd=(ag.productos||[]).map((r,i)=>({r,i})).filter(({r})=>ok(r.texto_factura+" "+(r.proveedor_nombre||""))&&filtraFechaAdmin(r));
-  h+=`<h3 style="margin:18px 0 8px">Nombres por decidir <span class="badge st-pool">${pnd.length}</span></h3><div class="mut" style="margin-bottom:6px">El agente no inventa el nombre: si el texto de la factura no se parece a ninguna línea del pedido, queda aquí. Elige (o escribe) a qué nombre EXACTO del pedido/ERP corresponde — queda aprendido para ese proveedor (y de paso la presentación: el nombre ya dice si son 2 KILOS o UNDX2270). Si de verdad es otro insumo, dale "No es lo mismo".</div>`;
+  h+=`<h3 style="margin:18px 0 8px">Nombres por decidir <span class="badge st-pool">${pnd.length}</span>${(EXPORTAR.actual.agente_nombres=pnd.map(x=>x.r),"")} ${exportarBotones("agente_nombres")}</h3><div class="mut" style="margin-bottom:6px">El agente no inventa el nombre: si el texto de la factura no se parece a ninguna línea del pedido, queda aquí. Elige (o escribe) a qué nombre EXACTO del pedido/ERP corresponde — queda aprendido para ese proveedor (y de paso la presentación: el nombre ya dice si son 2 KILOS o UNDX2270). Si de verdad es otro insumo, dale "No es lo mismo".</div>`;
   h+=pnd.length?pnd.map(({r,i})=>`<div class="card" style="margin:6px 0"><div class="row">
       <div style="flex:3"><div class="emisor">${escAg(r.texto_factura)}</div>
       <div class="mut">${escAg(r.proveedor_nombre||"—")} · ${escAg(r.pedido_numero||"")} · ${fhAg(r.creado_en)}</div>
@@ -962,7 +971,7 @@ function pintarAgente(c,q){
   // 3) Reglas aprendidas
   const rgs=ag.reglas.map((r,i)=>({r,i})).filter(({r})=>ok(r.producto_norm+" "+r.proveedor_nombre+" "+r.unidad)&&filtraFechaAdmin(r))
     .sort((a,b)=>(Number(b.r.requiere_revision)-Number(a.r.requiere_revision))||0);
-  h+=`<h3 style="margin:18px 0 8px">Reglas aprendidas <span class="badge">${rgs.length}</span></h3><div class="mut" style="margin-bottom:6px">1–2 correcciones = baja · 3–4 = media · 5+ (consistentes) o confirmada por admin = alta.</div>`;
+  h+=`<h3 style="margin:18px 0 8px">Reglas aprendidas <span class="badge">${rgs.length}</span>${(EXPORTAR.actual.agente_reglas=rgs.map(x=>x.r),"")} ${exportarBotones("agente_reglas")}</h3><div class="mut" style="margin-bottom:6px">1–2 correcciones = baja · 3–4 = media · 5+ (consistentes) o confirmada por admin = alta.</div>`;
   h+=rgs.length?rgs.map(({r,i})=>`<div class="card" style="margin:6px 0"><div class="row">
       <div style="flex:3"><div class="emisor">${escAg(r.producto_norm)}${r.presentacion?" · "+escAg(r.presentacion):""} → <b>${escAg(r.unidad)}</b></div>
       <div class="mut">${escAg(r.proveedor_nombre||r.proveedor_nit||"—")} · ${r.n} confirmación(es)${r.contradicciones?" · "+r.contradicciones+" en contra":""} · ${fhAg(r.ultima_en)}${r.corregido_por?" · "+escAg(r.corregido_por):""}</div></div>
@@ -1287,6 +1296,7 @@ function pintarPedidos(){
     });
   }
   if(q) l=l.filter(p=>((p.numero||"")+" "+(p.proveedor_texto||p.proveedor||"")+" "+(p.numero_factura||"")+" "+(p.pedido_erp||"")+" "+(p.sede_texto||"")).toLowerCase().includes(q));
+  EXPORTAR.actual.pedidos=l;   // lo que se ve (con vista, filtros y búsqueda) es lo que baja en Excel/CSV
   const cont=$("listaped");
   if(!l.length){cont.innerHTML='<div class="vacio">No hay pedidos acá.</div>';return;}
   cont.innerHTML=l.slice(0,300).map(p=>{
@@ -2221,6 +2231,7 @@ function pintar(){
   }
   const q=($("q").value||"").trim().toLowerCase();
   if(q) l=l.filter(f=>((f.numero||"")+" "+(f.prefijo||"")+(f.folio||"")+" "+(f.documento||"")+" "+(f.emisor||"")+" "+(f.cufe||"")+" "+(f.num_ingreso||"")).toLowerCase().includes(q));
+  EXPORTAR.actual.facturas=l;   // lo que se ve (con vista, filtros y búsqueda) es lo que baja en Excel/CSV
   const cont=$("lista");
   if(!l.length){cont.innerHTML='<div class="vacio">No hay documentos acá.</div>';return;}
   cont.innerHTML=l.map(f=>{
