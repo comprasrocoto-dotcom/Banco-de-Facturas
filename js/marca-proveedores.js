@@ -73,6 +73,29 @@
     return marcasPropias(marcas).some((m) => m.id === n) ? n : null;
   }
 
+  // ---- ventana "elegir proveedor" (Admin > Articulos > Amarrar): busqueda por nombre (sin tildes ni puntuacion, todas las palabras) o por NIT
+  const plano = (s) => String(s == null ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  function buscarProveedores(provs, q) {
+    const palabras = plano(q).split(' ').filter(Boolean);
+    const lista = (provs || []).slice().sort((a, b) => plano(a.razon_social || a.nombre_comercial).localeCompare(plano(b.razon_social || b.nombre_comercial)));
+    if (!palabras.length) return lista;
+    return lista.filter((p) => {
+      const texto = plano((p.razon_social || '') + ' ' + (p.nombre_comercial || '') + ' ' + (p.nit || ''));
+      const compacto = texto.replace(/ /g, '');   // "sas" tambien encuentra "S.A.S."
+      return palabras.every((w) => texto.indexOf(w) >= 0 || compacto.indexOf(w) >= 0);
+    });
+  }
+  function filasProveedores(provs, q, seleccionadoId) {
+    const l = buscarProveedores(provs, q);
+    if (!l.length) return '<div class="mut" style="padding:12px">Ningún proveedor coincide con "' + esc(q) + '".</div>';
+    return l.slice(0, 200).map((p) => `<div data-prov="${Number(p.id)}" onclick="provModalSel(${Number(p.id)})" style="padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer;${p.id === seleccionadoId ? 'background:#ccfbf1;font-weight:700' : ''}">${esc(p.razon_social || p.nombre_comercial || '—')} <span class="mut">${p.nit ? '· NIT ' + esc(p.nit) : '· sin NIT'}</span></div>`).join('') + (l.length > 200 ? '<div class="mut" style="padding:8px">…hay más: escribe para acotar.</div>' : '');
+  }
+  // proveedores que pueden recibir productos del catalogo GENERAL (Rocoto/Arrebatao): los de esas marcas o sin marca
+  function proveedoresDelGeneral(provs, vinculos, marcas) {
+    const gen = new Set((marcas || []).filter(esGeneral).map((x) => x.id)), con = new Set((vinculos || []).map((v) => v.proveedor_id)), enGen = new Set((vinculos || []).filter((v) => gen.has(v.marca_id)).map((v) => v.proveedor_id));
+    return (provs || []).filter((p) => enGen.has(p.id) || !con.has(p.id));
+  }
+
   // ---- Admin: cambios de marcas de un proveedor { agregar:[ids], quitar:[ids] }
   function cambiosMarcas(actuales, elegidas) {
     const a = new Set(actuales || []), e = new Set(elegidas || []);
@@ -96,5 +119,5 @@
     return (marcas || []).map((m) => `<label style="display:inline-flex;gap:4px;align-items:center;margin-right:12px"><input type="checkbox" id="${esc(idBase)}_m${Number(m.id)}" ${s.has(m.id) ? 'checked' : ''} style="width:auto;margin:0"> ${esc(m.nombre)}</label>`).join('');
   }
 
-  return { esGeneral, marcasPropias, opcionesCatalogo, articulosAdmin, preguntaMarcaArticulo, marcaDeRespuesta, proveedoresVisibles, sinMarca, proveedoresDeAdmin, marcasDe, tieneCatalogoPropio, articulosDeMarca, catalogoDeMarca, cambiosMarcas, opcionesMarca, etiquetasMarcas, casillasMarcas };
+  return { esc, buscarProveedores, filasProveedores, proveedoresDelGeneral, esGeneral, marcasPropias, opcionesCatalogo, articulosAdmin, preguntaMarcaArticulo, marcaDeRespuesta, proveedoresVisibles, sinMarca, proveedoresDeAdmin, marcasDe, tieneCatalogoPropio, articulosDeMarca, catalogoDeMarca, cambiosMarcas, opcionesMarca, etiquetasMarcas, casillasMarcas };
 });
