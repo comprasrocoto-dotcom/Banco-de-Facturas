@@ -11,7 +11,7 @@
 // ============================================================
 const EPC = { enCurso: {}, ctx: null };
 const escE = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const envioPuede = () => !!(perfil && (perfil.rol === 'admin' || perfil.rol === 'pagos'));   // encolar correos es de admin/pagos (regla ya existente)
+const envioPuede = () => !!(perfil && (perfil.rol === 'admin' || perfil.rol === 'pagos') && can('pedidos.enviar_proveedor'));   // encolar correos es de admin/pagos (regla del servidor) y ademas del permiso del perfil
 const envioMsgErr = (e) => String((e && e.message) || e || 'error desconocido').replace(/\s+/g, ' ').slice(0, 300);
 
 // ---------- Fase 1: tarjeta del proveedor en "Nuevo pedido" ----------

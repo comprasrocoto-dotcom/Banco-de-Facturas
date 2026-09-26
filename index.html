@@ -155,6 +155,7 @@ tr:hover td{background:#f1f5f9}
         <button class="chip"    id="ad-cat"  onclick="setAdmin('cat')">Qué le compro a cada proveedor</button>
         <button class="chip"    id="ad-agente" onclick="setAdmin('agente')">🤖 Agente</button>
         <button class="chip"    id="ad-import" onclick="setAdmin('import')">📥 Importar bases</button>
+        <button class="chip"    id="ad-usuarios" style="display:none" onclick="setAdmin('usuarios')">👥 Usuarios y perfiles</button>
         <span class="sp"></span>
         <input id="qa" placeholder="🔎 buscar..." style="width:240px;margin:0" oninput="pintarAdmin()">
         <button class="chip" id="btnFiltrosAdm" style="display:none" onclick="toggleFiltros('Adm')">Filtros ▾</button>
@@ -179,7 +180,7 @@ tr:hover td{background:#f1f5f9}
         <button class="chip on" id="pe-pend" onclick="setPedVista('pendiente')">Pendientes</button>
         <button class="chip"    id="pe-fact" onclick="setPedVista('facturado')">Facturados</button>
         <button class="chip"    id="pe-todos" onclick="setPedVista('todos')">Todos</button>
-        <button class="p" onclick="nuevoPedido()">➕ Nuevo pedido</button>
+        <button class="p" id="btnNuevoPedido" onclick="nuevoPedido()">➕ Nuevo pedido</button>
         <button class="p" id="btnIngresos" style="display:none;background:#1e3a8a;border-color:#1e3a8a" onclick="pedirIngresos()">🚀 Iniciar ingresos al ERP</button>
         <span class="sp"></span>
         <button class="chip" id="btnFiltrosPed" style="display:none" onclick="toggleFiltros('Ped')">Filtros ▾</button>
@@ -235,6 +236,8 @@ tr:hover td{background:#f1f5f9}
 <script src="js/decisiones-agente.js"></script>
 <script src="js/nombres-por-decidir.js"></script>
 <script src="js/nombres-por-decidir-ui.js"></script>
+<script src="js/usuarios.js"></script>
+<script src="js/usuarios-ui.js"></script>
 <script src="js/envio-pedido.js"></script>
 <script src="js/envio-pedido-ui.js"></script>
 <script src="js/nota-credito.js"></script>
@@ -255,9 +258,13 @@ async function init(){
 }
 async function sesion(u){
   usuario=u;
-  const {data:p}=await SB.from("perfiles").select("nombre,rol,sede_id,sedes(nombre,marca_id,marcas(nombre))").eq("user_id",u.id).single();
+  const {data:p}=await SB.from("perfiles").select("nombre,rol,sede_id,activo,perfil_id,debe_cambiar_clave,sedes(nombre,marca_id,marcas(nombre))").eq("user_id",u.id).single();
   perfil=p||{nombre:u.email,rol:"sede"};
+  // (25/09/2026) Usuario desactivado: no entra (el servidor tambien lo bloquea: mi_rol() devuelve 'inactivo')
+  if(perfil.activo===false){ await SB.auth.signOut(); usuario=null; perfil=null; $("lerr").textContent="Tu usuario está desactivado. Habla con el administrador."; return; }
+  await cargarPermisos();     // permisos del perfil (js/usuarios-ui.js); si falla, los de origen de su nivel
   $("login").style.display="none"; $("app").style.display="block";
+  if(perfil.debe_cambiar_clave) await exigirCambioClave();     // contraseña temporal: hay que cambiarla antes de seguir
   const s=perfil.sedes;
   if(perfil.rol==="admin"||perfil.rol==="pagos"){$("btnsubir").style.display="inline-block";$("barraDescarga").style.display="flex";$("m-cruce").style.display="inline-block";$("m-precios").style.display="inline-block";}
   if(perfil.rol==="admin"){ $("m-admin").style.display="inline-block"; $("btnIngresos").style.display="inline-block"; }
@@ -273,6 +280,7 @@ async function sesion(u){
     $("fSede").innerHTML='<option value="">📍 Todas las sedes</option>'+
       Object.keys(porMarca).map(m=>`<optgroup label="${m}">${porMarca[m].map(s=>`<option value="${s.id}">${s.nombre}</option>`).join("")}</optgroup>`).join("");
   }
+  aplicarPermisosUI();      // mostrar/ocultar segun los permisos del perfil
   const {data:ms}=await SB.from("marcas").select("id,nombre").order("nombre");
   $("mar").innerHTML=(ms||[]).map(m=>`<option value="${m.id}">${m.nombre}</option>`).join("");
   $("sede").textContent=(s?s.nombre:"—")+(s&&s.marcas?" · "+s.marcas.nombre:"");
@@ -617,9 +625,9 @@ async function guardarPedido(){
 }
 let adminCargado=false, adminVista="prov", adminProv=[], adminArt=[], adminCat=[];
 function setAdmin(v){ adminVista=v;
-  ["prov","art","cat","agente","import"].forEach(x=>$("ad-"+x).classList.toggle("on", x==v));
+  ["prov","art","cat","agente","import","usuarios"].forEach(x=>$("ad-"+x).classList.toggle("on", x==v));
   $("filtroCat").style.display = (v=="cat")?"flex":"none";
-  $("btnAdmNuevo").style.display = (v=="agente"||v=="import")?"none":"";
+  $("btnAdmNuevo").style.display = (v=="agente"||v=="import"||v=="usuarios")?"none":"";
   $("qa").style.display = (v=="import")?"none":"";
   $("vistaAdmin").classList.toggle("adm-import", v=="import");
   pintarAdmin();
@@ -672,6 +680,8 @@ function pintarAdmin(){
       }).join("") || '<div class="vacio">Sin resultados.</div>';
   } else if(adminVista==="agente"){
     pintarAgente(c,q);
+  } else if(adminVista==="usuarios"){
+    pintarUsuarios(c,q);
   } else if(adminVista==="import"){
     impPintar(c);
   } else {
@@ -989,7 +999,7 @@ function setModulo(m){
   $("vistaCruce").style.display = (m=="cruce")?"block":"none";
   if(m=="cruce" && typeof concPintar==="function") concPintar();
   $("filtrosFacturas").style.display = (m=="banco")?"block":"none";
-  $("barraDescarga").style.display = (m=="banco" && (perfil.rol==="admin"||perfil.rol==="pagos"))?"flex":"none";
+  $("barraDescarga").style.display = (m=="banco" && can("facturas.subir"))?"flex":"none";
   $("lista").style.display = (m=="banco")?"block":"none";
   $("vistaPedidos").style.display = (m=="pedidos")?"block":"none";
   if(m=="pedidos" && !pedidosCargados) cargarPedidos();
@@ -1051,7 +1061,7 @@ function pintarPedidos(){
         <span class="mut" style="font-weight:700">#${p.numero||""}</span>
         <span style="width:22px;height:22px;border-radius:50%;background:#15803d;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px">${p.estado==="facturado"?"✓":"●"}</span>
         <span class="mut" id="ch_${p.id}">⌄</span>
-        ${perfil.rol==="admin"?`<button class="d" title="Borrar pedido" onclick="event.stopPropagation();borrarPedido(${p.id})">🗑</button>`:""}
+        ${can("pedidos.borrar")?`<button class="d" title="Borrar pedido" onclick="event.stopPropagation();borrarPedido(${p.id})">🗑</button>`:""}
       </div>
       <div id="det_${p.id}"></div>
       </div>
@@ -1969,7 +1979,7 @@ function pintar(){
         ${f.archivo_recibo?`<button onclick="verPdfArchivo('${f.archivo_recibo}')">📸 Ver recibo</button>`:""}
         ${(f.tipo=="factura")?`<button class="s" onclick="abrirAmarre('factura','${f.cufe}')">🔗 Buscar pedido</button>`:""}
         ${botonNotaCredito(f)}
-        ${(perfil.rol==="admin")?`<button class="d" title="Borrar factura" onclick="borrarFactura('${f.cufe}')">🗑</button>`:""}
+        ${can("facturas.borrar")?`<button class="d" title="Borrar factura" onclick="borrarFactura('${f.cufe}')">🗑</button>`:""}
         ${(f.estado!="pagada")?`<button onclick="abrirNov('${f.cufe}')">Novedad</button>`:""}
       </div>
       ${nv?`<div class="mut" style="margin-top:10px">📝 ${nv.texto||nv.motivo}</div>`:""}
@@ -2446,6 +2456,48 @@ async function guardarNov(){
     <button onclick="$('modalPedido').classList.remove('on')">Cancelar</button>
     <button class="p" onclick="guardarPedido()">Guardar pedido</button></div>
   <div class="err" id="np_err"></div>
+</div></div>
+
+<div id="modalUsuario" class="modal"><div class="card" style="max-width:520px;width:96vw">
+  <h1 id="usr_titulo">➕ Nuevo usuario</h1>
+  <label class="mut">Nombre</label><input id="usr_nombre" placeholder="Nombre de la persona o de la sede" autocomplete="off">
+  <label class="mut">Correo (con el que ingresa)</label><input id="usr_email" type="email" placeholder="correo@ejemplo.com" autocomplete="off">
+  <label class="mut">Perfil</label><select id="usr_perfil" onchange="usrPintarSede()"></select>
+  <div id="usr_sede_box" style="display:none"><label class="mut">Sede</label><select id="usr_sede"></select><div class="mut" id="usr_sede_ayuda"></div></div>
+  <div id="usr_clave_box"><label class="mut">Contraseña temporal (se muestra ahora; la persona la cambia en su primer ingreso)</label>
+    <div class="row"><input id="usr_clave" style="flex:1;margin:0" autocomplete="off"><button onclick="$('usr_clave').value=UsuariosLib.generarClave(usrRng())">Generar otra</button></div></div>
+  <label id="usr_activo_box" style="display:none;margin-top:8px"><input type="checkbox" id="usr_activo" style="width:auto"> Usuario activo</label>
+  <div id="usr_err" style="min-height:18px;margin:6px 0"></div>
+  <div class="row"><span class="sp"></span><button onclick="$('modalUsuario').classList.remove('on')">Cancelar</button><button class="p" id="usr_guardar" onclick="usrGuardar()">Guardar</button></div>
+</div></div>
+
+<div id="modalClaveAdmin" class="modal"><div class="card" style="max-width:460px;width:96vw">
+  <h1>🔑 Restablecer contraseña</h1>
+  <div class="mut" id="usc_quien"></div>
+  <label class="mut">Contraseña temporal (la persona tendrá que cambiarla al ingresar)</label>
+  <div class="row"><input id="usc_clave" style="flex:1;margin:0" autocomplete="off"><button onclick="$('usc_clave').value=UsuariosLib.generarClave(usrRng())">Generar otra</button></div>
+  <div id="usc_err" style="min-height:18px;margin:6px 0"></div>
+  <div class="row"><span class="sp"></span><button onclick="$('modalClaveAdmin').classList.remove('on')">Cancelar</button><button class="p" id="usc_guardar" onclick="usrClaveGuardar()">Restablecer</button></div>
+</div></div>
+
+<div id="modalPerfil" class="modal"><div class="card" style="max-width:620px;width:96vw">
+  <h1 id="pf_titulo">➕ Nuevo perfil</h1>
+  <label class="mut">Nombre del perfil</label><input id="pf_nombre" placeholder="Ej: Contador, Auditor, Jefe de compras" autocomplete="off">
+  <label class="mut">Descripción</label><input id="pf_desc" placeholder="opcional" autocomplete="off">
+  <label class="mut">Nivel de datos (qué información puede leer el servidor)</label>
+  <select id="pf_nivel"><option value="sede">sede — solo lo de su sede</option><option value="pagos">pagos — todas las sedes, sin administración</option><option value="admin">admin — todo</option></select>
+  <div style="max-height:46vh;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-top:10px"><div style="font-weight:700">Permisos</div><div id="pf_permisos"></div></div>
+  <div id="pf_err" style="min-height:18px;margin:6px 0"></div>
+  <div class="row"><span class="sp"></span><button onclick="$('modalPerfil').classList.remove('on')">Cancelar</button><button class="p" id="pf_guardar" onclick="perfilGuardar()">Guardar perfil</button></div>
+</div></div>
+
+<div id="modalClave" class="modal"><div class="card" style="max-width:440px;width:96vw">
+  <h1>🔑 Cambia tu contraseña</h1>
+  <p class="mut">Ingresaste con una contraseña temporal. Elige una nueva para continuar (mínimo 8 caracteres).</p>
+  <label class="mut">Contraseña nueva</label><input id="cl_nueva" type="password" autocomplete="new-password">
+  <label class="mut">Repítela</label><input id="cl_repetir" type="password" autocomplete="new-password" onkeydown="if(event.key==='Enter')cambiarClaveObligatoria()">
+  <div id="cl_err" style="min-height:18px;margin:6px 0"></div>
+  <div class="row"><button onclick="SB.auth.signOut().then(()=>location.reload())">Cerrar sesión</button><span class="sp"></span><button class="p" id="cl_guardar" onclick="cambiarClaveObligatoria()">Cambiar contraseña</button></div>
 </div></div>
 
 <div id="modalEnvio" class="modal"><div class="card" style="max-width:560px;width:96vw">
