@@ -673,7 +673,7 @@ function pintarAdmin(){
     let l=adminArt.filter(x=>!q||((x.codigo_barras||"")+" "+(x.articulo_hiopos||"")+" "+(x.subfamilia||"")).toLowerCase().includes(q)).filter(filtraFechaAdmin);
     const conocidas=AdminEditar.unidadesConocidas(adminArt,[]);
     c.innerHTML = l.slice(0,400).map(x=>{
-      if(adminEdit&&adminEdit.tipo==="art"&&adminEdit.id===x.id) return AdminEditar.editorUnidad(x,conocidas,{error:adminEdit.error});
+      if(adminEdit&&adminEdit.tipo==="art"&&adminEdit.id===x.id) return AdminEditar.editorArticulo(x,conocidas,{error:adminEdit.error});
       const delArt=adminCat.filter(k=>k.codigo_barras===x.codigo_barras);
       const precios=delArt.filter(k=>k.precio_negociado!=null).map(k=>Number(k.precio_negociado));
       const info = delArt.length
@@ -684,7 +684,7 @@ function pintarAdmin(){
         <div class="mut">Código ${x.codigo_barras||"—"} · ${x.unimedida_compra||x.unimedida_hiopos||"—"} ${x.subfamilia?"· "+x.subfamilia:""}</div>
         <div class="mut">${info}</div></div>
         <span class="sp"></span>
-        <button onclick="editarUnidadArticulo(${x.id})">✏️ Cambiar unidad</button>
+        <button onclick="editarArticuloAdmin(${x.id})">✏️ Editar (código / unidad)</button>
         <button class="s" onclick="amarrarA('${(x.codigo_barras||"").replace(/'/g,"")}')">＋ Amarrar / poner precio</button></div></div>`;
       }).join("") || '<div class="vacio">Sin resultados.</div>';
   } else if(adminVista==="agente"){
@@ -947,19 +947,35 @@ function agregarAlCatalogo(pid){
       adminCargado=false; await cargarAdmin(); setAdmin("cat"); $("catProv").value=pid; pintarAdmin(); });
 }
 // (26/09/2026) EDITAR desde Admin: unidad de compra de un artículo y datos de un proveedor. Solo se envía lo que cambió; las políticas de la base ya limitan esto a admin/pagos.
-function editarUnidadArticulo(id){ adminEdit={tipo:"art",id}; pintarAdmin(); }
+function editarArticuloAdmin(id){ adminEdit={tipo:"art",id}; pintarAdmin(); }
 function editarProveedorAdmin(id){ adminEdit={tipo:"prov",id}; pintarAdmin(); }
 function cancelarEdicionAdmin(){ adminEdit=null; pintarAdmin(); }
-async function guardarUnidadArticulo(id){
+async function guardarArticuloAdmin(id){
   const a=adminArt.find(x=>x.id===id); if(!a) return;
-  const v=AdminEditar.validarUnidad(a.unimedida_compra, $("eu_"+id).value);
-  if(!v.ok){ adminEdit={tipo:"art",id,error:v.error}; pintarAdmin(); return; }
-  if(!v.cambio){ adminEdit=null; pintarAdmin(); return; }
-  if(!confirm("Cambiar la unidad de "+(a.articulo_hiopos||a.codigo_barras)+"\n\n"+(a.unimedida_compra||"—")+"  →  "+v.unidad+"\n\nLos pedidos ya creados no cambian.")) return;
-  const r=await SB.from("articulos").update({unimedida_compra:v.unidad}).eq("id",id).select("id");
-  if(r.error||!(r.data&&r.data.length)){ adminEdit={tipo:"art",id,error:"No se pudo guardar"+(r.error?": "+r.error.message:" (sin permiso)")}; pintarAdmin(); return; }
-  a.unimedida_compra=v.unidad;
-  const g=(typeof arts!=="undefined"&&arts||[]).find(x=>x.codigo_barras===a.codigo_barras); if(g) g.unimedida_compra=v.unidad;   // la lista de "Nuevo pedido" ya cargada
+  const fallo=(m)=>{ adminEdit={tipo:"art",id,error:m}; pintarAdmin(); };
+  const v=AdminEditar.validarArticulo(a,{codigo:$("ea_"+id+"_codigo").value, unidad:$("ea_"+id+"_unidad").value}, adminArt);
+  if(!v.ok) return fallo(v.errores.join(" "));
+  if(!v.codigo.cambio && !v.unidad.cambio){ adminEdit=null; pintarAdmin(); return; }
+  let msg="Cambios en "+(a.articulo_hiopos||a.codigo_barras)+":\n";
+  if(v.codigo.cambio) msg+="\n• Código: "+a.codigo_barras+"  →  "+v.codigo.valor+"\n  (se actualiza también en los amarres a proveedores, el historial de precios y las líneas de los pedidos)\n";
+  if(v.unidad.cambio) msg+="\n• Unidad: "+(a.unimedida_compra||"—")+"  →  "+v.unidad.valor+"\n  (los pedidos ya creados no cambian su unidad)\n";
+  if(!confirm(msg+"\n¿Guardar?")) return;
+  if(v.codigo.cambio){   // primero el código (función de la base: cambia todas las tablas en una sola transacción)
+    const r=await SB.rpc("articulo_cambiar_codigo",{p_id:id,p_nuevo:v.codigo.valor});
+    if(r.error) return fallo("No se pudo cambiar el código: "+r.error.message);
+    const viejo=a.codigo_barras, nuevo=(r.data&&r.data.codigo)||v.codigo.valor;
+    a.codigo_barras=nuevo;
+    adminCat.forEach(k=>{ if(k.codigo_barras===viejo) k.codigo_barras=nuevo; });
+    (typeof arts!=="undefined"&&arts||[]).forEach(x=>{ if(x.codigo_barras===viejo) x.codigo_barras=nuevo; });   // listas ya cargadas de "Nuevo pedido"
+    (typeof cat!=="undefined"&&cat||[]).forEach(x=>{ if(x.codigo_barras===viejo) x.codigo_barras=nuevo; });
+    adminProvArts={};   // lo que se le compra a cada proveedor se vuelve a leer con el código nuevo
+  }
+  if(v.unidad.cambio){
+    const r=await SB.from("articulos").update({unimedida_compra:v.unidad.valor}).eq("id",id).select("id");
+    if(r.error||!(r.data&&r.data.length)) return fallo((v.codigo.cambio?"El código ya se cambió, pero la unidad no: ":"No se pudo guardar la unidad: ")+(r.error?r.error.message:"sin permiso"));
+    a.unimedida_compra=v.unidad.valor;
+    const g=(typeof arts!=="undefined"&&arts||[]).find(x=>x.codigo_barras===a.codigo_barras); if(g) g.unimedida_compra=v.unidad.valor;
+  }
   adminEdit=null; pintarAdmin();
 }
 async function guardarProveedorAdmin(id){
