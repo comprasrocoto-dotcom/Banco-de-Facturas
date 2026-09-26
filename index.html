@@ -157,7 +157,7 @@ tr:hover td{background:#f1f5f9}
         <button class="chip"    id="ad-import" onclick="setAdmin('import')">📥 Importar bases</button>
         <button class="chip"    id="ad-usuarios" style="display:none" onclick="setAdmin('usuarios')">👥 Usuarios y perfiles</button>
         <span class="sp"></span>
-        <input id="qa" placeholder="🔎 buscar..." style="width:240px;margin:0" oninput="pintarAdmin()">
+        <input id="qa" placeholder="🔎 buscar..." style="width:240px;margin:0" oninput="adminLimite=400;pintarAdmin()">
         <button class="chip" id="btnFiltrosAdm" style="display:none" onclick="toggleFiltros('Adm')">Filtros ▾</button>
         <button class="p" id="btnAdmNuevo" onclick="adminNuevo()">➕ Nuevo</button>
       </div>
@@ -174,7 +174,7 @@ tr:hover td{background:#f1f5f9}
       </div>
       <div id="filtroCatalogoAdm" class="row" style="display:none;margin-bottom:12px">
         <span class="mut">Catálogo:</span>
-        <select id="admCatalogo" style="width:auto;margin:0;min-width:280px" onchange="adminEdit=null;pintarAdmin()"></select>
+        <select id="admCatalogo" style="width:auto;margin:0;min-width:280px" onchange="adminEdit=null;adminLimite=400;pintarAdmin()"></select>
       </div>
       <div id="filtroCat" class="row" style="display:none;margin-bottom:12px">
         <span class="mut">Proveedor:</span>
@@ -671,8 +671,9 @@ async function guardarPedido(){
 let adminCargado=false, adminVista="prov", adminProv=[], adminArt=[], adminCat=[];
 let adminMarcaArts=[], adminMarcaCat=[];   // articulos y catalogo propios de una marca (Sin Par...)
 let adminMarcas=[], adminVinc=[], adminMarcaTocada=false;   // marcas y proveedor_marca (js/marca-proveedores.js)
+let adminLimite=400;   // cuántos artículos se pintan de una vez en Admin > Artículos (hay más de 700: "Ver 400 más")
 let adminEdit=null;   // {tipo:"prov"|"art", id, error} = la tarjeta que se está editando (ver js/admin-editar.js)
-function setAdmin(v){ adminVista=v; adminEdit=null;
+function setAdmin(v){ adminVista=v; adminEdit=null; adminLimite=400;
   ["prov","art","cat","agente","import","usuarios"].forEach(x=>$("ad-"+x).classList.toggle("on", x==v));
   $("filtroCat").style.display = (v=="cat")?"flex":"none";
   $("filtroMarcaAdm").style.display = (v=="prov")?"flex":"none";
@@ -727,9 +728,9 @@ function pintarAdmin(){
     const selCat=$("admCatalogo"); { const cur=selCat.value||"general"; selCat.innerHTML=MarcaProv.opcionesCatalogo(adminMarcas,adminMarcaArts,cur); if(!selCat.value) selCat.value="general"; }
     const mSel=Number(selCat.value)||0;   // 0 = catálogo general (Rocoto y Arrebatao); id = marca con catálogo propio
     const fuenteArt=mSel?MarcaProv.articulosAdmin(adminMarcaArts,mSel):adminArt;
-    let l=fuenteArt.filter(x=>!q||((x.codigo_barras||"")+" "+(x.articulo_hiopos||"")+" "+(x.subfamilia||"")).toLowerCase().includes(q)).filter(filtraFechaAdmin);
+    let l=MarcaProv.buscarArticulos(fuenteArt,$("qa").value).filter(filtraFechaAdmin);   // busca en código, ambos nombres, subfamilia y unidad
     const conocidas=AdminEditar.unidadesConocidas(fuenteArt,[]);
-    c.innerHTML = l.slice(0,400).map(x=>{
+    c.innerHTML = (l.slice(0,adminLimite).map(x=>{
       if(adminEdit&&adminEdit.tipo==="art"&&adminEdit.id===x.id) return AdminEditar.editorArticulo(x,conocidas,{error:adminEdit.error});
       const delArt=mSel?adminMarcaCat.filter(k=>k.marca_id===mSel&&k.codigo_barras===x.codigo_barras):adminCat.filter(k=>k.codigo_barras===x.codigo_barras);
       const precios=delArt.filter(k=>k.precio_negociado!=null).map(k=>Number(k.precio_negociado));
@@ -743,7 +744,8 @@ function pintarAdmin(){
         <span class="sp"></span>
         <button onclick="editarArticuloAdmin(${x.id})">✏️ Editar (código / unidad)</button>
         <button class="s" onclick="${mSel?"amarrarMarca":"amarrarA"}('${(x.codigo_barras||"").replace(/'/g,"")}')">＋ Amarrar / poner precio</button></div></div>`;
-      }).join("") || '<div class="vacio">Sin resultados.</div>';
+      }).join("") || '<div class="vacio">Sin resultados.</div>') +
+      (l.length>adminLimite ? `<div class="row" style="justify-content:center;margin:12px 0"><span class="mut">Mostrando ${adminLimite} de ${l.length} artículos</span><button onclick="adminLimite+=400;pintarAdmin()">Ver 400 más</button></div>` : (l.length ? `<div class="mut" style="text-align:center;margin:10px 0">${l.length} artículo(s)</div>` : ''));
   } else if(adminVista==="agente"){
     pintarAgente(c,q);
   } else if(adminVista==="usuarios"){

@@ -90,6 +90,17 @@
     if (!l.length) return '<div class="mut" style="padding:12px">Ningún proveedor coincide con "' + esc(q) + '".</div>';
     return l.slice(0, 200).map((p) => `<div data-prov="${Number(p.id)}" onclick="provModalSel(${Number(p.id)})" style="padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer;${p.id === seleccionadoId ? 'background:#ccfbf1;font-weight:700' : ''}">${esc(p.razon_social || p.nombre_comercial || '—')} <span class="mut">${p.nit ? '· NIT ' + esc(p.nit) : '· sin NIT'}</span></div>`).join('') + (l.length > 200 ? '<div class="mut" style="padding:8px">…hay más: escribe para acotar.</div>' : '');
   }
+  // Busqueda de articulos en Admin: codigo, AMBOS nombres (Hiopos y comercial: 699 de 732 solo tienen el comercial), subfamilia y unidad; sin tildes ni puntuacion, todas las palabras
+  function buscarArticulos(articulos, q) {
+    const palabras = plano(q).split(' ').filter(Boolean);
+    if (!palabras.length) return articulos || [];
+    return (articulos || []).filter((a) => {
+      const texto = plano([a.codigo_barras, a.articulo_hiopos, a.articulo_comercial, a.subfamilia, a.unimedida_compra].join(' '));
+      const compacto = texto.replace(/ /g, '');
+      return palabras.every((w) => texto.indexOf(w) >= 0 || compacto.indexOf(w) >= 0);
+    });
+  }
+
   // proveedores que pueden recibir productos del catalogo GENERAL (Rocoto/Arrebatao): los de esas marcas o sin marca
   function proveedoresDelGeneral(provs, vinculos, marcas) {
     const gen = new Set((marcas || []).filter(esGeneral).map((x) => x.id)), con = new Set((vinculos || []).map((v) => v.proveedor_id)), enGen = new Set((vinculos || []).filter((v) => gen.has(v.marca_id)).map((v) => v.proveedor_id));
@@ -119,5 +130,5 @@
     return (marcas || []).map((m) => `<label style="display:inline-flex;gap:4px;align-items:center;margin-right:12px"><input type="checkbox" id="${esc(idBase)}_m${Number(m.id)}" ${s.has(m.id) ? 'checked' : ''} style="width:auto;margin:0"> ${esc(m.nombre)}</label>`).join('');
   }
 
-  return { esc, buscarProveedores, filasProveedores, proveedoresDelGeneral, esGeneral, marcasPropias, opcionesCatalogo, articulosAdmin, preguntaMarcaArticulo, marcaDeRespuesta, proveedoresVisibles, sinMarca, proveedoresDeAdmin, marcasDe, tieneCatalogoPropio, articulosDeMarca, catalogoDeMarca, cambiosMarcas, opcionesMarca, etiquetasMarcas, casillasMarcas };
+  return { esc, buscarArticulos, buscarProveedores, filasProveedores, proveedoresDelGeneral, esGeneral, marcasPropias, opcionesCatalogo, articulosAdmin, preguntaMarcaArticulo, marcaDeRespuesta, proveedoresVisibles, sinMarca, proveedoresDeAdmin, marcasDe, tieneCatalogoPropio, articulosDeMarca, catalogoDeMarca, cambiosMarcas, opcionesMarca, etiquetasMarcas, casillasMarcas };
 });
