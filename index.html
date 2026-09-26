@@ -238,6 +238,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/nombres-por-decidir.js"></script>
 <script src="js/nombres-por-decidir-ui.js"></script>
 <script src="js/ingreso-panel.js"></script>
+<script src="js/admin-editar.js"></script>
 <script src="js/usuarios.js"></script>
 <script src="js/usuarios-ui.js"></script>
 <script src="js/envio-pedido.js"></script>
@@ -626,7 +627,8 @@ async function guardarPedido(){
   else alert("Pedido "+nums[0]+" guardado.");
 }
 let adminCargado=false, adminVista="prov", adminProv=[], adminArt=[], adminCat=[];
-function setAdmin(v){ adminVista=v;
+let adminEdit=null;   // {tipo:"prov"|"art", id, error} = la tarjeta que se está editando (ver js/admin-editar.js)
+function setAdmin(v){ adminVista=v; adminEdit=null;
   ["prov","art","cat","agente","import","usuarios"].forEach(x=>$("ad-"+x).classList.toggle("on", x==v));
   $("filtroCat").style.display = (v=="cat")?"flex":"none";
   $("btnAdmNuevo").style.display = (v=="agente"||v=="import"||v=="usuarios")?"none":"";
@@ -658,16 +660,20 @@ function pintarAdmin(){
   const c=$("listaAdmin");
   if(adminVista==="prov"){
     let l=adminProv.filter(x=>!q||((x.razon_social||"")+" "+(x.nit||"")+" "+(x.nombre_comercial||"")).toLowerCase().includes(q)).filter(filtraFechaAdmin);
-    c.innerHTML = l.slice(0,400).map(x=>`<div class="card" style="margin:6px 0"><div class="row">
+    c.innerHTML = l.slice(0,400).map(x=>{ if(adminEdit&&adminEdit.tipo==="prov"&&adminEdit.id===x.id) return AdminEditar.editorProveedor(x,{error:adminEdit.error});
+      return `<div class="card" style="margin:6px 0"><div class="row">
         <div><div class="emisor">${x.razon_social||x.nombre_comercial||"—"}</div>
         <div class="mut">NIT ${x.nit||"—"} · Tel ${x.telefono1||"—"} · ${x.correo||"—"}${x.asesor?" · "+x.asesor:""}</div></div>
         <span class="sp"></span>
         <span class="badge">${adminCat.filter(k=>k.id_proveedor===x.id).length} artículos en el catálogo</span>
         <button class="p" onclick="asignarA(${x.id})">＋ Asignar producto</button>
-        <button onclick="verCatalogo(${x.id})">Ver catálogo</button></div></div>`).join("") || '<div class="vacio">Sin resultados.</div>';
+        <button onclick="verCatalogo(${x.id})">Ver catálogo</button>
+        <button onclick="editarProveedorAdmin(${x.id})">✏️ Editar</button></div></div>`;}).join("") || '<div class="vacio">Sin resultados.</div>';
   } else if(adminVista==="art"){
     let l=adminArt.filter(x=>!q||((x.codigo_barras||"")+" "+(x.articulo_hiopos||"")+" "+(x.subfamilia||"")).toLowerCase().includes(q)).filter(filtraFechaAdmin);
+    const conocidas=AdminEditar.unidadesConocidas(adminArt,[]);
     c.innerHTML = l.slice(0,400).map(x=>{
+      if(adminEdit&&adminEdit.tipo==="art"&&adminEdit.id===x.id) return AdminEditar.editorUnidad(x,conocidas,{error:adminEdit.error});
       const delArt=adminCat.filter(k=>k.codigo_barras===x.codigo_barras);
       const precios=delArt.filter(k=>k.precio_negociado!=null).map(k=>Number(k.precio_negociado));
       const info = delArt.length
@@ -678,6 +684,7 @@ function pintarAdmin(){
         <div class="mut">Código ${x.codigo_barras||"—"} · ${x.unimedida_compra||x.unimedida_hiopos||"—"} ${x.subfamilia?"· "+x.subfamilia:""}</div>
         <div class="mut">${info}</div></div>
         <span class="sp"></span>
+        <button onclick="editarUnidadArticulo(${x.id})">✏️ Cambiar unidad</button>
         <button class="s" onclick="amarrarA('${(x.codigo_barras||"").replace(/'/g,"")}')">＋ Amarrar / poner precio</button></div></div>`;
       }).join("") || '<div class="vacio">Sin resultados.</div>';
   } else if(adminVista==="agente"){
@@ -938,6 +945,36 @@ function agregarAlCatalogo(pid){
       precio_negociado:pr?Number(String(pr).replace(/[^0-9.]/g,"")):null, estado:"Aprobado"})
     .then(async r=>{ if(r.error){alert("No se pudo: "+r.error.message);return;}
       adminCargado=false; await cargarAdmin(); setAdmin("cat"); $("catProv").value=pid; pintarAdmin(); });
+}
+// (26/09/2026) EDITAR desde Admin: unidad de compra de un artículo y datos de un proveedor. Solo se envía lo que cambió; las políticas de la base ya limitan esto a admin/pagos.
+function editarUnidadArticulo(id){ adminEdit={tipo:"art",id}; pintarAdmin(); }
+function editarProveedorAdmin(id){ adminEdit={tipo:"prov",id}; pintarAdmin(); }
+function cancelarEdicionAdmin(){ adminEdit=null; pintarAdmin(); }
+async function guardarUnidadArticulo(id){
+  const a=adminArt.find(x=>x.id===id); if(!a) return;
+  const v=AdminEditar.validarUnidad(a.unimedida_compra, $("eu_"+id).value);
+  if(!v.ok){ adminEdit={tipo:"art",id,error:v.error}; pintarAdmin(); return; }
+  if(!v.cambio){ adminEdit=null; pintarAdmin(); return; }
+  if(!confirm("Cambiar la unidad de "+(a.articulo_hiopos||a.codigo_barras)+"\n\n"+(a.unimedida_compra||"—")+"  →  "+v.unidad+"\n\nLos pedidos ya creados no cambian.")) return;
+  const r=await SB.from("articulos").update({unimedida_compra:v.unidad}).eq("id",id).select("id");
+  if(r.error||!(r.data&&r.data.length)){ adminEdit={tipo:"art",id,error:"No se pudo guardar"+(r.error?": "+r.error.message:" (sin permiso)")}; pintarAdmin(); return; }
+  a.unimedida_compra=v.unidad;
+  const g=(typeof arts!=="undefined"&&arts||[]).find(x=>x.codigo_barras===a.codigo_barras); if(g) g.unimedida_compra=v.unidad;   // la lista de "Nuevo pedido" ya cargada
+  adminEdit=null; pintarAdmin();
+}
+async function guardarProveedorAdmin(id){
+  const p=adminProv.find(x=>x.id===id); if(!p) return;
+  const d={}; for(const c of AdminEditar.CAMPOS_PROV){ const el=$("ep_"+id+"_"+c); d[c]=el?el.value:""; }
+  const v=AdminEditar.validarProveedor(d,{id,otros:adminProv});
+  if(!v.ok){ adminEdit={tipo:"prov",id,error:v.errores.join(" ")}; pintarAdmin(); return; }
+  const cambios=AdminEditar.cambiosProveedor(p,v.valores);
+  if(!Object.keys(cambios).length){ adminEdit=null; pintarAdmin(); return; }
+  if(AdminEditar.cambiaIdentidad(cambios) && !confirm("Vas a cambiar el NIT o la razón social de "+(p.razon_social||p.nombre_comercial)+".\n\nAsí se reconoce a este proveedor en facturas y pedidos nuevos. ¿Continuar?")) return;
+  const r=await SB.from("proveedores").update(cambios).eq("id",id).select("id");
+  if(r.error||!(r.data&&r.data.length)){ const dup=r.error&&/duplicate|unique|proveedores_nit_key/i.test(r.error.message); adminEdit={tipo:"prov",id,error:dup?"Ese NIT ya lo tiene otro proveedor.":"No se pudo guardar"+(r.error?": "+r.error.message:" (sin permiso)")}; pintarAdmin(); return; }
+  Object.assign(p,cambios);
+  const g=(typeof provs!=="undefined"&&provs||[]).find(x=>x.id===id); if(g) Object.assign(g,cambios);   // la lista de "Nuevo pedido" ya cargada
+  adminEdit=null; pintarAdmin();
 }
 function amarrarA(codigo){
   if(!codigo) return;
