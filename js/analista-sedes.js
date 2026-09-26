@@ -46,5 +46,16 @@
   // ¿cambio algo? (para no llamar a la base sin necesidad)
   function cambio(antes, despues) { const a = [...new Set(antes || [])].sort((x, y) => x - y).join(','), b = [...new Set(despues || [])].sort((x, y) => x - y).join(','); return a !== b; }
 
-  return { esc, etiqueta, esAnalista, casillas, marcadas, resumen, aviso, permitidas, porUsuario, cambio };
+  // ---- correo de avisos del agente: hasta 3 correos; los avisos SIEMPRE llevan copia a compras (eso lo garantiza el agente)
+  const COMPRAS = 'comprasrocoto@gmail.com', RX_CORREO = /^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$/;
+  function validarCorreos(texto) {
+    const partes = String(texto == null ? '' : texto).toLowerCase().split(/[,;\s]+/).filter(Boolean), ok = [], malos = [];
+    for (const c of partes) { if (!RX_CORREO.test(c)) malos.push(c); else if (!ok.includes(c)) ok.push(c); }
+    if (malos.length) return { ok: false, correos: ok, error: 'Correo no válido: ' + malos.join(', ') + '.' };
+    if (ok.length > 3) return { ok: false, correos: ok, error: 'Máximo 3 correos por analista.' };
+    return { ok: true, correos: ok, texto: ok.join(', '), error: '' };
+  }
+  const textoAvisos = (correo) => (correo ? correo + ' (con copia a ' + COMPRAS + ')' : 'solo a ' + COMPRAS);
+
+  return { COMPRAS, validarCorreos, textoAvisos, esc, etiqueta, esAnalista, casillas, marcadas, resumen, aviso, permitidas, porUsuario, cambio };
 });
