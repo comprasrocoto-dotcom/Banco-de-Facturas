@@ -3,7 +3,7 @@
 //  Decide que proveedores (y que productos) ve cada marca. Logica pura (sin red ni DOM): la usa index.html y se prueba con node.
 //  Datos: proveedor_marca (proveedor_id, marca_id) · marca_articulo · marca_catalogo (ver supabase/proveedor_marca.sql)
 //
-//  REGLA:  una marca con proveedores vinculados ve SOLO los suyos (mas los que todavia no tienen ninguna marca, para no esconder los recien creados).
+//  REGLA:  una marca con proveedores vinculados ve SOLO los suyos. Un proveedor SIN marca no se lista en ninguna marca con base cargada (se ve en Admin > Proveedores como "sin marca" hasta que se le asigne una).
 //          una marca SIN proveedores cargados (123 wok, Casa de Nadie: su base aun no se ha cargado) sigue viendo todo, exactamente como antes.
 // ============================================================
 (function (root, factory) {
@@ -18,10 +18,16 @@
   function proveedoresVisibles(provs, vinculos, marcaId) {
     provs = provs || []; vinculos = vinculos || [];
     if (!marcaId) return provs;
-    const deMarca = new Set(), conAlguna = new Set();
-    for (const v of vinculos) { conAlguna.add(v.proveedor_id); if (v.marca_id === marcaId) deMarca.add(v.proveedor_id); }
+    const deMarca = new Set();
+    for (const v of vinculos) { if (v.marca_id === marcaId) deMarca.add(v.proveedor_id); }
     if (!deMarca.size) return provs;                                   // marca sin base cargada: como hoy
-    return provs.filter((p) => deMarca.has(p.id) || !conAlguna.has(p.id));
+    return provs.filter((p) => deMarca.has(p.id));
+  }
+
+  // proveedores que no tienen ninguna marca (no se listan al hacer pedidos)
+  function sinMarca(provs, vinculos) {
+    const con = new Set((vinculos || []).map((v) => v.proveedor_id));
+    return (provs || []).filter((p) => !con.has(p.id));
   }
 
   // Filtro ESTRICTO para Admin > Proveedores: '' = todos · 'sin' = los que no tienen ninguna marca · id = los de esa marca
@@ -66,5 +72,5 @@
     return (marcas || []).map((m) => `<label style="display:inline-flex;gap:4px;align-items:center;margin-right:12px"><input type="checkbox" id="${esc(idBase)}_m${Number(m.id)}" ${s.has(m.id) ? 'checked' : ''} style="width:auto;margin:0"> ${esc(m.nombre)}</label>`).join('');
   }
 
-  return { proveedoresVisibles, proveedoresDeAdmin, marcasDe, tieneCatalogoPropio, articulosDeMarca, catalogoDeMarca, cambiosMarcas, opcionesMarca, etiquetasMarcas, casillasMarcas };
+  return { proveedoresVisibles, sinMarca, proveedoresDeAdmin, marcasDe, tieneCatalogoPropio, articulosDeMarca, catalogoDeMarca, cambiosMarcas, opcionesMarca, etiquetasMarcas, casillasMarcas };
 });

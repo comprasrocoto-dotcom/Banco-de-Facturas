@@ -399,7 +399,9 @@ function aplicarMarcaNP(){
   const antes=Number($("np_prov").value||0);
   const vis=MarcaProv.proveedoresVisibles(provs,vinculosProv,marca);
   $("np_prov").innerHTML='<option value="">— elegí proveedor —</option>'+vis.map(x=>`<option value="${x.id}">${x.razon_social||x.nombre_comercial}</option>`).join("");
-  $("np_prov").value=(antes && vis.some(x=>x.id===antes))?String(antes):"";   // conserva el proveedor elegido solo si esta marca lo maneja
+  $("np_prov").value=(antes && vis.some(x=>x.id===antes))?String(antes):"";
+  // aviso a quien administra: los proveedores sin marca no se listan (se les asigna la marca en Admin > Proveedores)
+  const hint=$("np_sinmarca"); if(hint){ const n=(vis!==provs)?MarcaProv.sinMarca(provs,vinculosProv).length:0; hint.textContent=(n&&(perfil.rol==="admin"||perfil.rol==="pagos"))?"ℹ️ "+n+" proveedor(es) sin marca no se listan aquí: asígnales una marca en Admin > Proveedores.":""; }   // conserva el proveedor elegido solo si esta marca lo maneja
 }
 async function cambiarSedeNP(){
   const antes=Number($("np_prov").value||0);
@@ -1063,11 +1065,13 @@ function adminNuevo(){
     const nc=prompt("Nombre comercial (opcional):")||null;
     const t1=prompt("Teléfono (opcional):")||null;
     const co=prompt("Correo (opcional):")||null;
-    const marcaSel=Number($("admMarca").value||0);   // el proveedor nuevo queda en la marca que estás viendo (si estás en "Todas", queda sin marca y se ve en todas hasta que se la asignes con ✏️ Editar)
+    let marcasNuevo=[]; { const v=Number($("admMarca").value||0);   // el proveedor nuevo queda en la marca que estás viendo; en "Todas" se pregunta (un proveedor sin marca no se lista al hacer pedidos)
+      if(v) marcasNuevo=[v]; else { const t=prompt("¿En qué marcas se maneja este proveedor?\nEscribí los números separados por coma (vacío = ninguna por ahora):\n\n"+adminMarcas.map(mm=>mm.id+". "+mm.nombre).join("\n")); marcasNuevo=(t||"").split(/[,;\s]+/).map(Number).filter(n=>adminMarcas.some(mm=>mm.id===n)); } }
     SB.from("proveedores").insert({razon_social:rz.trim(), nit:nit?nit.replace(/[^0-9]/g,""):null,
       nombre_comercial:nc?nc.trim():null, telefono1:t1?t1.trim():null, correo:co?co.trim():null}).select("id").single()
       .then(async r=>{ if(r.error){alert("No se pudo: "+r.error.message);return;}
-        if(marcaSel && r.data) await SB.from("proveedor_marca").insert({proveedor_id:r.data.id,marca_id:marcaSel,origen:"admin"});
+        if(marcasNuevo.length && r.data) await SB.from("proveedor_marca").insert(marcasNuevo.map(mid=>({proveedor_id:r.data.id,marca_id:mid,origen:"admin"})));
+        else alert("El proveedor quedó SIN marca: no aparecerá al hacer pedidos hasta que le asignes una con ✏️ Editar.");
         adminCargado=false; await cargarAdmin(); });
   } else if(adminVista==="art"){
     const cb=prompt("Código (ej: ORD900 / código de barras):"); if(!cb) return;
@@ -2566,6 +2570,7 @@ async function guardarNov(){
       <select id="np_tipo"><option>Requisicion</option><option>Pedido</option><option>Traslado</option></select></div>
   </div>
   <label class="mut">Proveedor</label><select id="np_prov" onchange="filtrarArticulos()"></select>
+  <div id="np_sinmarca" class="mut" style="margin-top:2px"></div>
   <div id="np_contacto"></div>
   <div class="row">
     <div style="flex:1"><label class="mut">Fecha</label><input type="date" id="np_fecha"></div>
