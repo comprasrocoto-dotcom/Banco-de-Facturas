@@ -2741,7 +2741,7 @@ async function guardarNov(){
   <div id="usr_sedes_box" style="display:none"><label class="mut">Sedes asignadas (el analista solo trabaja con estas sedes y con las facturas que todavía no tienen sede)</label>
     <div id="usr_sedes_lista" onchange="usrSedesAviso()" style="border:1px solid var(--line);border-radius:9px;padding:6px 10px;max-height:240px;overflow:auto"></div><div class="mut" id="usr_sedes_aviso"></div></div>
   <div id="usr_avisos_box" style="display:none;margin-top:8px"><label class="mut">Correo para los avisos del agente (opcional, hasta 3 separados por coma)</label>
-    <input id="usr_avisos" placeholder="analista@ejemplo.com" autocomplete="off"><div class="mut">Las novedades de sus ingresos le llegan a este correo <b>siempre con copia a comprasrocoto@gmail.com</b>. Vacío = solo a comprasrocoto@gmail.com.</div></div>
+    <input id="usr_avisos" placeholder="analista@ejemplo.com" autocomplete="off"><div class="mut">Las novedades y el <b>resumen de cada ingreso</b> le llegan a este correo <b>siempre con copia a comprasrocoto@gmail.com</b>. Vacío = solo a comprasrocoto@gmail.com.</div></div>
   <div id="usr_clave_box"><label class="mut">Contraseña temporal (se muestra ahora; la persona la cambia en su primer ingreso)</label>
     <div class="row"><input id="usr_clave" style="flex:1;margin:0" autocomplete="off"><button onclick="$('usr_clave').value=UsuariosLib.generarClave(usrRng())">Generar otra</button></div></div>
   <label id="usr_activo_box" style="display:none;margin-top:8px"><input type="checkbox" id="usr_activo" style="width:auto"> Usuario activo</label>
