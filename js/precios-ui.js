@@ -30,6 +30,7 @@ function precRepintar() { if (typeof modulo !== 'undefined' && modulo === 'preci
 function precPintar() {
   const cont = $('preciosRaiz'); if (!cont) return;
   const base = Precios.ordenar(Precios.filtrar(pr.vars, { estado: pr.estado, minPct: Precios.SENSIBILIDAD[pr.sens], sentido: pr.sentido, q: pr.q }));
+  EXPORTAR.actual.precios = base;   // lo que se ve (con filtros y busqueda) es lo que baja en Excel/CSV
   const R = Precios.resumen(pr.vars), Rb = Precios.resumen(base), cuentaEstado = (e) => pr.vars.filter((v) => v.estado === e).length;
   const chip = (activo, click, txt) => `<button class="chip${activo ? ' on' : ''}" onclick="${click}">${txt}</button>`;
   let h = `<div class="card" style="margin:6px 0">
@@ -44,7 +45,7 @@ function precPintar() {
       <input id="prQ" value="${escAg(pr.q)}" placeholder="🔎 producto, proveedor, NIT o factura" style="width:280px;margin:0" oninput="precBuscar(this.value)">
       ${chip(pr.sentido === 'sube', "precFiltro('sentido','sube')", '▲ Suben')}${chip(pr.sentido === 'baja', "precFiltro('sentido','baja')", '▼ Bajan')}
       <span class="sp"></span>
-      <button onclick="precPanel('registrar')">➕ Registrar precio</button><button onclick="precPanel('lista')">📥 Subir lista (CSV)</button><button onclick="precPanel('config')">⚙️ Correo y umbral</button>
+      ${exportarBotones('precios')}<button onclick="precPanel('registrar')">➕ Registrar precio</button><button onclick="precPanel('lista')">📥 Subir lista (CSV)</button><button onclick="precPanel('config')">⚙️ Correo y umbral</button>
     </div>
     ${pr.msg ? `<div style="padding:8px 12px;border-radius:8px;${pr.msgMal ? 'background:#fee2e2;color:#991b1b' : 'background:#eff6ff;color:#1e3a8a'}">${pr.msg}</div>` : ''}
   </div>`;
