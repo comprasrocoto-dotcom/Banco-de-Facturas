@@ -16,7 +16,7 @@
   const DEFECTO = {
     admin: TODOS.slice(),
     pagos: ['facturas.ver', 'facturas.subir', 'facturas.sellar', 'facturas.asignar', 'pedidos.ver', 'pedidos.crear', 'pedidos.amarrar', 'pedidos.enviar_proveedor', 'cruce_dian.ver', 'precios.ver'],
-    sede: ['facturas.ver', 'facturas.sellar', 'pedidos.ver', 'pedidos.crear', 'pedidos.amarrar'],
+    sede: ['facturas.ver', 'facturas.sellar', 'pedidos.ver', 'pedidos.crear', 'pedidos.amarrar', 'pedidos.enviar_proveedor'],
   };
 
   // perfil = { rol, perfil_id }, permisosBase = lo que devolvio mis_permisos() (o null si fallo). -> array de permisos

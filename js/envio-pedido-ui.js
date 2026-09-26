@@ -11,7 +11,7 @@
 // ============================================================
 const EPC = { enCurso: {}, ctx: null, compartir: {}, wa: null };   // wa: ¿esta configurada la API oficial de WhatsApp Business? (null = aun no se pregunto)   // compartir[id] = { archivo, texto }: el PDF y el mensaje listos para el boton "Compartir PDF adjunto"
 const escE = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const envioPuede = () => !!(perfil && (perfil.rol === 'admin' || perfil.rol === 'pagos') && can('pedidos.enviar_proveedor'));   // encolar correos es de admin/pagos (regla del servidor) y ademas del permiso del perfil
+const envioPuede = () => !!(perfil && can('pedidos.enviar_proveedor'));   // el permiso del perfil (las sedes lo tienen para SUS pedidos; el servidor lo valida en pedido_correo_encolar)
 const envioMsgErr = (e) => String((e && e.message) || e || 'error desconocido').replace(/\s+/g, ' ').slice(0, 300);
 
 // ---------- Fase 1: tarjeta del proveedor en "Nuevo pedido" ----------
@@ -36,8 +36,8 @@ async function envioCargar(id) {
   if (r.error) throw new Error(r.error.message);
   const envios = r.data || [];
   const colas = {}, ids = [...new Set(envios.map((e) => e.correo_cola_id).filter((x) => x != null))];
-  if (ids.length && envioPuede()) {
-    const q = await SB.from('correo_cola').select('id,estado,ultimo_error,enviado_en,intentos').in('id', ids);
+  if (ids.length) {   // la sede no puede leer correo_cola: el estado de los correos de SU pedido llega por esta funcion
+    const q = await SB.rpc('pedido_correo_estados', { p_pedido_id: id });
     (q.data || []).forEach((c) => { colas[c.id] = c; });
   }
   const porCanal = EnvioPedido.estadoPorCanal(envios, colas);
@@ -204,13 +204,13 @@ async function envioEjecutar(x, canales, reenviar, win) {
   if (!mal.length) setTimeout(() => { $('modalEnvio').classList.remove('on'); }, 1600);
 }
 
-// CORREO: PDF -> Storage -> cola (correo_encolar) -> registro. Un fallo se registra como ERROR de ese canal; no afecta a los demas.
+// CORREO: PDF -> Storage -> cola (pedido_correo_encolar) -> registro. Un fallo se registra como ERROR de ese canal; no afecta a los demas.
 async function envioCorreo(x, fresco) {
   const dest = x.c.correo.valor;
   try {
     const ruta = (await envioPdf(x)).ruta;
     const m = await envioDatos(x, EnvioPedido.proximoIntento(fresco.envios, 'correo'));
-    const r = await SB.rpc('correo_encolar', { p_para: dest, p_asunto: m.asunto, p_cuerpo: m.cuerpoCorreo, p_pedido: String(x.p.numero), p_archivo_pdf: ruta });
+    const r = await SB.rpc('pedido_correo_encolar', { p_pedido_id: x.id, p_para: dest, p_asunto: m.asunto, p_cuerpo: m.cuerpoCorreo, p_archivo_pdf: ruta });
     if (r.error) throw new Error(r.error.message);
     const fila = Array.isArray(r.data) ? r.data[0] : r.data;
     if (fila && fila.duplicado) return { ok: true, texto: '✉️ Este correo ya estaba en la cola de envío (no se duplicó).' };
@@ -287,8 +287,8 @@ async function envioReintentar(id, canal) {
     const e = await envioCargar(id);
     const u = e.envios.find((y) => y.canal === canal);
     if (u && u.canal === 'correo' && u.correo_cola_id != null && u.estado !== 'error') {
-      // el correo se encolo pero la entrega fallo: se re-encola ESE mismo correo (correo_reintentar)
-      const r = await SB.rpc('correo_reintentar', { p_id: u.correo_cola_id }); if (r.error) throw new Error(r.error.message);
+      // el correo se encolo pero la entrega fallo: se re-encola ESE mismo correo (pedido_correo_reintentar)
+      const r = await SB.rpc('pedido_correo_reintentar', { p_cola_id: u.correo_cola_id }); if (r.error) throw new Error(r.error.message);
       await envioRegistrar({ id }, 'correo', u.destinatario, 'pendiente', u.correo_cola_id, null);
     } else {
       // fallo antes de encolarse (o WhatsApp): se prepara de nuevo el envio de ese canal
