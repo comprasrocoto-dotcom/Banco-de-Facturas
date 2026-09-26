@@ -68,7 +68,7 @@ insert into perfil_permiso (perfil_id, permiso)
 select a.id, c.permiso from perfil_acceso a join permiso_catalogo c on
   (a.clave = 'administrador')
   or (a.clave = 'pagos' and c.permiso in ('facturas.ver','facturas.subir','facturas.sellar','facturas.asignar','pedidos.ver','pedidos.crear','pedidos.amarrar','pedidos.enviar_proveedor','cruce_dian.ver','precios.ver'))
-  or (a.clave = 'sede'  and c.permiso in ('facturas.ver','facturas.sellar','pedidos.ver','pedidos.crear','pedidos.amarrar'))
+  or (a.clave = 'sede'  and c.permiso in ('facturas.ver','facturas.sellar','pedidos.ver','pedidos.crear','pedidos.amarrar','pedidos.enviar_proveedor'))   -- 26/09/2026: la sede tambien envia SUS pedidos (ver sedes_envian_pedidos.sql)
 on conflict do nothing;
 
 alter table perfiles add column if not exists perfil_id int references perfil_acceso(id);
