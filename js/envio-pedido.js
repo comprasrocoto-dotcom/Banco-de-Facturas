@@ -58,15 +58,15 @@
   // La unidad es la de COMPRA que ya maneja el sistema (articulos.unimedida_compra; si no, la guardada en la linea). NO se convierte ni se inventa.
   function unidadDe(linea, unidades) { return t((unidades && linea && unidades[linea.codigo]) || (linea && linea.unidad)); }
 
-  // datos: { pedido, proveedor, lineas:[{codigo,insumo,cantidad,unidad}], unidades:{codigo:unidad}, empresa, intento, enlacePdf }
-  //   enlacePdf: enlace directo al PDF de la orden (WhatsApp no deja adjuntar archivos desde una pagina: el proveedor lo abre con un toque). El correo lleva el PDF ADJUNTO.
+  // datos: { pedido, proveedor, lineas:[{codigo,insumo,cantidad,unidad}], unidades:{codigo:unidad}, empresa, intento, detalleWhatsapp }
+  //   detalleWhatsapp === false: el texto de WhatsApp NO lista los productos (van en el PDF de la orden, que se manda aparte como archivo). Si no hay PDF se lista el detalle (para que el proveedor no reciba un pedido vacio).
   //   intento > 1 = reenvio: el asunto lo dice (y asi la cola no lo toma por un duplicado del envio anterior)
   function armarMensajes(datos) {
     const p = (datos && datos.pedido) || {}, prov = (datos && datos.proveedor) || {};
     const nombre = t(prov.razon_social || prov.nombre_comercial || p.proveedor_texto || p.proveedor);
     const numero = t(p.numero), fecha = fechaCorta(p.fecha), obs = t(p.observacion_pedido), empresa = t(datos && datos.empresa);
     const items = ((datos && datos.lineas) || []).map((l) => ({ producto: t(l.insumo || l.codigo), cantidad: cantidadTexto(l.cantidad), unidad: unidadDe(l, datos.unidades) }));
-    const reenvio = Number(datos && datos.intento) > 1, enlacePdf = t(datos && datos.enlacePdf);
+    const reenvio = Number(datos && datos.intento) > 1, detalleWa = !(datos && datos.detalleWhatsapp === false);
     // 2do envio = "REENVÍO", 3ro = "REENVÍO 2"...: asi la cola (que descarta lo identico del mismo dia) no confunde un reenvio con el envio anterior
     const marca = reenvio ? (Number(datos.intento) === 2 ? 'REENVÍO - ' : `REENVÍO ${Number(datos.intento) - 1} - `) : '';
     const asunto = `${marca}Pedido #${numero} - ${nombre}`.trim();
@@ -86,10 +86,8 @@
       'Hola, buen día.', '',
       `Compartimos el pedido #${numero}.`, '',
       `Fecha: ${fecha}`, '',
-      'Detalle:', '',
-      ...items.map((i) => `• ${i.producto} — ${i.cantidad}${i.unidad ? ' ' + i.unidad : ''}`), '',
+      ...(detalleWa ? ['Detalle:', '', ...items.map((i) => `• ${i.producto} — ${i.cantidad}${i.unidad ? ' ' + i.unidad : ''}`), ''] : []),
       ...(obs ? [`Observaciones: ${obs}`, ''] : []),
-      ...(enlacePdf ? ['📄 Orden de compra en PDF (con los códigos de producto):', enlacePdf, ''] : []),
       'Por favor confirmar disponibilidad y fecha estimada de entrega.', '',
       'Muchas gracias.',
     ].join('\n');
@@ -107,8 +105,9 @@
   const ETIQUETAS = {
     pendiente: 'PENDIENTE', enviando: 'ENVIANDO', enviado: 'ENVIADO', error: 'ERROR',
     enlace_generado: 'ENLACE ABIERTO — falta confirmar el envío en WhatsApp', confirmado_manual: 'ENVIADO (confirmado por el usuario)',
+    aceptado: 'ENVIADO POR WHATSAPP BUSINESS (aceptado)',   // API oficial: WhatsApp acepto el mensaje con el PDF adjunto
   };
-  const EXITO = new Set(['enviado', 'confirmado_manual']);
+  const EXITO = new Set(['enviado', 'confirmado_manual', 'aceptado']);
   const mas = (a, b) => (String(b.creado_en || '').localeCompare(String(a.creado_en || '')) || (Number(b.id) || 0) - (Number(a.id) || 0));
 
   // El estado REAL de un correo lo dice la cola (el envio es asincrono: lo despacha el vigilante); agotado = error.
