@@ -289,9 +289,9 @@ async function sesion(u){
   // (25/09/2026) Usuario desactivado: no entra (el servidor tambien lo bloquea: mi_rol() devuelve 'inactivo')
   if(perfil.activo===false){ await SB.auth.signOut(); usuario=null; perfil=null; $("lerr").textContent="Tu usuario está desactivado. Habla con el administrador."; return; }
   await cargarPermisos();     // permisos del perfil (js/usuarios-ui.js); si falla, los de origen de su nivel
-  $("btnManual").style.display=MANUALES_PERM.some(m=>can("manual."+m))?"":"none";     // el administrador decide quién ve qué manual (Admin > Usuarios y perfiles > Perfiles > grupo Manual)
   try{ const ra=await SB.rpc("mi_alcance"); alcanceUsuario=ra.error?null:ra.data; }catch(e){ alcanceUsuario=null; }   // sedes del analista (la base ya filtra; esto solo acota los selectores)
   $("login").style.display="none"; $("app").style.display="block";
+  try{ pintarBotonManual(); }catch(e){}     // 📖 Manual: solo si su perfil tiene algun manual habilitado
   if(perfil.debe_cambiar_clave) await exigirCambioClave();     // contraseña temporal: hay que cambiarla antes de seguir
   const s=perfil.sedes;
   if(perfil.rol==="admin"||perfil.rol==="pagos"){$("btnsubir").style.display="inline-block";$("barraDescarga").style.display="flex";$("m-cruce").style.display="inline-block";$("m-precios").style.display="inline-block";}
@@ -2033,6 +2033,7 @@ async function relanzar(){
 // (26/09/2026) Manual de uso. El texto lo entrega la base solo a quien tiene el permiso manual.sede / manual.analista / manual.admin (tabla manual_pagina + RLS).
 // Aqui se abre el de su perfil si lo tiene habilitado; si no, el primero que sí tenga. Sin ninguno: se avisa.
 const MANUALES_PERM=["sede","analista","admin"];
+function pintarBotonManual(){ $("btnManual").style.display=MANUALES_PERM.some(m=>can("manual."+m))?"":"none"; }   // el administrador decide quién ve qué manual (Admin > Usuarios y perfiles > Perfiles > grupo Manual)
 function abrirManual(){
   const r=(typeof perfil!=="undefined"&&perfil&&perfil.rol)||"";
   const propio=r==="admin"?"admin":(r==="pagos"?"analista":"sede");
