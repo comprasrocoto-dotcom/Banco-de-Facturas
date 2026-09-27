@@ -97,6 +97,7 @@ tr:hover td{background:#f1f5f9}
       <option value="">📍 Todas las sedes</option>
     </select>
     <span class="sp"></span>
+    <button id="btnManual" title="Manual de uso de tu perfil (se abre en otra pestaña)" onclick="abrirManual()">📖 Manual</button>
     <button onclick="salir()">Salir</button>
   </header>
   <div class="wrap">
@@ -2027,6 +2028,12 @@ async function relanzar(){
   if(r.error){ alert(msgPedirOrden(r.error)); return; }
   await cargarOrdenes();
   alert("✅ Orden de relanzamiento enviada.\n\nEl VIGILANTE la toma en menos de 30 segundos (si está encendido en tu PC).");
+}
+// (26/09/2026) Manual de uso: cada perfil abre el suyo (admin / analista = nivel "pagos" / sede) en otra pestaña; desde ahí se puede pasar a los otros.
+function abrirManual(){
+  const r=(typeof perfil!=="undefined"&&perfil&&perfil.rol)||"";
+  const p=r==="admin"?"admin":(r==="pagos"?"analista":"sede");
+  window.open("/manual-"+p,"_blank","noopener");
 }
 async function pedirIngresos(){
   const eleg=pedidos.filter(p=>!p.pedido_erp && p.factura_cufe);
