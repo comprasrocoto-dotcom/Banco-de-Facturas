@@ -246,6 +246,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/unidad-nueva.js"></script>
 <script src="js/unidad-nueva-ui.js"></script>
 <script src="js/decisiones-agente.js"></script>
+<script src="js/agente-avisos.js"></script>
 <script src="js/nombres-por-decidir.js"></script>
 <script src="js/nombres-por-decidir-ui.js"></script>
 <script src="js/ingreso-panel.js"></script>
@@ -838,7 +839,7 @@ function pintarAdmin(){
 // cuenta en la base (función unidad_registrar_correccion) y sube la confianza de la regla.
 const escAg=s=>String(s==null?"":s).replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
 const fhAg=d=>d?new Date(d).toLocaleString("es-CO",{timeZone:"America/Bogota",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"";
-let ag={cargado:false,cargando:false,rev:[],eventos:[],validaciones:[],reglas:[],correos:[],dian:[],productos:[],error:"",unidades:[],aliasMapa:{}};
+let ag={cargado:false,cargando:false,rev:[],eventos:[],validaciones:[],reglas:[],correos:[],dian:[],productos:[],error:"",unidades:[],aliasMapa:{},avisos:[]};
 // "Descargas de la DIAN" queda plegada (no aporta a diario): se abre solo si uno quiere, y se recuerda en este navegador.
 let agDianAbierto=(()=>{try{return localStorage.getItem("agDianAbierto")==="1";}catch(e){return false;}})();
 function agToggleDian(){agDianAbierto=!agDianAbierto;try{localStorage.setItem("agDianAbierto",agDianAbierto?"1":"0");}catch(e){/* sin storage: solo no se recuerda */}pintarAdmin();}
@@ -846,15 +847,16 @@ async function cargarAgente(forzar){
   if(ag.cargando||(ag.cargado&&!forzar)) return;
   ag.cargando=true;
   try{
-    const [r1,r2,r3,r4,r5,r6]=await Promise.all([
+    const [r1,r2,r3,r4,r5,r6,r7]=await Promise.all([
       SB.from("unidad_revision").select("*").eq("estado","pendiente").order("creado_en",{ascending:false}).limit(200),
       SB.from("unidad_evento").select("*").eq("tipo","decision_agente").is("oculto_en",null).order("creado_en",{ascending:false}).limit(200),
       SB.from("regla_unidad_resumen").select("*").order("ultima_en",{ascending:false}).limit(300),
       SB.from("correo_cola").select("*").order("creado_en",{ascending:false}).limit(60),
       SB.from("dian_descarga").select("*").order("creado_en",{ascending:false}).limit(60),
-      SB.from("unidad_evento").select("clave,tipo,unidad_usuario,creado_en").in("tipo",["correccion_usuario","confirmacion_admin"]).order("creado_en",{ascending:false}).limit(1000)]);   // lo que la persona ya dejo firme
+      SB.from("unidad_evento").select("clave,tipo,unidad_usuario,creado_en").in("tipo",["correccion_usuario","confirmacion_admin"]).order("creado_en",{ascending:false}).limit(1000),   // lo que la persona ya dejo firme
+      SB.from("agente_aviso").select("*").eq("estado","pendiente").order("creado_en",{ascending:false}).limit(300)]);
     const e=r1.error||r2.error||r3.error||r4.error||r5.error; ag.error=e?e.message:"";
-    ag.rev=r1.data||[]; ag.eventos=r2.data||[]; ag.reglas=r3.data||[]; ag.correos=r4.data||[]; ag.dian=r5.data||[]; ag.validaciones=r6.data||[]; ag.cargado=true;
+    ag.rev=r1.data||[]; ag.eventos=r2.data||[]; ag.reglas=r3.data||[]; ag.correos=r4.data||[]; ag.dian=r5.data||[]; ag.validaciones=r6.data||[]; ag.avisos=(r7&&r7.data)||[]; ag.cargado=true;
     await cargarUnidadesAg();
     await cargarNombresDecidir();
   }catch(e){ ag.error=e.message; }
@@ -897,6 +899,19 @@ function agConfirmarRegla(i){ const r=ag.reglas[i]; if(!r) return;
   if(!confirm("Confirmar como regla firme: "+r.producto_norm+" → "+r.unidad+"\n(queda con confianza ALTA)")) return;
   registrarUnidadAg({clave:r.clave,desc:r.descripcion_original,provNombre:r.proveedor_nombre,unidadAgente:r.unidad,unidad:r.unidad,admin:true}); }
 const badgeNivelAg=n=>`<span class="badge ${n==="alta"?"st-sellada":(n==="media"?"st-asignada":"st-pool")}">confianza ${escAg(n)}</span>`;
+// "Avisos del agente": solo los marca vistos (no cambia el pedido ni la factura). Si falla, la lista sigue como estaba.
+async function agAvisoResolver(id){
+  const {error}=await SB.rpc("agente_aviso_resolver",{p_ids:[id],p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||"admin"});
+  if(error){ alert("No se pudo marcar: "+error.message); return; }
+  await cargarAgente(true);
+}
+async function agAvisosResolverTodos(){
+  const v=AgenteAvisos.pendientes(ag.avisos); if(!v.length) return;
+  if(!confirm("¿Marcar como vistos los "+v.length+" avisos que se ven? No cambia nada del pedido ni de la factura.")) return;
+  const {error}=await SB.rpc("agente_aviso_resolver",{p_ids:v.map(a=>a.id),p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||"admin"});
+  if(error){ alert("No se pudo marcar: "+error.message); return; }
+  await cargarAgente(true);
+}
 async function agReintentarDian(i){ const m=ag.dian[i]; if(!m) return;
   const {error}=await SB.rpc("dian_reintentar",{p_id:m.id});
   if(error){ alert("No se pudo reintentar: "+error.message); return; }
@@ -911,6 +926,16 @@ function pintarAgente(c,q){
   const esAdmin=perfil&&perfil.rol==="admin";
   let h="";
   if(ag.error) h+=`<div class="card" style="border-color:#b45309">⚠️ No pude leer todo: ${escAg(ag.error)} <button onclick="cargarAgente(true)">Reintentar</button></div>`;
+  // 0) Avisos del agente: lo que le paso durante un ingreso y NO es "unidad" ni "nombre" sin decidir (esas tienen su propia lista mas abajo).
+  //    Antes esto solo llegaba por correo; si a alguien se le pasaba, se perdia.
+  const avs=AgenteAvisos.pendientes(ag.avisos).map((a)=>({a,i:ag.avisos.indexOf(a)})).filter(({a})=>ok(a.motivo+" "+(a.detalle||"")+" "+(a.pedido_numero||""))&&filtraFechaAdmin(a));
+  h+=`<h3 style="margin:8px 0">Avisos del agente <span class="badge ${avs.length?"st-pool":"st-sellada"}">${avs.length}</span>${(EXPORTAR.actual.agente_avisos=avs.map(x=>x.a),"")} ${exportarBotones("agente_avisos")}${avs.length?`<button class="s" onclick="agAvisosResolverTodos()" title="Los marca como vistos; no cambia nada del pedido ni de la factura">Marcar todos vistos</button>`:""}</h3><div class="mut" style="margin-bottom:6px">Cosas que le pasaron al agente en un ingreso y no encajan en "Unidades" ni "Nombres por decidir": revisa si hay que ajustar algo (un dato, una cuenta del ERP) o corregirlo a mano en el pedido/ERP.</div>`;
+  h+=avs.length?avs.map(({a,i})=>`<div class="card" style="margin:6px 0"><div class="row">
+      <div style="flex:3"><div class="emisor">${escAg(a.motivo)}</div>
+      <div class="mut">${a.pedido_numero?escAg(a.pedido_numero)+" · ":""}${fhAg(a.creado_en)}</div>
+      ${a.detalle&&a.detalle!==a.motivo?`<div class="mut" style="margin-top:2px">${escAg(a.detalle)}</div>`:""}</div>
+      <button class="s" onclick="agAvisoResolver(${a.id})" title="Lo marca visto; no cambia nada del pedido ni de la factura">Marcar visto</button>
+    </div></div>`).join(""):'<div class="vacio">Sin avisos pendientes. ✅</div>';
   // 1) Pendientes: el agente NO inventó la unidad y espera que una persona decida
   const rev=ag.rev.map((r,i)=>({r,i})).filter(({r})=>ok(r.descripcion_original+" "+r.proveedor_nombre)&&filtraFechaAdmin(r));
   h+=`<h3 style="margin:8px 0">Unidades por decidir <span class="badge st-pool">${rev.length}</span>${(EXPORTAR.actual.agente_pend=rev.map(x=>x.r),"")} ${exportarBotones("agente_pend")}</h3><div class="mut" style="margin-bottom:6px">El agente no inventa la unidad: si no está seguro, la línea NO se anexa y queda aquí.</div>`;
