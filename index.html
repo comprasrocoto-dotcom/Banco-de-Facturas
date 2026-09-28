@@ -249,6 +249,8 @@ tr:hover td{background:#f1f5f9}
 <script src="js/agente-avisos.js"></script>
 <script src="js/nombres-por-decidir.js"></script>
 <script src="js/nombres-por-decidir-ui.js"></script>
+<script src="js/proveedores-por-decidir.js"></script>
+<script src="js/proveedores-por-decidir-ui.js"></script>
 <script src="js/ingreso-panel.js"></script>
 <script src="js/admin-editar.js"></script>
 <script src="js/marca-proveedores.js"></script>
@@ -839,7 +841,7 @@ function pintarAdmin(){
 // cuenta en la base (función unidad_registrar_correccion) y sube la confianza de la regla.
 const escAg=s=>String(s==null?"":s).replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
 const fhAg=d=>d?new Date(d).toLocaleString("es-CO",{timeZone:"America/Bogota",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"";
-let ag={cargado:false,cargando:false,rev:[],eventos:[],validaciones:[],reglas:[],correos:[],dian:[],productos:[],error:"",unidades:[],aliasMapa:{},avisos:[]};
+let ag={cargado:false,cargando:false,rev:[],eventos:[],validaciones:[],reglas:[],correos:[],dian:[],productos:[],error:"",unidades:[],aliasMapa:{},avisos:[],proveedoresRev:[]};
 // "Descargas de la DIAN" queda plegada (no aporta a diario): se abre solo si uno quiere, y se recuerda en este navegador.
 let agDianAbierto=(()=>{try{return localStorage.getItem("agDianAbierto")==="1";}catch(e){return false;}})();
 function agToggleDian(){agDianAbierto=!agDianAbierto;try{localStorage.setItem("agDianAbierto",agDianAbierto?"1":"0");}catch(e){/* sin storage: solo no se recuerda */}pintarAdmin();}
@@ -859,6 +861,7 @@ async function cargarAgente(forzar){
     ag.rev=r1.data||[]; ag.eventos=r2.data||[]; ag.reglas=r3.data||[]; ag.correos=r4.data||[]; ag.dian=r5.data||[]; ag.validaciones=r6.data||[]; ag.avisos=(r7&&r7.data)||[]; ag.cargado=true;
     await cargarUnidadesAg();
     await cargarNombresDecidir();
+    await cargarProveedoresPorDecidir();
   }catch(e){ ag.error=e.message; }
   ag.cargando=false; if(adminVista==="agente") pintarAdmin();
 }
@@ -958,6 +961,19 @@ function pintarAgente(c,q){
       <div class="mut" id="agpm_${i}" style="color:#991b1b"></div></div>
       <button class="p" id="agpb_${i}" onclick="agProductoEnsenar(${i})">Enseñar</button>
       <button class="d" onclick="agProductoDescartar(${i})">No es lo mismo</button>
+    </div></div>`).join(""):'<div class="vacio">Nada pendiente. ✅</div>';
+  // 1a-tris) Proveedores por decidir: el bot de pedidos no encontro este proveedor en el ERP al montar un pedido
+  const pvd=(ag.proveedoresRev||[]).map((r,i)=>({r,i})).filter(({r})=>ok(r.proveedor_texto+" "+(r.pedido_numero||""))&&filtraFechaAdmin(r));
+  h+=`<h3 style="margin:18px 0 8px">Proveedores por decidir <span class="badge st-pool">${pvd.length}</span>${(EXPORTAR.actual.agente_proveedores=pvd.map(x=>x.r),"")} ${exportarBotones("agente_proveedores")}</h3><div class="mut" style="margin-bottom:6px">El agente no adivina el proveedor: si el nombre del pedido no coincide con el que usa el ERP, queda aquí. Elige (o escribe) el nombre EXACTO que muestra el ERP — queda aprendido por NIT y no se vuelve a preguntar. Si el proveedor de verdad no existe en el ERP, dale "No existe en el ERP".</div>`;
+  h+=pvd.length?pvd.map(({r,i})=>`<div class="card" style="margin:6px 0"><div class="row">
+      <div style="flex:3"><div class="emisor">${escAg(r.proveedor_texto)}</div>
+      <div class="mut">${escAg(r.pedido_numero||"")} · ${fhAg(r.creado_en)}</div>
+      ${(r.sugerencias||[]).length?`<div class="mut" style="margin-top:4px">¿Es alguno de estos? ${r.sugerencias.map(s=>`<button class="s" style="margin:2px 4px 0 0;padding:3px 8px;font-size:12px" onclick="agProveedorElegir(${i},'${escAg(s).replace(/'/g,"&#39;")}')">${escAg(s)}</button>`).join("")}</div>`:""}
+      <input id="agvi_${i}" placeholder="NIT del proveedor" value="${escAg(r.proveedor_nit||"")}" style="margin-top:6px;max-width:220px" autocomplete="off">
+      <input id="agvn_${i}" placeholder="Nombre exacto que muestra el ERP" value="${(r.sugerencias||[]).length===1?escAg(r.sugerencias[0]):""}" style="margin-top:6px" autocomplete="off">
+      <div class="mut" id="agvm_${i}" style="color:#991b1b"></div></div>
+      <button class="p" id="agvb_${i}" onclick="agProveedorEnsenar(${i})">Enseñar</button>
+      <button class="d" onclick="agProveedorDescartar(${i})">No existe en el ERP</button>
     </div></div>`).join(""):'<div class="vacio">Nada pendiente. ✅</div>';
   // 1b) Correos del agente: estado, intentos y último error (se reintentan solos)
   const cor=ag.correos.map((m,i)=>({m,i})).filter(({m})=>ok(m.asunto+" "+m.destinatario+" "+(m.pedido_numero||""))&&filtraFechaAdmin(m));

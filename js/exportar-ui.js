@@ -68,6 +68,8 @@ EXPORTAR.defs.admin_cat = { nombre: 'que_le_compro_a_cada_proveedor', hoja: 'QuÃ
 
 EXPORTAR.defs.agente_avisos = { nombre: 'avisos_del_agente', hoja: 'Avisos del agente', columnas: [
   { t: 'Motivo', v: (r) => r.motivo }, { t: 'Detalle', v: (r) => r.detalle }, { t: 'Pedido', v: (r) => r.pedido_numero }, { t: 'Factura', v: (r) => r.factura_cufe }, { t: 'Fecha', v: (r) => (r.creado_en ? String(r.creado_en).slice(0, 16).replace('T', ' ') : null) } ] };
+EXPORTAR.defs.agente_proveedores = { nombre: 'proveedores_por_decidir', hoja: 'Proveedores por decidir', columnas: [
+  { t: 'Proveedor (texto del pedido)', v: (r) => r.proveedor_texto }, { t: 'NIT', v: (r) => r.proveedor_nit }, { t: 'Pedido', v: (r) => r.pedido_numero }, { t: 'Fecha', v: (r) => (r.creado_en ? String(r.creado_en).slice(0, 16).replace('T', ' ') : null) }, { t: 'Sugerencias del ERP', v: (r) => (r.sugerencias || []).join(' | ') } ] };
 EXPORTAR.defs.agente_pend = { nombre: 'unidades_por_decidir', hoja: 'Unidades por decidir', columnas: [
   { t: 'DescripciÃ³n', v: (r) => r.descripcion_original }, { t: 'Proveedor', v: (r) => r.proveedor_nombre }, { t: 'Pedido', v: (r) => r.pedido_numero }, { t: 'Fecha', v: (r) => (r.creado_en ? String(r.creado_en).slice(0, 16).replace('T', ' ') : null) }, { t: 'Motivo', v: (r) => r.motivo }, { t: 'Sugerencia', v: (r) => r.sugerencia } ] };
 EXPORTAR.defs.agente_nombres = { nombre: 'nombres_por_decidir', hoja: 'Nombres por decidir', columnas: [
