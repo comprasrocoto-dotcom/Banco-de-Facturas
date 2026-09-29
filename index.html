@@ -845,6 +845,12 @@ let ag={cargado:false,cargando:false,rev:[],eventos:[],validaciones:[],reglas:[]
 // "Descargas de la DIAN" queda plegada (no aporta a diario): se abre solo si uno quiere, y se recuerda en este navegador.
 let agDianAbierto=(()=>{try{return localStorage.getItem("agDianAbierto")==="1";}catch(e){return false;}})();
 function agToggleDian(){agDianAbierto=!agDianAbierto;try{localStorage.setItem("agDianAbierto",agDianAbierto?"1":"0");}catch(e){/* sin storage: solo no se recuerda */}pintarAdmin();}
+// (29/09/2026) "Correos del agente" y "Reglas aprendidas" crecen sin parar a medida que el agente aprende y manda correos; por defecto solo se
+// ve lo que sigue sin resolver (correos que no se han enviado, reglas que piden revisión) y "Ver historial" trae TODO. Se recuerda en este navegador.
+let agCorreosHistorial=(()=>{try{return localStorage.getItem("agCorreosHistorial")==="1";}catch(e){return false;}})();
+function agToggleCorreosHistorial(){agCorreosHistorial=!agCorreosHistorial;try{localStorage.setItem("agCorreosHistorial",agCorreosHistorial?"1":"0");}catch(e){/* sin storage: solo no se recuerda */}pintarAdmin();}
+let agReglasHistorial=(()=>{try{return localStorage.getItem("agReglasHistorial")==="1";}catch(e){return false;}})();
+function agToggleReglasHistorial(){agReglasHistorial=!agReglasHistorial;try{localStorage.setItem("agReglasHistorial",agReglasHistorial?"1":"0");}catch(e){/* sin storage: solo no se recuerda */}pintarAdmin();}
 async function cargarAgente(forzar){
   if(ag.cargando||(ag.cargado&&!forzar)) return;
   ag.cargando=true;
@@ -975,10 +981,12 @@ function pintarAgente(c,q){
       <button class="p" id="agvb_${i}" onclick="agProveedorEnsenar(${i})">Enseñar</button>
       <button class="d" onclick="agProveedorDescartar(${i})">No existe en el ERP</button>
     </div></div>`).join(""):'<div class="vacio">Nada pendiente. ✅</div>';
-  // 1b) Correos del agente: estado, intentos y último error (se reintentan solos)
-  const cor=ag.correos.map((m,i)=>({m,i})).filter(({m})=>ok(m.asunto+" "+m.destinatario+" "+(m.pedido_numero||""))&&filtraFechaAdmin(m));
-  const malos=cor.filter(({m})=>m.estado==="error"||m.estado==="agotado").length;
-  h+=`<h3 style="margin:18px 0 8px">Correos del agente <span class="badge ${malos?"st-pool":"st-sellada"}">${malos?malos+" con problema":"todo enviado"}</span></h3><div class="mut" style="margin-bottom:6px">Si un correo falla se reintenta solo (a los 2 min, 10 min, 30 min y 2 h). Después de 5 intentos queda “agotado” y lo puedes reintentar aquí.</div>`;
+  // 1b) Correos del agente: por defecto solo lo que AUN NO esta enviado (pendiente/enviando/error/agotado); los ya enviados
+  // no aportan a diario y quedan en el Historial (se recuerda en este navegador si se dejo abierto).
+  const corTodos=ag.correos.map((m,i)=>({m,i})).filter(({m})=>ok(m.asunto+" "+m.destinatario+" "+(m.pedido_numero||""))&&filtraFechaAdmin(m));
+  const malos=corTodos.filter(({m})=>m.estado==="error"||m.estado==="agotado").length;
+  const cor=agCorreosHistorial?corTodos:corTodos.filter(({m})=>m.estado!=="enviado");
+  h+=`<h3 style="margin:18px 0 8px">Correos del agente <span class="badge ${malos?"st-pool":"st-sellada"}">${malos?malos+" con problema":"todo enviado"}</span> <button class="s" onclick="agToggleCorreosHistorial()">${agCorreosHistorial?"Ocultar":"Ver historial ("+corTodos.length+")"}</button></h3><div class="mut" style="margin-bottom:6px">Si un correo falla se reintenta solo (a los 2 min, 10 min, 30 min y 2 h). Después de 5 intentos queda “agotado” y lo puedes reintentar aquí.</div>`;
   h+=cor.length?cor.map(({m,i})=>{const est={enviado:"st-sellada",enviando:"st-asignada",pendiente:"st-asignada",error:"st-pool",agotado:"st-pool"}[m.estado]||"";
     return `<div class="card" style="margin:6px 0"><div class="row">
       <div style="flex:3"><div class="emisor">${escAg(m.asunto)}</div>
@@ -987,7 +995,7 @@ function pintarAgente(c,q){
       ${m.ultimo_error?`<div class="mut" style="color:#b45309">Último error: ${escAg(String(m.ultimo_error).slice(0,300))}</div>`:""}</div>
       <span class="badge ${est}">${escAg(m.estado)}</span>
       ${(m.estado==="error"||m.estado==="agotado")?`<button onclick="agReintentarCorreo(${i})">Reintentar ahora</button>`:""}
-    </div></div>`;}).join(""):'<div class="vacio">Todavía no hay correos registrados en la cola.</div>';
+    </div></div>`;}).join(""):(corTodos.length?'<div class="vacio">Sin pendientes: todos los correos ya se enviaron. ✅</div>':'<div class="vacio">Todavía no hay correos registrados en la cola.</div>');
   // 1c) Descargas de la DIAN: facturas que el robot baja de la DIAN y sube al banco
   const dn=ag.dian.map((m,i)=>({m,i})).filter(({m})=>ok((m.documento||"")+" "+(m.emisor||"")+" "+(m.nit_emisor||""))&&filtraFechaAdmin(m));
   const dMalas=dn.filter(({m})=>m.estado==="error").length, dEnCurso=dn.filter(({m})=>m.estado!=="subida"&&m.estado!=="error").length;
@@ -1012,10 +1020,13 @@ function pintarAgente(c,q){
       <div class="mut">${escAg(d.proveedor||"—")} · ${escAg(e.pedido_numero||"")} · ${fhAg(e.creado_en)} · decidió <b>${escAg(e.unidad_agente)}</b> por ${escAg(e.fuente)} (${escAg(e.confianza||"—")})${d.requiere_revision?" · ⚠️ requiere revisión":""}</div></div>
       <select id="agev_${i}" style="width:auto;margin:0" onchange="agUnidadCambio(this)">${optsUnidadAg(e.unidad_agente)}</select>
       <button onclick="agCorregirEv(${i})">Corregir</button><button class="s" onclick="agQuitarEv(${i})" title="Sacarla de esta lista (no cambia ninguna regla)">Quitar</button></div></div>`;}).join(""):'<div class="vacio">Nada por revisar: todas las decisiones del agente ya se corrigieron, confirmaron o quitaron.</div>';
-  // 3) Reglas aprendidas
-  const rgs=ag.reglas.map((r,i)=>({r,i})).filter(({r})=>ok(r.producto_norm+" "+r.proveedor_nombre+" "+r.unidad)&&filtraFechaAdmin(r))
+  // 3) Reglas aprendidas: por defecto solo las que PIDEN revisión (contradictorias o requiere_revision); las ya firmes
+  // no aportan a diario y quedan en el Historial (se recuerda en este navegador si se dejo abierto). El Excel/CSV exporta TODAS igual.
+  const rgsTodas=ag.reglas.map((r,i)=>({r,i})).filter(({r})=>ok(r.producto_norm+" "+r.proveedor_nombre+" "+r.unidad)&&filtraFechaAdmin(r))
     .sort((a,b)=>(Number(b.r.requiere_revision)-Number(a.r.requiere_revision))||0);
-  h+=`<h3 style="margin:18px 0 8px">Reglas aprendidas <span class="badge">${rgs.length}</span>${(EXPORTAR.actual.agente_reglas=rgs.map(x=>x.r),"")} ${exportarBotones("agente_reglas")}</h3><div class="mut" style="margin-bottom:6px">1–2 correcciones = baja · 3–4 = media · 5+ (consistentes) o confirmada por admin = alta.</div>`;
+  const rgsAtencion=rgsTodas.filter(({r})=>r.requiere_revision||r.estado==="contradictoria");
+  const rgs=agReglasHistorial?rgsTodas:rgsAtencion;
+  h+=`<h3 style="margin:18px 0 8px">Reglas aprendidas <span class="badge ${rgsAtencion.length?"st-pool":"st-sellada"}">${rgsAtencion.length?rgsAtencion.length+" por revisar":"al día"}</span>${(EXPORTAR.actual.agente_reglas=rgsTodas.map(x=>x.r),"")} ${exportarBotones("agente_reglas")} <button class="s" onclick="agToggleReglasHistorial()">${agReglasHistorial?"Ocultar":"Ver historial ("+rgsTodas.length+")"}</button></h3><div class="mut" style="margin-bottom:6px">1–2 correcciones = baja · 3–4 = media · 5+ (consistentes) o confirmada por admin = alta.</div>`;
   h+=rgs.length?rgs.map(({r,i})=>`<div class="card" style="margin:6px 0"><div class="row">
       <div style="flex:3"><div class="emisor">${escAg(r.producto_norm)}${r.presentacion?" · "+escAg(r.presentacion):""} → <b>${escAg(r.unidad)}</b></div>
       <div class="mut">${escAg(r.proveedor_nombre||r.proveedor_nit||"—")} · ${r.n} confirmación(es)${r.contradicciones?" · "+r.contradicciones+" en contra":""} · ${fhAg(r.ultima_en)}${r.corregido_por?" · "+escAg(r.corregido_por):""}</div></div>
@@ -1023,7 +1034,7 @@ function pintarAgente(c,q){
       <span class="badge ${r.estado==="contradictoria"?"st-pool":"st-sellada"}">${escAg(r.estado)}</span>
       ${r.requiere_revision?'<span class="badge st-pool">⚠️ revisar</span>':""}
       ${esAdmin&&!r.confirmada_admin?`<button class="p" onclick="agConfirmarRegla(${i})">Confirmar</button>`:""}
-    </div></div>`).join(""):'<div class="vacio">Todavía no hay reglas: se crean cuando alguien corrige o decide una unidad.</div>';
+    </div></div>`).join(""):(rgsTodas.length?'<div class="vacio">Nada por revisar: las reglas aprendidas están firmes. ✅</div>':'<div class="vacio">Todavía no hay reglas: se crean cuando alguien corrige o decide una unidad.</div>');
   c.innerHTML=h;
 }
 // Artículos que se le compran a un proveedor (del histórico de compras) + precio editable
