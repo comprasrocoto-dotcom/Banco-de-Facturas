@@ -470,7 +470,7 @@ async function cambiarSedeNP(){
   $("np_sub").innerHTML='<option value="">Todas las subfamilias</option>';
   pintarProductos();
 }
-async function filtrarArticulos(){
+async function filtrarArticulos(mantenerCant){
   const id=Number($("np_prov").value||0);
   provArts=[];
   if(typeof pintarContactoProv==="function") pintarContactoProv();   // tarjeta con NIT / correo / WhatsApp del proveedor elegido (js/envio-pedido-ui.js)
@@ -501,9 +501,17 @@ async function filtrarArticulos(){
   } else {
     $("np_arts_info").textContent="";
   }
-  npCant={}; $("np_q").value=""; pintarProductos();
+  if(!mantenerCant){ npCant={}; $("np_q").value=""; }
+  pintarProductos();
 }
 let npCant={};
+// Proveedor(es) que venden este articulo, segun catalogo_compras/marca_catalogo (misma fuente que ya usa listaArticulos).
+function proveedoresDeArticulo(cod){
+  return [...new Set(cat.filter(c=>c.codigo_barras===cod).map(c=>c.id_proveedor))];
+}
+function nombreProveedorNP(id){
+  const p=(provs||[]).find(x=>x.id===id); return p?(p.razon_social||p.nombre_comercial||""):"";
+}
 function numEs(v){ if(v==null) return 0; const s=String(v).trim().replace(/\s/g,"").replace(",","."); const x=Number(s); return isNaN(x)?0:x; }
 function pintarProductos(){
   const q=($("np_q").value||"").trim().toLowerCase();
@@ -519,10 +527,17 @@ function pintarProductos(){
     if(!q) return true;
     return ((a.codigo||"")+" "+(a.nombre||"")).toLowerCase().includes(q);
   });
+  const provElegido=Number($("np_prov").value||0);
   $("np_tabla").innerHTML = filas.slice(0,400).map(a=>{
     const mc=mmCeldas(a);
     const c=npCant[a.codigo]||0;
-    return `<tr><td class="mut">${a.codigo||""}</td><td>${a.nombre||""}</td>
+    let pista="";
+    if(!provElegido && !provArts.length){
+      const ids=proveedoresDeArticulo(a.codigo);
+      if(ids.length===1) pista=`<div class="mut" style="font-size:11px">🏷️ ${escAg(nombreProveedorNP(ids[0]))}</div>`;
+      else if(ids.length>1) pista=`<div class="mut" style="font-size:11px">🏷️ varios proveedores</div>`;
+    }
+    return `<tr><td class="mut">${a.codigo||""}</td><td>${a.nombre||""}${pista}</td>
       <td class="mut">${a.unidad||"—"}</td>
       <td class="num mut" style="white-space:nowrap"${mc.tMin}>${mc.min}</td>
       <td class="num mut" style="white-space:nowrap"${mc.tMax}${mc.dMax}>${mc.max}</td>
@@ -539,6 +554,19 @@ function paso(cod,v){
   npCant[cod]=v;
   let tot=0; for(const k in npCant) tot+=Number(npCant[k]||0);
   $("np_total").textContent="Total: "+money(0)+"  ·  "+tot+" artículos";
+  // No sabían con quién se maneja este articulo: si es el primero que agregan y solo hay UN proveedor
+  // posible (catalogo_compras), se completa solo (se puede cambiar arriba); si hay varios, se deja como esta.
+  if(v>0 && !provArts.length && !Number($("np_prov").value||0)){
+    const ids=proveedoresDeArticulo(cod);
+    if(ids.length===1){
+      $("np_prov").value=String(ids[0]);
+      if(typeof npProvSync==="function") npProvSync();
+      filtrarArticulos(true).then(()=>{
+        const info=$("np_arts_info"); if(info) info.textContent="🔎 Proveedor detectado por el artículo agregado (" + nombreProveedorNP(ids[0]) + ") — cambialo arriba si no es ese. "+info.textContent;
+      });
+      return;
+    }
+  }
   pintarProductos();
 }
 function listaArticulos(){
@@ -663,7 +691,7 @@ async function revisarMaximos(){
 async function guardarPedido(){
   if(!(await revisarMaximos())) return;
   const prov=Number($("np_prov").value||0);
-  if(!prov){$("np_err").textContent="Elegí el proveedor.";return;}
+  if(!prov){$("np_err").textContent="Elegí el proveedor (el sistema no pudo adivinarlo solo: el artículo tiene varios proveedores posibles, o ninguno registrado todavía).";return;}
   const L=listaArticulos();
   const filas=[];
   for(const cod in npCant){
