@@ -69,16 +69,26 @@ create trigger bloquear_amarre_otro_proveedor before update on pedidos
 -- Amarra un pedido con una factura (usar esto desde la web en vez de UPDATE directo a factura_cufe).
 -- p_forzar: solo un admin, con un motivo obligatorio (queda en amarre_forzado). Sin forzar, si el NIT no
 -- coincide, el trigger de arriba omite el UPDATE y esta funcion lo convierte en un mensaje claro.
+--
+-- FIX (29/09/2026): la primera version exigia admin/pagos, pero la politica ped_amarrar YA dejaba a una
+-- SEDE amarrar SU PROPIO pedido (sede_id = mi_sede() o marca_id = mi_marca()) desde antes de este bloqueo
+-- por NIT; las sedes quedaron sin poder amarrar ningun pedido ("Solo admin o pagos pueden amarrar.",
+-- reportado por el usuario con captura). Se agrega ese mismo permiso; forzar sigue siendo solo admin.
 create or replace function pedido_factura_amarrar(p_pedido_id bigint, p_cufe text, p_usuario text default null, p_forzar boolean default false, p_motivo text default null)
 returns void
 language plpgsql
 security definer
 set search_path to 'public'
 as $$
-declare v_filas integer;
+declare v_filas integer; v_pedido pedidos%rowtype;
 begin
-  if coalesce(auth.role(), '') <> 'service_role' and mi_rol() not in ('admin', 'pagos') then
-    raise exception 'Solo admin o pagos pueden amarrar.' using errcode = '42501';
+  select * into v_pedido from pedidos where id = p_pedido_id;
+  if not found then raise exception 'Ese pedido no existe.' using errcode = '22023'; end if;
+  if coalesce(auth.role(), '') <> 'service_role'
+     and mi_rol() not in ('admin', 'pagos')
+     and not (mi_rol() = 'sede' and (v_pedido.sede_id = mi_sede() or v_pedido.marca_id = mi_marca()))
+  then
+    raise exception 'Sin permiso para amarrar este pedido.' using errcode = '42501';
   end if;
   if not exists (select 1 from facturas where cufe = p_cufe) then raise exception 'Esa factura no existe.' using errcode = '22023'; end if;
   if p_forzar then
@@ -90,7 +100,6 @@ begin
   update pedidos set factura_cufe = p_cufe where id = p_pedido_id;
   get diagnostics v_filas = row_count;
   if v_filas = 0 then
-    if not exists (select 1 from pedidos where id = p_pedido_id) then raise exception 'Ese pedido no existe.' using errcode = '22023'; end if;
     raise exception 'La factura es de otro proveedor (NIT distinto al del pedido). Solo un administrador puede forzarlo con un motivo.' using errcode = '22023';
   end if;
 end
