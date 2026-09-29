@@ -1610,6 +1610,24 @@ function confirmarSiOtroProveedor(f,p){
   if(SinSellar.mismoProveedor(f,p)) return true;      // 'igual' o 'parecido'
   return confirm("⛔ OJO: la factura es de\n   "+(f.emisor||"?")+"\ny el pedido "+(p.numero||"")+" es de\n   "+(p.proveedor_texto||"?")+"\n\nNo parecen el mismo proveedor. Si los amarras, el agente NO lo ingresará al ERP (queda como novedad) y habrá que desamarrarlos.\n\n¿Amarrar de todos modos?");
 }
+// (28/09/2026) BLOQUEO DURO por NIT: si los dos NIT se conocen y son DISTINTOS, ya no es una advertencia que se pueda aceptar con un clic
+// (paso con PED-0149/PED-0167/PED-0193: facturas de OTRO proveedor amarradas). Solo un administrador puede forzarlo, escribiendo un motivo
+// (queda guardado en amarre_forzado); la base tambien lo exige (pedido_factura_amarrar / trigger en pedidos), esto es solo para no ir y volver.
+// Si el NIT no se puede comparar (falta en alguno), sigue el aviso por NOMBRE de siempre (confirmarSiOtroProveedor, que se puede aceptar).
+// -> { ok:false } bloqueado (ya se avisó) | { ok:true, forzar:false, motivo:null } sigue como antes | { ok:true, forzar:true, motivo } admin forzó
+function confirmarAmarreProveedor(f,p){
+  if(SinSellar.nitDistinto(f,p)){
+    if(!perfil || perfil.rol!=="admin"){
+      alert("⛔ La factura es de OTRO proveedor (NIT distinto al del pedido "+((p&&p.numero)||"")+"). Solo un administrador puede forzar este amarre.");
+      return {ok:false};
+    }
+    const motivo=prompt("⛔ La factura es de\n   "+((f&&f.emisor)||"?")+"\ny el pedido "+((p&&p.numero)||"")+" es de\n   "+((p&&p.proveedor_texto)||"?")+"\n\nSon proveedores DISTINTOS (por NIT), no una diferencia de nombre. Para forzar el amarre igual, escribí el motivo:");
+    if(!motivo||!motivo.trim()) return {ok:false};
+    return {ok:true,forzar:true,motivo:motivo.trim()};
+  }
+  if(!confirmarSiOtroProveedor(f,p)) return {ok:false};
+  return {ok:true,forzar:false,motivo:null};
+}
 function bloquearSiYaAmarrado(p){
   // TAREA (14/09): dos facturas por pedido requieren validacion humana, asi que
   // desde estos flujos NO se deja amarrar una segunda factura encima de la que
@@ -1623,10 +1641,10 @@ function bloquearSiYaAmarrado(p){
 async function amarrarConFactura(cufe){
   const pAntes=pedidos.find(x=>x.id===amId);
   if(bloquearSiYaAmarrado(pAntes)) return;
-  if(!confirmarSiOtroProveedor(facturas.find(x=>x.cufe===cufe),pAntes)) return;
-  const up=await SB.from("pedidos").update({factura_cufe:cufe}).eq("id",amId);
-  if(up.error){$("amErr").textContent="No se pudo: "+up.error.message;return;}
   const f=facturas.find(x=>x.cufe===cufe)||{};
+  const dec=confirmarAmarreProveedor(f,pAntes); if(!dec.ok) return;
+  const up=await SB.rpc("pedido_factura_amarrar",{p_pedido_id:amId,p_cufe:cufe,p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||null,p_forzar:dec.forzar,p_motivo:dec.motivo});
+  if(up.error){$("amErr").textContent="No se pudo: "+up.error.message;return;}
   await SB.from("historial").insert({cufe,accion:"pedido amarrado",detalle:"pedido "+(pedidos.find(x=>x.id===amId)||{}).numero,usuario:usuario.id}).then(()=>{},()=>{});
   $("modalAmarre").classList.remove("on");
   pedidosCargados=false; await cargarPedidos(); await cargar();
@@ -1635,8 +1653,9 @@ async function amarrarConFactura(cufe){
 async function amarrarConPedido(pid){
   const pAntes=pedidos.find(x=>x.id===pid);
   if(bloquearSiYaAmarrado(pAntes)) return;
-  if(!confirmarSiOtroProveedor(facturas.find(x=>x.cufe===amId),pAntes)) return;
-  const up=await SB.from("pedidos").update({factura_cufe:amId}).eq("id",pid);
+  const f=facturas.find(x=>x.cufe===amId);
+  const dec=confirmarAmarreProveedor(f,pAntes); if(!dec.ok) return;
+  const up=await SB.rpc("pedido_factura_amarrar",{p_pedido_id:pid,p_cufe:amId,p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||null,p_forzar:dec.forzar,p_motivo:dec.motivo});
   if(up.error){$("amErr").textContent="No se pudo: "+up.error.message;return;}
   await SB.from("historial").insert({cufe:amId,accion:"pedido amarrado",detalle:"pedido "+(pedidos.find(x=>x.id===pid)||{}).numero,usuario:usuario.id}).then(()=>{},()=>{});
   $("modalAmarre").classList.remove("on");
@@ -2197,10 +2216,12 @@ async function amarrarPedido(id){
   const busc=(elegido||"").trim().toUpperCase();
   const f=facturas.find(x=>(((x.prefijo||"")+(x.folio||"")).toUpperCase()===busc) || (x.cufe||"").toUpperCase().startsWith(busc));
   if(!f){alert("No encontré esa factura.");return;}
+  const dec=confirmarAmarreProveedor(f,p); if(!dec.ok) return;
   // Guardar tambien el NUMERO de la factura en el pedido: asi el detalle muestra N. FACTURA.
   const numF = (((f.prefijo||"")+(f.folio||"")).replace(/[^A-Za-z0-9]/g,"")) || (f.documento||"").replace(/[^A-Za-z0-9]/g,"") || "";
-  const up=await SB.from("pedidos").update({factura_cufe:f.cufe, numero_factura: numF || null}).eq("id",id);
+  const up=await SB.rpc("pedido_factura_amarrar",{p_pedido_id:id,p_cufe:f.cufe,p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||null,p_forzar:dec.forzar,p_motivo:dec.motivo});
   if(up.error){alert("No se pudo amarrar: "+up.error.message);return;}
+  if(numF) await SB.from("pedidos").update({numero_factura:numF}).eq("id",id);
   await SB.from("historial").insert({cufe:f.cufe,accion:"pedido amarrado",detalle:p.numero,usuario:usuario.id});
   f.pedido_num=p.numero; await cargar(); await cargarPedidos();
   alert("¡Amarrado! "+p.numero+" ↔ "+(numF||"la factura"));

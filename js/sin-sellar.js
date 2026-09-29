@@ -64,6 +64,15 @@
     if (nf && np) return nf === np ? 'igual' : null;
     return Conc.compararProveedor(nf, factura && factura.emisor, pedido && (pedido.proveedor_texto || pedido.proveedor));
   }
+  // (28/09/2026) ¿son DEFINITIVAMENTE de proveedores distintos, por NIT? Solo dice true cuando los DOS NIT se conocen y no son el mismo
+  // (tolera el digito de verificacion, igual criterio que nitIgual en lib/proveedor-pedido.js). Si falta algun NIT, no se puede asegurar -> false
+  // (ahi sigue mandando el aviso por nombre de mismoProveedor/confirmarSiOtroProveedor, que se puede aceptar). Esto es lo que hace el BLOQUEO DURO
+  // que ya no se puede saltar con un clic (ver confirmarAmarreProveedor en index.html y supabase/amarre_pedido_factura.sql).
+  function nitIgualTolerante(a, b) { a = soloDig(a); b = soloDig(b); return !!a && !!b && (a === b || a.slice(0, -1) === b || b.slice(0, -1) === a); }
+  function nitDistinto(factura, pedido) {
+    const nf = soloDig(factura && factura.nit_emisor), np = soloDig(pedido && pedido.nit_proveedor);
+    return !!nf && !!np && !nitIgualTolerante(nf, np);
+  }
   // Los pedidos del mismo proveedor primero, luego los parecidos, luego el resto; dentro de cada grupo se respeta el orden que ya traian.
   function ordenarPedidos(factura, pedidos) {
     const rank = { igual: 0, parecido: 1 };
@@ -88,5 +97,5 @@
     return { n: ls.length, corto, completo: ls.map((l) => '• ' + nombre(l) + cant(l)).join('\n') };
   }
 
-  return { DIAS_AVISO, DIAS_ALERTA, diasEntre, conIngreso, esIngresadaSinSellar, etiqueta, ordenar, sedeDe, resumenPorSede, mensajeAviso, mismoProveedor, ordenarPedidos, pendienteDeAmarrar, ordenarRecientes, vistazoInsumos };
+  return { DIAS_AVISO, DIAS_ALERTA, diasEntre, conIngreso, esIngresadaSinSellar, etiqueta, ordenar, sedeDe, resumenPorSede, mensajeAviso, mismoProveedor, nitDistinto, ordenarPedidos, pendienteDeAmarrar, ordenarRecientes, vistazoInsumos };
 });
