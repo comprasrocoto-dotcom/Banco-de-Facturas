@@ -313,7 +313,11 @@ async function sesion(u){
   }
   aplicarPermisosUI();      // mostrar/ocultar segun los permisos del perfil
   const {data:ms}=await SB.from("marcas").select("id,nombre").order("nombre");
-  $("mar").innerHTML=(ms||[]).map(m=>`<option value="${m.id}">${m.nombre}</option>`).join("");
+  // (29/09/2026) "Subir facturas": un analista con sedes de VARIAS marcas (ej. Deiby: 123 wok y Rocoto) podia dejar aca la marca de la
+  // ultima vez sin darse cuenta -> el PDF se intentaba desbloquear con el NIT de OTRA marca. Ahora el selector: (a) solo ofrece SUS
+  // marcas (igual que #fSede), (b) arranca sin elegir (no la primera de la lista), y subirPdfs() exige elegirla antes de subir.
+  const marcaIdsAg=(alcanceUsuario&&alcanceUsuario.restringido)?new Set(AnalistaSedes.permitidas(sedes,alcanceUsuario).map(s=>s.marca_id)):null;
+  $("mar").innerHTML='<option value="">— elige la marca —</option>'+(ms||[]).filter(m=>!marcaIdsAg||marcaIdsAg.has(m.id)).map(m=>`<option value="${m.id}">${m.nombre}</option>`).join("");
   $("sede").textContent=(s?s.nombre:"—")+(s&&s.marcas?" · "+s.marcas.nombre:"");
   await cargar();
 }
@@ -2919,7 +2923,7 @@ async function guardarNov(){
 </div></div>
 <script>
 let archivos=[];
-function abrirSubir(){$("modal2").classList.add("on");$("res").innerHTML="";archivos=[];}
+function abrirSubir(){$("modal2").classList.add("on");$("res").innerHTML="";archivos=[];$("mar").value="";}   // nunca deja la marca de la vez anterior puesta
 function cerrarSubir(){$("modal2").classList.remove("on");}
 function elegir(ev){
   const todos=[...ev.target.files];
@@ -3000,7 +3004,8 @@ async function datosDePdf(f){
 }
 async function subirPdfs(){
   if(!archivos.length){$("res").innerHTML="⚠️ Elegí primero los PDF.";return;}
-  const marca=Number($("mar").value), tipo=$("tipo2").value, categoria=$("cat2").value;
+  const marca=Number($("mar").value||0), tipo=$("tipo2").value, categoria=$("cat2").value;
+  if(!marca){$("res").innerHTML="⚠️ Elegí primero la marca/empresa (cada PDF de la DIAN se desbloquea con el NIT de SU marca; si eliges otra, no va a abrir).";return;}
   const marcas={}; document.querySelectorAll("#mar option").forEach(o=>marcas[o.value]=o.textContent);
   let ok=0; const errs=[];
   $("res").innerHTML="⏳ Procesando "+archivos.length+" archivo(s)...";
