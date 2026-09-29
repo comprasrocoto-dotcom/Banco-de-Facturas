@@ -82,13 +82,17 @@ const concNumErp = (d) => Object.assign({}, d, { base: Number(d.base) || 0, impu
 
 async function concCargarFuentes() {
   const errores = {};
+  // (29/09/2026) facturas/pedidos/erp_documento/conciliacion_decision se traen por estas 4 funciones (cruce_*), NO con SB.from(...) directo:
+  // el Excel de la DIAN es por MARCA, no por sede, y un analista restringido a ciertas sedes (perfil_sede) no veia por RLS lo que YA
+  // estaba cargado por OTRA sede de su misma marca -> el cruce lo marcaba "pendiente" por error, aunque ya estuviera en el sistema.
+  // Las funciones devuelven las MISMAS columnas de siempre, solo que sin el filtro de sede (supabase/cruce_dian_alcance_completo.sql).
   const [facturas, pedidos, erpDocs, cargas, alias, decisiones, marcas, excluidos, config, sedes] = await Promise.all([
-    concIntentar(() => concPaginar((a, b) => SB.from('facturas').select('cufe,nit_emisor,prefijo,folio,documento,tipo,estado,num_ingreso,sede_id').order('cufe').range(a, b)), errores, 'web'),
-    concIntentar(() => concPaginar((a, b) => SB.from('pedidos').select('numero,proveedor_texto,nit_proveedor,factura_cufe,pedido_erp,numero_factura').or('numero_factura.not.is.null,factura_cufe.not.is.null').order('id').range(a, b)), errores, 'pedidos'),
-    concIntentar(() => concPaginar((a, b) => SB.from('erp_documento').select('causacion,serie,numero,fecha,su_doc,su_doc_clave,contacto,contacto_norm,almacen,base,impuestos,neto,tipo,procesado').order('causacion').range(a, b)), errores, 'erp'),
+    concIntentar(() => concPaginar((a, b) => SB.rpc('cruce_facturas').range(a, b)), errores, 'web'),
+    concIntentar(() => concPaginar((a, b) => SB.rpc('cruce_pedidos').range(a, b)), errores, 'pedidos'),
+    concIntentar(() => concPaginar((a, b) => SB.rpc('cruce_erp_documento').range(a, b)), errores, 'erp'),
     concIntentar(async () => { const r = await SB.from('erp_carga').select('id,archivo,cargado_en,total,desde,hasta,cargado_por,archivo_modificado,corte').not('total', 'is', null).order('id', { ascending: false }).limit(100); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'erp'),
     concIntentar(async () => { const r = await SB.from('proveedor_alias').select('nit,nombre_erp_norm'); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'alias'),
-    concIntentar(async () => { const r = await SB.from('conciliacion_decision').select('cufe,decision,causacion_erp,factura_relacionada,nota'); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'decisiones'),
+    concIntentar(async () => { const r = await SB.rpc('cruce_decisiones'); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'decisiones'),
     concIntentar(async () => { const r = await SB.from('marcas').select('id,nombre,nit'); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'marcas'),
     concIntentar(async () => { const r = await SB.from('proveedor_excluido').select('id,nombre,nit').eq('activo', true); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'excluidos'),
     concIntentar(async () => { const r = await SB.from('cruce_config').select('clave,valor'); if (r.error) throw new Error(r.error.message); return r.data || []; }, errores, 'config'),
@@ -169,7 +173,7 @@ async function concDecidir(f, decision, causacion, facturaRel, nota, candidato) 
   const nit = f.nit || '';
   // Si otra persona ya corrigió este documento mientras esta pantalla estaba abierta, se avisa antes de pisar su decisión
   try {
-    const p = await SB.from('conciliacion_decision').select('cufe,decision,causacion_erp,factura_relacionada,decidido_por').eq('cufe', f.cufe).limit(1);
+    const p = await SB.rpc('cruce_decisiones', { p_cufe: f.cufe });   // TODA la marca (no solo las sedes del analista): ver cruce_dian_alcance_completo.sql
     const previo = (p.data && p.data[0]) || null, local = conc.fuentes.decisiones.find((d) => String(d.cufe).toLowerCase() === f.cufe) || null;
     const v = (o, k) => (o && o[k]) || null;
     if ((v(previo, 'decision') !== v(local, 'decision') || v(previo, 'causacion_erp') !== v(local, 'causacion_erp') || v(previo, 'factura_relacionada') !== v(local, 'factura_relacionada'))
@@ -266,27 +270,26 @@ async function concIniciarCarga() {
   c.fase = 'procesando'; c.cancelar = false; concPintar();
   await concProcesar(c.items);
 }
-// Fuentes RECIEN LEIDAS para UN documento (consultas puntuales), justo antes de cargarlo
+// Fuentes RECIEN LEIDAS para UN documento (consultas puntuales), justo antes de cargarlo. (29/09/2026) facturas/pedidos/erp_documento/
+// conciliacion_decision por las funciones cruce_* (ven TODA la marca, no solo las sedes del analista: ver cruce_dian_alcance_completo.sql).
 async function concFuentesFrescas(f) {
   const k = Conciliacion.criteriosConsulta(f.r), errores = {};
   const uniq = (arr, key) => { const m = new Map(); arr.flat().filter(Boolean).forEach((x) => m.set(key(x), x)); return [...m.values()]; };
   const q = async (fn) => { const r = await fn(); if (r.error) throw new Error(r.error.message); return r.data || []; };
-  const colsF = 'cufe,nit_emisor,prefijo,folio,documento,tipo,estado,num_ingreso,sede_id', colsE = 'causacion,serie,numero,fecha,su_doc,su_doc_clave,contacto,contacto_norm,almacen,base,impuestos,neto,tipo,procesado', colsP = 'numero,proveedor_texto,nit_proveedor,factura_cufe,pedido_erp,numero_factura';
-  const [fa, fb, ea, eb, pa, pb, alias, dec, carga, ultimaCarga] = await Promise.all([
-    concIntentar(() => q(() => SB.from('facturas').select(colsF).eq('cufe', k.cufe)), errores, 'web'),
-    concIntentar(() => q(() => SB.from('facturas').select(colsF).eq('nit_emisor', k.nit)), errores, 'web'),
-    concIntentar(() => (k.digitos ? q(() => SB.from('erp_documento').select(colsE).ilike('su_doc_clave', '*' + k.digitos + '*')) : Promise.resolve([])), errores, 'erp'),
-    concIntentar(() => (k.contactoNorm ? q(() => SB.from('erp_documento').select(colsE).eq('contacto_norm', k.contactoNorm)) : Promise.resolve([])), errores, 'erp'),
-    concIntentar(() => (k.digitos ? q(() => SB.from('pedidos').select(colsP).ilike('numero_factura', '*' + k.digitos + '*')) : Promise.resolve([])), errores, 'pedidos'),
-    concIntentar(() => q(() => SB.from('pedidos').select(colsP).eq('factura_cufe', k.cufe)), errores, 'pedidos'),
+  const [facturasWeb, ea, eb, pa, pb, alias, dec, carga, ultimaCarga] = await Promise.all([
+    concIntentar(() => q(() => SB.rpc('cruce_facturas', { p_cufe: k.cufe || null, p_nit_emisor: k.nit || null })), errores, 'web'),
+    concIntentar(() => (k.digitos ? q(() => SB.rpc('cruce_erp_documento', { p_su_doc_clave_contiene: k.digitos, p_contacto_norm: null })) : Promise.resolve([])), errores, 'erp'),
+    concIntentar(() => (k.contactoNorm ? q(() => SB.rpc('cruce_erp_documento', { p_su_doc_clave_contiene: null, p_contacto_norm: k.contactoNorm })) : Promise.resolve([])), errores, 'erp'),
+    concIntentar(() => (k.digitos ? q(() => SB.rpc('cruce_pedidos', { p_factura_cufe: null, p_numero_factura_contiene: k.digitos })) : Promise.resolve([])), errores, 'pedidos'),
+    concIntentar(() => (k.cufe ? q(() => SB.rpc('cruce_pedidos', { p_factura_cufe: k.cufe, p_numero_factura_contiene: null })) : Promise.resolve([])), errores, 'pedidos'),
     concIntentar(() => q(() => SB.from('proveedor_alias').select('nit,nombre_erp_norm').eq('nit', k.nit)), errores, 'erp'),
-    concIntentar(() => q(() => SB.from('conciliacion_decision').select('cufe,decision,causacion_erp,factura_relacionada,nota').eq('cufe', k.cufe)), errores, 'erp'),
+    concIntentar(() => (k.cufe ? q(() => SB.rpc('cruce_decisiones', { p_cufe: k.cufe })) : Promise.resolve([])), errores, 'erp'),
     concIntentar(() => q(() => SB.from('erp_carga').select('desde,cargado_en').not('total', 'is', null).order('desde', { ascending: true }).limit(1)), errores, 'erp'),
     concIntentar(() => q(() => SB.from('erp_carga').select('archivo_modificado,corte').not('total', 'is', null).order('id', { ascending: false }).limit(1)), errores, 'erp'),
   ]);
   const desde = carga && carga[0] ? carga[0].desde : null;
   return {
-    facturasWeb: uniq([fa || [], fb || []], (x) => x.cufe), pedidos: uniq([pa || [], pb || []], (x) => x.numero + '|' + x.numero_factura),
+    facturasWeb: facturasWeb || [], pedidos: uniq([pa || [], pb || []], (x) => x.numero + '|' + x.numero_factura),
     erp: desde ? { docs: uniq([ea || [], eb || []], (x) => x.causacion).map(concNumErp), desde, archivo_modificado: ultimaCarga && ultimaCarga[0] ? ultimaCarga[0].archivo_modificado : null, corte: ultimaCarga && ultimaCarga[0] ? ultimaCarga[0].corte : null } : null,
     alias: (alias || []).map((a) => ({ nit: a.nit, nombre_norm: a.nombre_erp_norm })), decisiones: dec || [], errores,
   };
@@ -349,7 +352,7 @@ async function concRefrescarCarga() {
     const por = Object.fromEntries((data || []).map((x) => [x.cufe, x]));
     for (const it of lote) {
       const x = por[it.fila.cufe];
-      if (!x) { const w = await SB.from('facturas').select('cufe').eq('cufe', it.fila.cufe).limit(1); if (w.data && w.data.length) { it.estado = 'PDF_SUBIDO'; it.detalle = 'ya está en la web'; } continue; }
+      if (!x) { const w = await SB.rpc('cruce_facturas', { p_cufe: it.fila.cufe, p_nit_emisor: null }); if (w.data && w.data.length) { it.estado = 'PDF_SUBIDO'; it.detalle = 'ya está en la web'; } continue; }
       if (x.estado === 'subida') { it.estado = 'PDF_SUBIDO'; it.detalle = 'subido a la web (Sin asignar)'; }
       else if (x.estado === 'bajando') { it.estado = 'SUBIENDO_PDF'; it.detalle = 'el robot lo está subiendo'; }
       else if (x.estado === 'error' || x.estado === 'agotado') { it.estado = 'ERROR'; it.detalle = (x.ultimo_error || 'error al subir el PDF').slice(0, 300); }
