@@ -2145,7 +2145,11 @@ function abrirManual(){
   window.open("/manual-"+p,"_blank","noopener");
 }
 async function pedirIngresos(){
-  const eleg=pedidos.filter(p=>!p.pedido_erp && p.factura_cufe);
+  // (02/10/2026) OJO: un pedido facturado DIRECTO (FACTURA_DIRECTA=1, sin pasar por
+  // "Pedido de compra") NUNCA llega a tener pedido_erp - sin el "p.estado!=='facturado'"
+  // esta lista lo vuelve a ofrecer para siempre aunque ya este bien facturado (mismo
+  // bug que el filtro del agente, ver agente-pedidos.js commit 36a586c).
+  const eleg=pedidos.filter(p=>!p.pedido_erp && p.factura_cufe && p.estado!=='facturado');
   if(!eleg.length){
     const pendFac=pedidos.filter(p=>p.pedido_erp && p.factura_cufe);
     if(pendFac.length){
