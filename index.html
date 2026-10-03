@@ -512,6 +512,36 @@ function proveedoresDeArticulo(cod){
 function nombreProveedorNP(id){
   const p=(provs||[]).find(x=>x.id===id); return p?(p.razon_social||p.nombre_comercial||""):"";
 }
+// (03/10/2026) Cuando un articulo tiene VARIOS proveedores posibles, la pista de pintarProductos()
+// solo avisa "varios proveedores" (a proposito, no adivina) pero no deja elegir cual desde aca -
+// hay que salir a buscar el proveedor a mano. Estas dos funciones agregan esa eleccion con un clic,
+// sin tocar la tabla np_tabla ni el atajo de un solo proveedor que ya existian.
+function elegirProveedorDeArticulo(codigo, idProveedor){
+  idProveedor = Number(idProveedor);
+  if(!idProveedor) return;
+  if((npProvVis||[]).length && !(npProvVis||[]).some(p=>p.id===idProveedor)) return;   // nunca un proveedor fuera de la marca/sede actual
+  $("np_prov").value = String(idProveedor);
+  if(typeof npProvSync==="function") npProvSync();
+  return filtrarArticulos(true);   // true = mantenerCant, mismo mecanismo que ya usa paso() para no perder cantidades ni el texto buscado
+}
+function pintarProveedoresPorArticulo(filas){
+  const cont = $("np_prov_sugeridos"); if(!cont) return;
+  if(Number($("np_prov").value||0) || provArts.length){ cont.innerHTML=""; return; }   // ya se sabe el proveedor: nada que elegir
+  const visibles = new Set((npProvVis||[]).map(p=>p.id));
+  const pares = [];
+  filas.forEach(a=>{
+    const ids = proveedoresDeArticulo(a.codigo).filter(id=>visibles.has(id));
+    if(ids.length>1) ids.forEach(id=>pares.push({a,id}));
+  });
+  if(!pares.length){ cont.innerHTML=""; return; }
+  cont.innerHTML = '<div class="mut" style="margin:6px 2px">Este artículo lo vende más de un proveedor — elegí con cuál seguir:</div>'
+    + pares.map(({a,id})=>`<div class="card" style="margin:6px 0;padding:10px 14px;cursor:pointer" onclick="elegirProveedorDeArticulo('${String(a.codigo||"").replace(/'/g,"")}',${id})">
+      <div class="row">
+        <div><b>${escAg(a.nombre||"")}</b><div class="mut" style="font-size:12px">${escAg(a.codigo||"")}${a.unidad?" · "+escAg(a.unidad):""}</div></div>
+        <span class="sp"></span>
+        <span class="badge">🏷️ ${escAg(nombreProveedorNP(id))}</span>
+      </div></div>`).join("");
+}
 function numEs(v){ if(v==null) return 0; const s=String(v).trim().replace(/\s/g,"").replace(",","."); const x=Number(s); return isNaN(x)?0:x; }
 function pintarProductos(){
   const q=($("np_q").value||"").trim().toLowerCase();
@@ -548,6 +578,7 @@ function pintarProductos(){
         <button class="s" style="padding:4px 10px" onclick="paso('${(a.codigo||"").replace(/'/g,"")}',${c+1})">＋</button>
       </span></td></tr>`;
   }).join("") || '<tr><td colspan="6" class="mut" style="padding:16px">Sin artículos para mostrar.</td></tr>';
+  pintarProveedoresPorArticulo(filas);
 }
 function paso(cod,v){
   v=numEs(v); if(v<0) v=0;
@@ -2856,6 +2887,7 @@ async function guardarNov(){
     <input id="np_q" placeholder="🔍 Buscar artículo..." style="flex:2;margin:0" oninput="pintarProductos()" autocomplete="off">
     <select id="np_sub" style="flex:1;margin:0" onchange="pintarProductos()"><option value="">Todas las subfamilias</option></select>
   </div>
+  <div id="np_prov_sugeridos"></div>
   <div id="np_lineas" style="display:none"></div>
   <div style="max-height:54vh;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:10px">
     <table style="margin:0"><thead><tr style="background:#12306b;color:#fff;position:sticky;top:0">
