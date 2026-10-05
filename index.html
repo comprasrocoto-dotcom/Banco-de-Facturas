@@ -73,6 +73,9 @@ tr:hover td{background:#f1f5f9}
 @media (max-width:900px){.np-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:560px){.np-grid{grid-template-columns:1fr}}
 .np-cuenta{background:#dcfce7;color:#166534;border-color:#86efac}
+.np-busca-art{margin-top:10px;padding:10px 12px;border:1px dashed #a5f3fc;border-radius:10px;background:#f0fdff}
+/* tarjetas DENTRO de un modal (proveedor por articulo): sin heredar el tamano/sombra/scroll del propio modal (.modal .card) */
+.modal .card .card{max-width:none;width:auto;max-height:none;overflow:visible;box-shadow:none;border:1px solid var(--line)}
 .np-pie{position:sticky;bottom:-16px;margin:12px -16px -16px;padding:10px 16px 12px;background:#fff;border-top:1px solid var(--line);box-shadow:0 -6px 14px rgba(15,23,42,.06);z-index:5}
 #np_tabla tr.np-con td{background:#ecfdf5}
 #np_tabla tr.np-con input{border-color:#22c55e;font-weight:700}
@@ -344,6 +347,7 @@ let arts=[], provs=[], cat=[], minmax=[], provArts=[], npLineas=0;
 // PROVEEDORES POR MARCA (js/marca-proveedores.js): artsGlobal/catGlobal son los de siempre (Rocoto/Arrebatao); las marcas con productos propios (Sin Par) usan marca_articulo / marca_catalogo
 let npProvVis=[], npProvIdx=0;   // proveedores que ofrece el buscador de "Nuevo pedido" y la fila resaltada
 let artsGlobal=null, catGlobal=null, vinculosProv=[], marcaArts=[], marcaCat=[], npMarcaPropia=false;
+let npHist=[];   // (05/10/2026) historial proveedor<->articulo (vista proveedor_articulos): a quien se le ha comprado cada articulo
 // Trae TODAS las filas de una tabla (por paginas de 1.000). Si algo falla devuelve lo que alcanzo a traer (como antes: la pantalla sigue).
 async function traerTodo(tabla, cols, orden){
   const out=[];
@@ -396,6 +400,7 @@ async function nuevoPedido(){
     marcaArts=await traerTodo("marca_articulo","marca_id,codigo_barras,articulo,unidad_compra,subfamilia",["id"]);
     marcaCat=await traerTodo("marca_catalogo","marca_id,codigo_barras,id_proveedor,precio_negociado",["id"]);
     minmax=await traerTodo("maximos_minimos","articulo,almacen,subarticulo,minimo,maximo",["id"]);
+    npHist=await traerTodo("proveedor_articulos","proveedor_id,codigo,veces,ultima",["proveedor_id"]);   // ~500 filas; si falla queda vacio y todo sigue como antes (solo catalogo)
     await prepararConversiones();
   }
   npProvVis=provs;
@@ -473,6 +478,52 @@ function npProvTecla(e){
   } else if(e.key==="Escape"){ if(abierta){ e.preventDefault(); e.stopPropagation(); npProvCerrar(); } }
 }
 document.addEventListener("mousedown",e=>{ const w=document.getElementById("np_prov_wrap"); if(w && !w.contains(e.target)) npProvCerrar(); });
+// (05/10/2026) "¿No sabés a quién pedirle? Buscá por artículo" (como el proyecto de referencia GCA): cualquier articulo ->
+// todos los proveedores que lo venden (catalogo + historial, proveedoresConDetalle) -> "Pedir a este" fija el proveedor con el
+// mecanismo de siempre y deja la lista de productos filtrada en ese articulo (por su CODIGO: el nombre del historial puede variar).
+const npNorm=s=>String(s==null?"":s).normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase();
+function npArtBuscar(){
+  const l=$("np_art_lista"); if(!l) return;
+  const q=npNorm($("np_art_q").value).trim();
+  if(q.length<2){ l.style.display="none"; l.innerHTML=""; return; }
+  const res=[];
+  for(const a of arts){ if(npNorm((a.codigo_barras||"")+" "+(a.articulo_hiopos||a.articulo_comercial||"")).includes(q)){ res.push(a); if(res.length>=8) break; } }
+  l.innerHTML=res.length ? res.map(a=>{
+      const n=proveedoresDeArticulo(a.codigo_barras).length;
+      return `<div style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--line)" onclick="npArtElegir('${String(a.codigo_barras||"").replace(/'/g,"")}')"><b>${escAg(a.articulo_hiopos||a.articulo_comercial||"")}</b> <span class="mut">${escAg(a.codigo_barras||"")}${a.unimedida_compra?" · "+escAg(a.unimedida_compra):""} · ${n?n+(n>1?" proveedores":" proveedor"):"sin proveedor conocido"}</span></div>`;
+    }).join("")
+    : '<div class="mut" style="padding:8px 12px">Ningún artículo coincide.</div>';
+  l.style.display="block";
+}
+function npArtElegir(cod){
+  const l=$("np_art_lista"); if(l){ l.style.display="none"; l.innerHTML=""; }
+  const a=arts.find(x=>x.codigo_barras===cod)||{};
+  $("np_art_q").value=a.articulo_hiopos||a.articulo_comercial||cod;
+  const c=$("np_art_provs"); if(!c) return;
+  const ps=proveedoresConDetalle(cod);
+  if(!ps.length){ c.innerHTML='<div class="mut" style="margin:6px 2px">Nadie lo tiene en catálogo ni hay compras anteriores de este artículo.</div>'; return; }
+  const elegido=Number($("np_prov").value||0), codJs=String(cod).replace(/'/g,"");
+  const fecha=s=>typeof fch==="function"?fch(String(s).slice(0,10)):String(s).slice(0,10);
+  c.innerHTML=ps.map(p=>`<div class="card" style="margin:6px 0;padding:10px 14px"><div class="row">
+      <div><b>${escAg(nombreProveedorNP(p.id))}</b>
+        <div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${p.enCatalogo?`<span class="badge">En catálogo${p.precio!=null?" · "+money(p.precio):""}</span>`:""}${p.veces?`<span class="badge">Comprado ${p.veces} ${p.veces===1?"vez":"veces"}${p.ultima?" · última "+fecha(p.ultima):""}</span>`:""}</div></div>
+      <span class="sp"></span>
+      ${p.id===elegido?'<span class="badge np-cuenta">Proveedor elegido</span>':`<button class="p" onclick="npArtPedir('${codJs}',${p.id})">Pedir a este</button>`}
+    </div></div>`).join("");
+}
+async function npArtPedir(cod, id){
+  id=Number(id); if(!id) return;
+  if((npProvVis||[]).length && !npProvVis.some(p=>p.id===id)) return;   // nunca un proveedor fuera de la marca/sede actual
+  const actual=Number($("np_prov").value||0);
+  const conflicto=!!actual && actual!==id && Object.keys(npCant).some(k=>Number(npCant[k])>0);
+  if(conflicto && !confirm("Ya tenés cantidades para "+nombreProveedorNP(actual)+".\n\nUn pedido es de un solo proveedor: si cambiás a "+nombreProveedorNP(id)+" se borran esas cantidades. ¿Seguir?")) return;
+  if(actual!==id){ $("np_prov").value=String(id); if(typeof npProvSync==="function") npProvSync(); await filtrarArticulos(!conflicto); }
+  $("np_q").value=cod;
+  const c=$("np_art_provs"); if(c) c.innerHTML="";
+  $("np_art_q").value="";
+  pintarProductos();
+}
+document.addEventListener("mousedown",e=>{ const w=document.getElementById("np_art_wrap"), l=document.getElementById("np_art_lista"); if(w && l && !w.contains(e.target)) l.style.display="none"; });
 async function cambiarSedeNP(){
   const antes=Number($("np_prov").value||0);
   aplicarMarcaNP();
@@ -516,9 +567,24 @@ async function filtrarArticulos(mantenerCant){
   pintarProductos();
 }
 let npCant={};
-// Proveedor(es) que venden este articulo, segun catalogo_compras/marca_catalogo (misma fuente que ya usa listaArticulos).
+// Proveedor(es) que venden este articulo: catalogo (catalogo_compras/marca_catalogo, con precio) + historial de compras
+// (05/10/2026: el catalogo solo cubre ~166 de 732 articulos; el historial, ~465). El historial NO se usa si la marca tiene
+// catalogo propio (Sin Par: sus codigos chocan con los de `articulos`), igual que filtrarArticulos(). Respeta npProvVis.
+// -> [{ id, enCatalogo, precio, veces, ultima }]: primero los del catalogo, luego los mas comprados.
+function proveedoresConDetalle(cod){
+  const m=new Map();
+  for(const c of cat){ if(c.codigo_barras!==cod || !c.id_proveedor || m.has(c.id_proveedor)) continue;
+    m.set(c.id_proveedor,{id:c.id_proveedor, enCatalogo:true, precio:c.precio_negociado!=null?Number(c.precio_negociado):null, veces:0, ultima:null}); }
+  const hist=(typeof npHist!=="undefined" && !npMarcaPropia) ? npHist : [];
+  for(const h of hist){ const id=Number(h.proveedor_id); if(!id || h.codigo!==cod) continue;
+    const x=m.get(id)||{id, enCatalogo:false, precio:null, veces:0, ultima:null}; m.set(id,x);
+    x.veces+=Number(h.veces||0); if(h.ultima && (!x.ultima || h.ultima>x.ultima)) x.ultima=h.ultima; }
+  let l=[...m.values()];
+  if((npProvVis||[]).length){ const vis=new Set(npProvVis.map(p=>p.id)); l=l.filter(x=>vis.has(x.id)); }
+  return l.sort((a,b)=>(b.enCatalogo-a.enCatalogo)||(b.veces-a.veces));
+}
 function proveedoresDeArticulo(cod){
-  return [...new Set(cat.filter(c=>c.codigo_barras===cod).map(c=>c.id_proveedor))];
+  return proveedoresConDetalle(cod).map(x=>x.id);
 }
 function nombreProveedorNP(id){
   const p=(provs||[]).find(x=>x.id===id); return p?(p.razon_social||p.nombre_comercial||""):"";
@@ -2916,6 +2982,14 @@ async function guardarNov(){
     <select id="np_prov" onchange="filtrarArticulos()" style="display:none"></select>
     <div id="np_sinmarca" class="mut" style="margin-top:2px"></div>
     <div id="np_contacto"></div>
+    <div class="np-busca-art">
+      <div class="mut" style="font-weight:700;color:#0e7490">📦 ¿No sabés a quién pedirle? Buscá por artículo</div>
+      <div id="np_art_wrap" style="position:relative">
+        <input id="np_art_q" placeholder="Escribí el artículo o su código…" autocomplete="off" oninput="npArtBuscar()" onfocus="npArtBuscar()">
+        <div id="np_art_lista" style="display:none;position:absolute;left:0;right:0;top:100%;margin-top:-6px;z-index:40;max-height:300px;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:9px;box-shadow:0 10px 30px rgba(15,23,42,.18)"></div>
+      </div>
+      <div id="np_art_provs"></div>
+    </div>
   </div>
   <div class="np-sec">
     <div class="row" style="align-items:center">
