@@ -1269,6 +1269,33 @@ let adminHist=null, adminHistPend=false, catCompF={ver:"todo", prov:"", sub:"", 
 function catCompVer(v){ catCompF.ver=v; adminLimite=400; pintarAdmin(); }
 function catCompSet(k,v){ catCompF[k]=v; if(k==="prov") catCompF.sub=""; adminLimite=400; pintarAdmin(); }   // otro proveedor: sus subfamilias son otras
 function catCompLimpiar(){ catCompF={ver:"todo", prov:"", sub:"", orden:catCompF.orden}; $("qa").value=""; adminLimite=400; pintarAdmin(); }
+// (05/10/2026) Quitar lineas del catalogo (general: catalogo_compras; marca propia: marca_catalogo), una con ✕ o varias marcadas.
+// Solo admin/pagos (la base tambien lo exige). Las marcadas se limitan a las que se ven: un filtro nuevo no deja marcas escondidas.
+let catCompSel=new Set(), catCompFilas=[], catCompVisibles=[];
+const catCompPuedeQuitar=()=>["admin","pagos"].includes(perfil&&perfil.rol);
+function catCompMarcar(id,si){ if(si) catCompSel.add(Number(id)); else catCompSel.delete(Number(id)); pintarAdmin(); }
+function catCompMarcarTodas(si){ if(si) catCompVisibles.forEach(id=>catCompSel.add(id)); else catCompSel.clear(); pintarAdmin(); }
+function catCompQuitarMarcadas(){ return catCompQuitar([...catCompSel]); }
+async function catCompQuitar(ids){
+  ids=(ids||[]).map(Number).filter(id=>id>0); if(!ids.length || !catCompPuedeQuitar()) return;
+  const mSel=Number(($("admCatalogo")||{}).value)||0, tabla=mSel?"marca_catalogo":"catalogo_compras";
+  const nomCat=mSel?((adminMarcas.find(m=>m.id===mSel)||{}).nombre||"")+" (propio)":"Rocoto y Arrebatao (general)";
+  if(!confirm(CatalogoCompleto.textoQuitar(catCompFilas,ids,nomCat))) return;
+  if(ids.length>=CatalogoCompleto.PEDIR_ESCRIBIR_DESDE && String(prompt("Escribe QUITAR para borrar "+ids.length+" líneas del catálogo:")||"").trim().toUpperCase()!=="QUITAR"){ alert("No se borró nada."); return; }
+  const borrados=new Set();
+  for(let i=0;i<ids.length;i+=200){
+    const r=await SB.from(tabla).delete().in("id",ids.slice(i,i+200)).select("id");
+    if(r.error){ alert("No se pudo quitar"+(borrados.size?" todo (sí se quitaron "+borrados.size+")":"")+": "+r.error.message); break; }
+    (r.data||[]).forEach(x=>borrados.add(Number(x.id)));
+  }
+  if(mSel) adminMarcaCat=adminMarcaCat.filter(k=>!borrados.has(Number(k.id))); else adminCat=adminCat.filter(k=>!borrados.has(Number(k.id)));
+  borrados.forEach(id=>catCompSel.delete(id));
+  if(borrados.size){ provs=[]; marcaCat=[];   // Nuevo pedido vuelve a leer catalogo y proveedores la proxima vez que se abra
+    SB.from("historial").insert({accion:"catálogo: líneas quitadas", detalle:nomCat+" · "+borrados.size+" línea(s) · ids "+[...borrados].slice(0,50).join(","), usuario:usuario.id}).then(()=>{},()=>{}); }
+  if(borrados.size<ids.length && borrados.size) alert("Se quitaron "+borrados.size+" de "+ids.length+" líneas (las demás no: ya no existían o no tienes permiso).");
+  else if(!borrados.size) alert("No se quitó ninguna línea (ya no existían o no tienes permiso).");
+  pintarAdmin();
+}
 function pintarCatalogoCompleto(c){
   const selCat=$("admCatalogo"); { const cur=selCat.value||"general"; selCat.innerHTML=MarcaProv.opcionesCatalogo(adminMarcas,adminMarcaArts,cur); if(!selCat.value) selCat.value="general"; }
   const mSel=Number(selCat.value)||0;   // 0 = catalogo general; id = marca con catalogo propio (el historial no aplica: sus codigos chocan)
@@ -1280,12 +1307,15 @@ function pintarCatalogoCompleto(c){
   }
   const filas=CatalogoCompleto.armarFilas({ cat: mSel?adminMarcaCat.filter(k=>k.marca_id===mSel):adminCat, arts: mSel?MarcaProv.articulosAdmin(adminMarcaArts,mSel):adminArt,
     provs: adminProv, hist: mSel?[]:adminHist, usarHist: !mSel });
-  if(catCompMarca!==mSel){ catCompMarca=mSel; catCompF.prov=""; catCompF.sub=""; }   // otro catalogo: proveedor y subfamilia de antes no aplican
+  if(catCompMarca!==mSel){ catCompMarca=mSel; catCompF.prov=""; catCompF.sub=""; catCompSel.clear(); }   // otro catalogo: proveedor, subfamilia y marcas de antes no aplican
   const q=$("qa").value, f=catCompF;
   const vis=CatalogoCompleto.ordenar(CatalogoCompleto.filtrar(filas,{ver:f.ver, q, prov:f.prov, sub:f.sub}), f.orden);
   EXPORTAR.catalogoArt = mSel ? ((adminMarcas.find(m=>m.id===mSel)||{}).nombre||"")+" (catálogo propio)" : "Rocoto y Arrebatao (general)";
   EXPORTAR.actual.admin_catcompleto=vis;
-  c.innerHTML=CatalogoCompleto.html(vis,{ver:f.ver, resumen:CatalogoCompleto.resumen(filas), conteos:CatalogoCompleto.conteos(filas,{q, prov:f.prov, sub:f.sub}),
+  catCompFilas=filas;
+  catCompVisibles=vis.slice(0,adminLimite).filter(x=>x.tipo==="catalogo"&&Number(x.id)>0).map(x=>Number(x.id));
+  { const v=new Set(catCompVisibles); [...catCompSel].forEach(id=>{ if(!v.has(id)) catCompSel.delete(id); }); }   // solo quedan marcadas las que se ven
+  c.innerHTML=CatalogoCompleto.html(vis,{quitar:catCompPuedeQuitar(), seleccion:catCompSel, ver:f.ver, resumen:CatalogoCompleto.resumen(filas), conteos:CatalogoCompleto.conteos(filas,{q, prov:f.prov, sub:f.sub}),
     proveedores:CatalogoCompleto.proveedoresDe(filas), subfamilias:CatalogoCompleto.subfamiliasDe(CatalogoCompleto.filtrar(filas,{prov:f.prov})),
     prov:f.prov, sub:f.sub, orden:f.orden, hayFiltros: f.ver!=="todo"||!!f.prov||!!f.sub||!!String(q).trim(),
     limite:adminLimite, amarrar: mSel?"amarrarMarca":"amarrarA", conHist: !mSel});
