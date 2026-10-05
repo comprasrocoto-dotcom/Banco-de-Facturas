@@ -2249,7 +2249,7 @@ async function descartarIngreso(ids){
   const lista=ids ? ingresoDocs.filter(d=>ids.includes(d.pedido_id)) : ingresoDocs.slice();
   if(!lista.length) return;
   const nombres=lista.slice(0,10).map(d=>d.numero||d.pedido_id).join(", ")+(lista.length>10?" y "+(lista.length-10)+" más":"");
-  if(!confirm("Se van a SACAR DE LA COLA "+lista.length+" documento(s): "+nombres+".\n\nEl agente NO los vuelve a intentar (ni con \"Reintentar errores\"). Hazlo solo si ya los revisaste o los resolviste a mano en el ERP.\n\n¿Continuar?")) return;
+  if(!confirm("Se van a SACAR DE LA COLA "+lista.length+" documento(s): "+nombres+".\n\nEl agente NO los vuelve a intentar (ni con \"Reintentar errores\"). Si después le amarras OTRA factura a uno de esos pedidos, vuelve a la cola solo. Hazlo solo si ya los revisaste o los resolviste a mano en el ERP.\n\n¿Continuar?")) return;
   const r=await SB.rpc("ingreso_descartar",{p_ids:lista.map(d=>d.pedido_id)});
   if(r.error){ alert("No se pudo: "+r.error.message); return; }
   await cargarErroresIngreso();
