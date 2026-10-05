@@ -1419,7 +1419,9 @@ function pintarPedidos(){
   if(!l.length){cont.innerHTML='<div class="vacio">No hay pedidos acá.</div>';return;}
   cont.innerHTML=l.slice(0,300).map(p=>{
     const est = p.estado==="facturado" ? '<span class="badge st-sellada">Facturado</span>' : '<span class="badge st-pool">Pendiente</span>';
-    const am  = p.factura_cufe ? '<span class="badge st-asignada">Amarrado a '+(p.numero_factura||"factura")+'</span>' : '';
+    const amFecha = p.factura_cufe && p.factura_amarrada_en
+      ? ' title="Enlazada el '+new Date(p.factura_amarrada_en).toLocaleString('es-CO',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})+'"' : '';
+    const am  = p.factura_cufe ? '<span class="badge st-asignada"'+amFecha+'>Amarrado a '+(p.numero_factura||"factura")+'</span>' : '';
     const erp = p.pedido_erp ? '<span class="badge">ERP '+p.pedido_erp+'</span>' : '';
     return `<div class="card" style="padding:0;overflow:hidden">
       <div class="row" style="padding:14px 16px;cursor:pointer" onclick="abrirPedido(${p.id})">
@@ -1803,6 +1805,7 @@ async function abrirPedido(id){
        <div style="font-weight:700;color:#1e3a8a">📄 DATOS DE FACTURA</div>
        <div class="row" style="gap:40px;margin-top:8px;align-items:flex-start">
          <div><div class="mut" style="font-weight:700">N. FACTURA</div><div>${numFacturaDe(p)||"—"}</div></div>
+         <div><div class="mut" style="font-weight:700">ENLAZADA EL</div><div>${p.factura_amarrada_en?new Date(p.factura_amarrada_en).toLocaleString('es-CO',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):(p.factura_cufe?"—":"")}</div></div>
          <div><div class="mut" style="font-weight:700">TIPO</div><div>${p.forma_pago||p.tipo||"—"}</div></div>
          <div><div class="mut" style="font-weight:700">OBSERVACIÓN</div><div>${p.observacion_factura||"—"}</div></div>
          <div><div class="mut" style="font-weight:700">NOTA DE CRÉDITO</div><div>${p.numero_nota_credito||"—"}</div></div>
