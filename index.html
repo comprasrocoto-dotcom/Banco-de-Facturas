@@ -73,6 +73,7 @@ tr:hover td{background:#f1f5f9}
 @media (max-width:900px){.np-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:560px){.np-grid{grid-template-columns:1fr}}
 .np-cuenta{background:#dcfce7;color:#166534;border-color:#86efac}
+.np-clon{margin-top:8px;padding:10px 14px;border:1px solid #a5f3fc;background:#ecfeff;color:#155e75;border-radius:10px;font-size:13px}
 .np-busca-art{margin-top:10px;padding:10px 12px;border:1px dashed #a5f3fc;border-radius:10px;background:#f0fdff}
 /* tarjetas DENTRO de un modal (proveedor por articulo): sin heredar el tamano/sombra/scroll del propio modal (.modal .card) */
 .modal .card .card{max-width:none;width:auto;max-height:none;overflow:visible;box-shadow:none;border:1px solid var(--line)}
@@ -388,6 +389,7 @@ function mmCeldas(a){
 }
 async function nuevoPedido(){
   $("np_err").textContent=""; $("np_lineas").innerHTML=""; npLineas=0; provArts=[];
+  { const cl=$("np_clon"); if(cl){ cl.style.display="none"; cl.innerHTML=""; } }   // aviso de "clonando" solo cuando viene de clonarPedido()
   const hoy=new Date().toISOString().slice(0,10);
   $("np_fecha").value=hoy; $("np_entrega").value=""; $("np_obs").value=""; $("np_resp").value="";
   if(!provs.length){
@@ -804,6 +806,33 @@ async function revisarMaximos(){
   }catch(e){ return true; }
 }
 
+// (05/10/2026) CLONAR un pedido (como el proyecto de referencia GCA): abre "Nuevo pedido" con la misma sede, tipo, proveedor
+// y cantidades del pedido elegido; se guarda como un pedido NUEVO con guardarPedido() de siempre (el original no se toca).
+// Responsable, observacion y fecha de entrega quedan para llenar de nuevo. Lo que ya no se puede copiar se avisa, no se inventa.
+async function clonarPedido(id){
+  const p=pedidos.find(x=>x.id===id); if(!p) return;
+  const r=await SB.from("pedido_lineas").select("codigo,insumo,cantidad").eq("pedido_id",id);
+  if(r.error){ alert("No se pudo leer el pedido para clonarlo: "+r.error.message); return; }
+  await nuevoPedido();
+  const avisos=[];
+  if(perfil.rol!=="sede" && p.sede_id){
+    if([...$("np_sede").options].some(o=>Number(o.value)===p.sede_id)){ $("np_sede").value=String(p.sede_id); await cambiarSedeNP(); }
+    else avisos.push("la sede del pedido ("+(p.sede_texto||p.sede_id)+") no está entre las tuyas: elige la sede arriba");
+  }
+  if(p.tipo && [...$("np_tipo").options].some(o=>(o.value||o.text)===p.tipo)) $("np_tipo").value=p.tipo;
+  if(p.proveedor_id && (npProvVis||[]).some(x=>x.id===p.proveedor_id)){ $("np_prov").value=String(p.proveedor_id); npProvSync(); await filtrarArticulos(); }
+  else avisos.push("el proveedor ("+(p.proveedor_texto||"sin proveedor")+") no está disponible para esta sede: elígelo arriba");
+  const disponibles=new Set(listaArticulos().map(a=>a.codigo)), fuera=[];
+  for(const l of (r.data||[])){
+    const cant=numEs(l.cantidad); if(!(cant>0)) continue;
+    if(l.codigo && disponibles.has(l.codigo)) npCant[l.codigo]=cant;
+    else fuera.push((l.insumo||l.codigo||"?")+" ("+cant+")");
+  }
+  if(fuera.length) avisos.push(fuera.length+" artículo(s) ya no están en la lista de este proveedor y NO se copiaron: "+fuera.join(", "));
+  pintarProductos();
+  const cl=$("np_clon");
+  if(cl){ cl.innerHTML="⧉ <b>Clonando el pedido #"+escAg(p.numero||p.id)+"</b> — se guardará como un pedido NUEVO (el original no cambia). Revisa cantidades, responsable y fechas."+avisos.map(a=>'<div style="margin-top:4px;color:#b45309">⚠️ '+escAg(a)+'</div>').join(""); cl.style.display="block"; }
+}
 async function guardarPedido(){
   if(!(await revisarMaximos())) return;
   const prov=Number($("np_prov").value||0);
@@ -1875,6 +1904,7 @@ async function abrirPedido(id){
          <button onclick="ordenCompra(${p.id})" style="background:#166534;border-color:#166534;color:#fff">⬇ PDF</button>
          <button onclick="csvPedido(${p.id})" style="background:#166534;border-color:#166534;color:#fff">⬇ CSV</button>
          <button onclick="editarPedido(${p.id})" style="background:#4f46e5;border-color:#4f46e5;color:#fff">✎ Editar</button>
+         ${(typeof can==="function"&&can("pedidos.crear"))?`<button onclick="clonarPedido(${p.id})" style="background:#0e7490;border-color:#0e7490;color:#fff" title="Crea un pedido NUEVO con la misma sede, proveedor y cantidades">⧉ Clonar</button>`:""}
        </div>
      </div>
      <table style="margin-top:18px"><thead><tr style="background:#166534;color:#fff">
@@ -2971,6 +3001,7 @@ async function guardarNov(){
 
 <div id="modalPedido" class="modal"><div class="card" style="max-width:1080px;width:96vw">
   <h1>➕ Nuevo pedido</h1>
+  <div id="np_clon" class="np-clon" style="display:none"></div>
   <!-- (05/10/2026) Pantalla ordenada en 3 bloques (estilo del proyecto de referencia GCA). Solo cambia la presentacion: mismos ids y handlers de siempre. -->
   <div class="np-sec">
     <div class="np-tit">1. INFORMACIÓN DEL PEDIDO</div>
