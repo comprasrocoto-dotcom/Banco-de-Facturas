@@ -16,13 +16,26 @@
   const nombreProv = (p) => (p ? (p.razon_social || p.nombre_comercial || '') : '');
   const nombreArt = (a) => (a ? (a.articulo_hiopos || a.articulo_comercial || '') : '');
 
+  // Nombre con el que la SEDE ve el articulo en "Nuevo pedido" (index.html: filtrarArticulos + listaArticulos): si eligio un
+  // proveedor al que ya se le ha pedido ese codigo, el nombre que quedo en esos pedidos (proveedor_articulos.insumo); si no,
+  // el de Artículos + " (unidad)".
+  const nombreLista = (a) => (a ? nombreArt(a) + (a.unimedida_compra ? ' (' + a.unimedida_compra + ')' : '') : '');
+  const limpio = (s) => norm(s).replace(/\s+/g, ' ').trim();
+  const mismoNombre = (n, a) => !!a && [nombreArt(a), nombreLista(a)].some((b) => limpio(b) === limpio(n));
+
   // filas: una por cada fila del catalogo + una por cada articulo que NO tiene ningun proveedor en el catalogo.
-  // hist (vista proveedor_articulos: proveedor_id, codigo, veces, ultima) solo sugiere a quien se le ha comprado; usarHist=false
-  // para una marca con catalogo propio (sus codigos chocan con los de `articulos`).
+  // hist (vista proveedor_articulos: proveedor_id, codigo, insumo, veces, ultima) sugiere a quien se le ha comprado y da el nombre
+  // que ve la sede; usarHist=false para una marca con catalogo propio (sus codigos chocan con los de `articulos`).
   function armarFilas({ cat = [], arts = [], provs = [], hist = [], usarHist = true } = {}) {
     const artDe = new Map(), provDe = new Map();
     for (const a of arts) if (a && a.codigo_barras && !artDe.has(a.codigo_barras)) artDe.set(a.codigo_barras, a);
     for (const p of provs) if (p && p.id != null) provDe.set(Number(p.id), p);
+    // nombres de los pedidos por "proveedor|codigo" y por codigo (cualquier proveedor)
+    const nomPC = new Map(), nomC = new Map();
+    const suma = (m, k, n) => { if (!m.has(k)) m.set(k, []); if (n && !m.get(k).some((x) => limpio(x) === limpio(n))) m.get(k).push(String(n).trim()); };
+    if (usarHist) for (const h of hist) { const id = Number(h.proveedor_id); if (!id || !h.codigo || !h.insumo) continue; suma(nomPC, id + '|' + h.codigo, h.insumo); suma(nomC, h.codigo, h.insumo); }
+    const sede = (a, nombres) => { const l = (nombres && nombres.length) ? nombres : (a ? [nombreLista(a)] : []); return { nombreSede: l, nombreSedeDistinto: l.some((n) => !mismoNombre(n, a)) }; };
+    const comercialDe = (a) => (a && a.articulo_hiopos && a.articulo_comercial && limpio(a.articulo_hiopos) !== limpio(a.articulo_comercial) ? a.articulo_comercial : null);
     const filas = [], conCatalogo = new Set();
     for (const k of cat) {
       const a = artDe.get(k.codigo_barras), p = provDe.get(Number(k.id_proveedor));
@@ -34,7 +47,8 @@
       if (k.precio_negociado == null) faltas.push('sin precio');
       filas.push({ tipo: 'catalogo', id: k.id, codigo: k.codigo_barras, articulo: nombreArt(a) || null, unidad: a ? (a.unimedida_compra || a.unimedida_hiopos || '') : '',
         subfamilia: a ? (a.subfamilia || '') : '', proveedorId: k.id_proveedor, proveedor: nombreProv(p) || null, nit: p ? (String(p.nit || '').trim() || null) : null,
-        precio: k.precio_negociado == null ? null : Number(k.precio_negociado), prioridad: k.prioridad == null ? null : k.prioridad, estado: k.estado || null, faltas, compradoA: [] });
+        precio: k.precio_negociado == null ? null : Number(k.precio_negociado), prioridad: k.prioridad == null ? null : k.prioridad, estado: k.estado || null, faltas, compradoA: [],
+        comercial: comercialDe(a), ...sede(a, a ? nomPC.get(Number(k.id_proveedor) + '|' + k.codigo_barras) : null) });
     }
     // a quien se le ha comprado cada articulo (sumando por proveedor)
     const comprado = new Map();
@@ -48,7 +62,8 @@
       if (conCatalogo.has(a.codigo_barras)) continue;
       const compradoA = [...(comprado.get(a.codigo_barras) || new Map()).values()].sort((x, y) => y.veces - x.veces);
       filas.push({ tipo: 'sin_proveedor', id: null, codigo: a.codigo_barras, articulo: nombreArt(a) || null, unidad: a.unimedida_compra || a.unimedida_hiopos || '', subfamilia: a.subfamilia || '',
-        proveedorId: null, proveedor: null, nit: null, precio: null, prioridad: null, estado: null, faltas: ['sin proveedor en el catálogo'], compradoA });
+        proveedorId: null, proveedor: null, nit: null, precio: null, prioridad: null, estado: null, faltas: ['sin proveedor en el catálogo'], compradoA,
+        comercial: comercialDe(a), ...sede(a, nomC.get(a.codigo_barras)) });
     }
     return filas.sort((x, y) => norm(x.articulo || x.codigo).localeCompare(norm(y.articulo || y.codigo)) || String(x.codigo).localeCompare(String(y.codigo)) || norm(x.proveedor).localeCompare(norm(y.proveedor)));
   }
@@ -60,6 +75,7 @@
     sugeridos: { t: '…ya comprados a alguien', f: (x) => x.tipo === 'sin_proveedor' && x.compradoA.length > 0 },
     sin_precio: { t: 'Sin precio', f: (x) => x.tipo === 'catalogo' && x.precio == null },
     sin_nit: { t: 'Proveedor sin NIT', f: (x) => x.tipo === 'catalogo' && !!x.proveedor && !x.nit },
+    nombre_distinto: { t: 'La sede lo ve con otro nombre', f: (x) => !!x.nombreSedeDistinto },
   };
 
   function resumen(filas) {
@@ -80,7 +96,7 @@
       if (pid && !(Number(x.proveedorId) === pid || x.compradoA.some((c) => c.id === pid))) return false;
       if (sub && (sub === SIN_SUB ? !!x.subfamilia : (x.subfamilia || '') !== sub)) return false;
       if (!palabras.length) return true;
-      const texto = norm([x.codigo, x.articulo, x.subfamilia, x.unidad, x.proveedor, x.nit, ...x.compradoA.map((c) => c.nombre + ' ' + (c.nit || ''))].join(' '));
+      const texto = norm([x.codigo, x.articulo, x.comercial, ...(x.nombreSede || []), x.subfamilia, x.unidad, x.proveedor, x.nit, ...x.compradoA.map((c) => c.nombre + ' ' + (c.nit || ''))].join(' '));
       return palabras.every((p) => texto.includes(p));
     });
   }
@@ -126,7 +142,7 @@
     const r = o.resumen || resumen(filas), ver = VISTAS[o.ver] ? o.ver : 'todo', limite = o.limite || 400;
     const n = o.conteos || r, prov = String(o.prov || ''), sub = String(o.sub || ''), orden = ORDENES[o.orden] ? o.orden : 'articulo';
     const chip = (v) => `<button class="chip${v === ver ? ' on' : ''}"${n[v] || v === ver ? '' : ' style="opacity:.55"'} onclick="catCompVer('${v}')">${esc(VISTAS[v].t)} (${n[v]})</button>`;
-    const vistas = ['todo', 'catalogo', 'sin_proveedor'].concat(o.conHist === false ? [] : ['sugeridos']).concat(['sin_precio', 'sin_nit']);
+    const vistas = ['todo', 'catalogo', 'sin_proveedor'].concat(o.conHist === false ? [] : ['sugeridos']).concat(['sin_precio', 'sin_nit']).concat(o.conHist === false ? [] : ['nombre_distinto']);
     const opt = (v, t, sel) => `<option value="${esc(v)}"${String(v) === sel ? ' selected' : ''}>${esc(t)}</option>`;
     const selProv = opt('', 'Todos los proveedores', prov) + (o.proveedores || []).map((p) => opt(p.id, p.nombre + (p.nit ? ' · NIT ' + p.nit : '') + ' (' + p.enCatalogo + ' en catálogo' + (p.porSubir ? ', ' + p.porSubir + ' por subir' : '') + ')', prov)).join('');
     const selSub = opt('', 'Todas las subfamilias', sub) + (o.subfamilias || []).map((s) => opt(s.valor, (s.valor === SIN_SUB ? '(sin subfamilia)' : s.valor) + ' (' + s.n + ')', sub)).join('');
@@ -137,7 +153,7 @@
         <div><b style="font-size:20px">${r.articulos}</b> <span class="mut">artículos con proveedor</span></div>
         <div><b style="font-size:20px">${r.proveedores}</b> <span class="mut">proveedores</span></div>
         <div><b style="font-size:20px;color:#b91c1c">${r.sin_proveedor}</b> <span class="mut">artículos SIN proveedor (falta subirlos)</span></div></div>
-      <div class="mut" style="margin-top:6px">${o.conHist === false ? '' : '“Se le ha comprado a” sale de los pedidos: es una pista de a quién amarrarlo, no está en el catálogo. '}Descarga con ⬇ Excel lo que estás viendo para completarlo e importarlo.</div></div>
+      <div class="mut" style="margin-top:6px">${o.conHist === false ? '' : '“Se le ha comprado a” sale de los pedidos: es una pista de a quién amarrarlo, no está en el catálogo. “Nombre que ve la sede” es como aparece en Nuevo pedido: si ya se le pidió a ese proveedor, el nombre que quedó en esos pedidos; si no, el de Artículos con su unidad. '}Descarga con ⬇ Excel lo que estás viendo para completarlo e importarlo.</div></div>
       <div class="card" style="margin-bottom:10px;padding:12px 14px">
         <div class="row" style="flex-wrap:wrap;gap:10px;align-items:flex-end">
           ${campo('Proveedor', `<select style="width:100%;margin:0" onchange="catCompSet('prov',this.value)">${selProv}</select>`, 2.5)}
@@ -159,11 +175,17 @@
       const nit = x.tipo === 'catalogo' ? (x.nit ? esc(x.nit) : (x.proveedor ? '<span style="color:#b91c1c">sin NIT</span>' : '—')) : '—';
       const precio = x.precio != null ? pesos(x.precio) : (x.tipo === 'catalogo' ? '<span style="color:#b45309">sin precio</span>' : '—');
       const accion = o.amarrar && x.codigo ? `<button class="s" style="padding:3px 10px;font-size:12px;white-space:nowrap" title="${x.tipo === 'catalogo' ? 'Amarrarlo a otro proveedor o cambiar su precio' : 'Amarrarlo a un proveedor (con precio)'}" onclick="${o.amarrar}('${esc(String(x.codigo).replace(/['\\]/g, ''))}')">＋ Amarrar</button>` : '';
-      return `<tr${x.tipo === 'sin_proveedor' ? ' style="background:#fef2f2"' : ''}><td class="mut" style="white-space:nowrap">${esc(x.codigo)}</td><td style="min-width:190px">${x.articulo ? esc(x.articulo) : '<span style="color:#b91c1c">— no está en Artículos —</span>'}</td>
+      const nomSede = (x.nombreSede || []).length
+        ? (x.nombreSedeDistinto
+          ? `<div style="background:#fef3c7;border-radius:6px;padding:3px 6px">${x.nombreSede.map(esc).join('<br>')}<div style="font-size:11px;color:#92400e;font-weight:700">⚠️ ${x.nombreSede.length > 1 ? x.nombreSede.length + ' nombres distintos' : 'distinto al de Artículos'}</div></div>`
+          : `<span class="mut">${x.nombreSede.map(esc).join('<br>')}</span>`)
+        : '—';
+      return `<tr${x.tipo === 'sin_proveedor' ? ' style="background:#fef2f2"' : ''}><td class="mut" style="white-space:nowrap">${esc(x.codigo)}</td><td style="min-width:190px">${x.articulo ? esc(x.articulo) : '<span style="color:#b91c1c">— no está en Artículos —</span>'}${x.comercial ? `<div class="mut" style="font-size:11.5px">comercial: ${esc(x.comercial)}</div>` : ''}</td>
+        <td style="min-width:190px">${nomSede}</td>
         <td class="mut">${esc(x.unidad || '—')}</td><td class="mut">${esc(x.subfamilia || '—')}</td><td style="min-width:190px;max-width:340px">${prov}</td><td style="white-space:nowrap">${nit}</td>
         <td class="num" style="white-space:nowrap">${precio}</td><td class="num mut">${x.prioridad == null ? '—' : esc(x.prioridad)}</td><td>${accion}</td></tr>`;
     };
-    return cab + `<div class="card" style="padding:0;overflow-x:auto"><table><thead><tr><th>CÓDIGO</th><th>ARTÍCULO</th><th>UNIDAD</th><th>SUBFAMILIA</th><th>PROVEEDOR</th><th>NIT</th><th class="num">PRECIO</th><th class="num">PRIOR.</th><th></th></tr></thead>
+    return cab + `<div class="card" style="padding:0;overflow-x:auto"><table><thead><tr><th>CÓDIGO</th><th>ARTÍCULO</th><th>NOMBRE QUE VE LA SEDE</th><th>UNIDAD</th><th>SUBFAMILIA</th><th>PROVEEDOR</th><th>NIT</th><th class="num">PRECIO</th><th class="num">PRIOR.</th><th></th></tr></thead>
       <tbody>${filas.slice(0, limite).map(fila).join('')}</tbody></table></div>`
       + (filas.length > limite ? `<div class="row" style="justify-content:center;margin:12px 0"><span class="mut">Mostrando ${limite} de ${filas.length}</span><button onclick="adminLimite+=400;pintarAdmin()">Ver 400 más</button></div>` : `<div class="mut" style="text-align:center;margin:10px 0">${filas.length} fila(s)</div>`);
   }
