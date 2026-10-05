@@ -2083,6 +2083,18 @@ async function cargarOrdenes(){
 }
 // refresco liviano del estado del bot (cada 8s: el progreso se ve casi en vivo)
 setInterval(()=>{ if(typeof usuario!=="undefined" && usuario) cargarOrdenes().catch(()=>{}); }, 8000);
+// (04/10/2026) Facturas/pedidos NO tenian ningun refresco automatico: una pestaña abierta mucho
+// tiempo sin que nadie haga una accion se quedaba mostrando datos viejos hasta F5 (pedido del
+// usuario: dos PCs podian "ver cosas distintas" solo por esto, no por un problema de permisos).
+// Cada 60s, solo si no hay un modal de edicion abierto (para no interrumpir a alguien a mitad de
+// escribir), se vuelve a consultar fresco - mismo patron que cargarOrdenes(), mas espaciado porque
+// facturas/pedidos son listas mas pesadas.
+setInterval(()=>{
+  if(typeof usuario==="undefined" || !usuario) return;
+  if(document.querySelector('.modal.on')) return;   // no interrumpir un modal abierto
+  cargar().catch(()=>{});
+  if(typeof pedidosCargados!=="undefined" && pedidosCargados) cargarPedidos().catch(()=>{});
+}, 60000);
 // (26/09/2026) COLA DE INGRESOS: documentos en ERROR / pendientes de reintento (tabla ingreso_documento), con su etapa y el motivo. Los COMPLETADOS no se vuelven a procesar.
 let ingresoDocs=[];
 async function cargarErroresIngreso(){
