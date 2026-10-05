@@ -80,6 +80,9 @@ tr:hover td{background:#f1f5f9}
 .np-pie{position:sticky;bottom:-16px;margin:12px -16px -16px;padding:10px 16px 12px;background:#fff;border-top:1px solid var(--line);box-shadow:0 -6px 14px rgba(15,23,42,.06);z-index:5}
 #np_tabla tr.np-con td{background:#ecfdf5}
 #np_tabla tr.np-con input{border-color:#22c55e;font-weight:700}
+#np_tabla tr.np-dest td{background:#dbeafe;border-top:2px solid #2563eb;border-bottom:2px solid #2563eb}
+#np_tabla tr.np-dest td:first-child{border-left:4px solid #2563eb}
+.np-dest-tag{font-size:11px;font-weight:700;color:#1d4ed8;margin-top:2px}
 .err{color:var(--bad);font-size:13px;min-height:18px}
 .vacio{text-align:center;color:var(--mut);padding:44px;background:#fff;border:1px dashed var(--line);border-radius:14px}
 .login-tag{display:inline-block;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
@@ -428,7 +431,7 @@ async function nuevoPedido(){
       return `<option value="${s.id}">${et? et+" " : ""}${s.nombre}</option>`;
     }).join("");
   }
-  npCant={}; $("np_q").value=""; $("np_sub").innerHTML='<option value="">Todas las subfamilias</option>';
+  npCant={}; npDestacado=""; $("np_q").value=""; $("np_sub").innerHTML='<option value="">Todas las subfamilias</option>';
   aplicarMarcaNP();      // proveedores (y productos) de la marca de la sede elegida
   pintarProductos();
   $("modalPedido").classList.add("on");
@@ -482,7 +485,8 @@ function npProvTecla(e){
 document.addEventListener("mousedown",e=>{ const w=document.getElementById("np_prov_wrap"); if(w && !w.contains(e.target)) npProvCerrar(); });
 // (05/10/2026) "¿No sabés a quién pedirle? Buscá por artículo" (como el proyecto de referencia GCA): cualquier articulo ->
 // todos los proveedores que lo venden (catalogo + historial, proveedoresConDetalle) -> "Pedir a este" fija el proveedor con el
-// mecanismo de siempre y deja la lista de productos filtrada en ese articulo (por su CODIGO: el nombre del historial puede variar).
+// mecanismo de siempre y muestra TODOS los productos de ese proveedor con el articulo elegido de primero y resaltado (npDestacado,
+// por su CODIGO: el nombre del historial puede variar).
 const npNorm=s=>String(s==null?"":s).normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase();
 function npArtBuscar(){
   const l=$("np_art_lista"); if(!l) return;
@@ -520,10 +524,14 @@ async function npArtPedir(cod, id){
   const conflicto=!!actual && actual!==id && Object.keys(npCant).some(k=>Number(npCant[k])>0);
   if(conflicto && !confirm("Ya tenés cantidades para "+nombreProveedorNP(actual)+".\n\nUn pedido es de un solo proveedor: si cambiás a "+nombreProveedorNP(id)+" se borran esas cantidades. ¿Seguir?")) return;
   if(actual!==id){ $("np_prov").value=String(id); if(typeof npProvSync==="function") npProvSync(); await filtrarArticulos(!conflicto); }
-  $("np_q").value=cod;
+  // (05/10/2026) lista COMPLETA del proveedor (sin buscar ni subfamilia) con el articulo elegido de primero y resaltado
+  $("np_q").value=""; $("np_sub").value="";
+  npDestacado=String(cod||"");
   const c=$("np_art_provs"); if(c) c.innerHTML="";
   $("np_art_q").value="";
   pintarProductos();
+  const f=(typeof document.getElementById==="function")?document.getElementById("np_dest"):null;
+  if(f&&f.scrollIntoView) f.scrollIntoView({block:"center",behavior:"smooth"});
 }
 document.addEventListener("mousedown",e=>{ const w=document.getElementById("np_art_wrap"), l=document.getElementById("np_art_lista"); if(w && l && !w.contains(e.target)) l.style.display="none"; });
 async function cambiarSedeNP(){
@@ -565,10 +573,11 @@ async function filtrarArticulos(mantenerCant){
   } else {
     $("np_arts_info").textContent="";
   }
-  if(!mantenerCant){ npCant={}; $("np_q").value=""; }
+  if(!mantenerCant){ npCant={}; $("np_q").value=""; npDestacado=""; }
   pintarProductos();
 }
 let npCant={};
+let npDestacado="";   // codigo del articulo elegido en "Pedir a este": va de primero y resaltado en la lista de productos
 // Proveedor(es) que venden este articulo: catalogo (catalogo_compras/marca_catalogo, con precio) + historial de compras
 // (05/10/2026: el catalogo solo cubre ~166 de 732 articulos; el historial, ~465). El historial NO se usa si la marca tiene
 // catalogo propio (Sin Par: sus codigos chocan con los de `articulos`), igual que filtrarArticulos(). Respeta npProvVis.
@@ -636,6 +645,15 @@ function pintarProductos(){
     if(!q) return true;
     return ((a.codigo||"")+" "+(a.nombre||"")).toLowerCase().includes(q);
   });
+  const dest=(typeof npDestacado!=="undefined")?npDestacado:"";
+  if(dest){
+    let i=filas.findIndex(a=>a.codigo===dest);
+    if(i<0 && !L.some(a=>a.codigo===dest)){   // no esta en la lista del proveedor: igual se muestra para poder pedirlo
+      const x=arts.find(a=>a.codigo_barras===dest);
+      if(x){ filas.unshift({codigo:x.codigo_barras, unidad:x.unimedida_compra||"", subfamilia:x.subfamilia||"", nombre:(x.articulo_hiopos||x.articulo_comercial||"")+(x.unimedida_compra?" ("+x.unimedida_compra+")":"")}); i=0; }
+    }
+    if(i>0) filas.unshift(filas.splice(i,1)[0]);
+  }
   const provElegido=Number($("np_prov").value||0);
   $("np_tabla").innerHTML = filas.slice(0,400).map(a=>{
     const mc=mmCeldas(a);
@@ -646,7 +664,9 @@ function pintarProductos(){
       if(ids.length===1) pista=`<div class="mut" style="font-size:11px">🏷️ ${escAg(nombreProveedorNP(ids[0]))}</div>`;
       else if(ids.length>1) pista=`<div class="mut" style="font-size:11px">🏷️ varios proveedores</div>`;
     }
-    return `<tr${c>0?' class="np-con"':''}><td class="mut">${a.codigo||""}</td><td>${a.nombre||""}${pista}</td>
+    const esDest=!!dest && a.codigo===dest;
+    const clases=[c>0?"np-con":"", esDest?"np-dest":""].filter(Boolean).join(" ");
+    return `<tr${esDest?' id="np_dest"':''}${clases?` class="${clases}"`:''}><td class="mut">${a.codigo||""}</td><td>${a.nombre||""}${esDest?'<div class="np-dest-tag">👉 El que buscaste</div>':''}${pista}</td>
       <td class="mut">${a.unidad||"—"}</td>
       <td class="num mut" style="white-space:nowrap"${mc.tMin}>${mc.min}</td>
       <td class="num mut" style="white-space:nowrap"${mc.tMax}${mc.dMax}>${mc.max}</td>
