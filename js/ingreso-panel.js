@@ -47,11 +47,17 @@
     const l = (docs || []).filter((d) => d.estado === 'ERROR' || d.estado === 'PENDIENTE_REINTENTO');
     if (!l.length) return '';
     const errores = l.filter((d) => d.estado === 'ERROR');
-    const filas = l.slice(0, 30).map((d) => `<div style="border-top:1px solid var(--line);padding:5px 0"><b>${esc(d.numero || d.pedido_id)}</b> · ${d.estado === 'ERROR' ? '<span style="color:#b91c1c">ERROR</span>' : '<span style="color:#b45309">PENDIENTE DE REINTENTO</span>'}
-      ${d.error_etapa ? ' · ' + esc(d.error_etapa) : ''}<div class="mut">${esc(d.etapa || '')}${d.error ? ' — ' + esc(d.error) : ''}</div></div>`).join('');
+    // (05/10/2026) "Quitar"/"Limpiar" = sacar de la cola (estado DESCARTADO, RPC ingreso_descartar): el agente deja de reintentarlo.
+    const quitar = (d) => (opciones.puede && Number(d.pedido_id) ? `<button class="d" style="padding:3px 10px;font-size:12px" title="Sacar de la cola: el agente no lo vuelve a intentar" onclick="descartarIngreso([${Number(d.pedido_id)}])">✕ Quitar</button>` : '');
+    const filas = l.slice(0, 30).map((d) => `<div style="border-top:1px solid var(--line);padding:5px 0;display:flex;gap:10px;align-items:flex-start"><div style="flex:1"><b>${esc(d.numero || d.pedido_id)}</b> · ${d.estado === 'ERROR' ? '<span style="color:#b91c1c">ERROR</span>' : '<span style="color:#b45309">PENDIENTE DE REINTENTO</span>'}
+      ${d.error_etapa ? ' · ' + esc(d.error_etapa) : ''}<div class="mut">${esc(d.etapa || '')}${d.error ? ' — ' + esc(d.error) : ''}</div></div>${quitar(d)}</div>`).join('');
+    const botones = [
+      errores.length && opciones.puede ? `<button class="p" onclick="reintentarErroresIngreso()">🔁 REINTENTAR ERRORES (${errores.length})</button>` : '',
+      opciones.puede ? `<button onclick="descartarIngreso(null)" title="Sacar de la cola TODOS los de esta lista: el agente deja de intentarlos">🧹 LIMPIAR VENTANA (${l.length})</button>` : '',
+    ].filter(Boolean).join(' ');
     return `<div class="card" style="border-left:5px solid #b45309;margin-top:8px"><div style="font-weight:700;color:#b45309">Documentos con novedad (${l.length})</div>
-      <div class="mut">Los COMPLETADOS no se vuelven a procesar. Corrige lo que indica cada uno y pulsa reintentar.</div>${filas}
-      ${errores.length && opciones.puede ? `<div class="row" style="margin-top:8px"><button class="p" onclick="reintentarErroresIngreso()">🔁 REINTENTAR ERRORES (${errores.length})</button></div>` : ''}</div>`;
+      <div class="mut">Los COMPLETADOS no se vuelven a procesar. Corrige lo que indica cada uno y pulsa reintentar, o sácalo de la cola si ya lo resolviste a mano.</div>${filas}
+      ${botones ? `<div class="row" style="margin-top:8px">${botones}</div>` : ''}</div>`;
   }
 
   return { esc, titulo, porcentaje, bloqueProgreso, bloqueErrores, MIN_SIN_LATIDO };
