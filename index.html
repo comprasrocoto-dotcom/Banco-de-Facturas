@@ -7,6 +7,12 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>Banco de Facturas</title>
+<link rel="icon" type="image/svg+xml" href="icono.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0f766e">
+<meta name="apple-mobile-web-app-title" content="Facturas">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
@@ -21,6 +27,8 @@
 body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.55 "Segoe UI",-apple-system,BlinkMacSystemFont,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
 header{padding:14px 22px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;flex-wrap:wrap;position:sticky;top:0;z-index:5;box-shadow:0 1px 3px rgba(15,23,42,.06)}
 h1{font-size:16px;margin:0;letter-spacing:.3px;font-weight:700}
+.logo-app{width:28px;height:28px;vertical-align:-8px;margin-right:9px;border-radius:7px;box-shadow:0 1px 3px rgba(15,23,42,.18)}
+.logo-app.logo-grande{width:40px;height:40px;vertical-align:-12px;border-radius:10px}
 .sp{flex:1}
 .chip{padding:6px 13px;border:1px solid var(--line);border-radius:999px;cursor:pointer;font-size:13px;font-weight:600;color:var(--mut);background:#fff;transition:.15s}
 .chip:hover{border-color:#cbd5e1;color:var(--txt)}
@@ -95,7 +103,7 @@ tr:hover td{background:#f1f5f9}
 <body>
 
 <div id="login" class="card">
-  <h1>🏦 Banco de Facturas</h1>
+  <h1><img class="logo-app logo-grande" src="icono.svg" alt="">Banco de Facturas</h1>
   <p class="mut">Entrá con el usuario de tu punto de venta.</p>
   <input id="em" type="email" placeholder="correo">
   <input id="pw" type="password" placeholder="contraseña">
@@ -105,7 +113,7 @@ tr:hover td{background:#f1f5f9}
 
 <div id="app" style="display:none">
   <header>
-    <h1>🏦 BANCO DE FACTURAS</h1>
+    <h1><img class="logo-app" src="icono.svg" alt="">BANCO DE FACTURAS</h1>
     <button class="chip on" id="m-banco" onclick="setModulo('banco')">Facturas</button>
     <button class="chip"    id="m-pedidos" onclick="setModulo('pedidos')">📋 Pedidos</button>
     <button class="chip"  id="m-cruce" style="display:none" onclick="setModulo('cruce')">🧾 Cruce DIAN</button>
