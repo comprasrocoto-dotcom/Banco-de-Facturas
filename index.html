@@ -2412,7 +2412,23 @@ async function pedirIngresos(){
   // "Pedido de compra") NUNCA llega a tener pedido_erp - sin el "p.estado!=='facturado'"
   // esta lista lo vuelve a ofrecer para siempre aunque ya este bien facturado (mismo
   // bug que el filtro del agente, ver agente-pedidos.js commit 36a586c).
-  const eleg=pedidos.filter(p=>!p.pedido_erp && p.factura_cufe && p.estado!=='facturado');
+  let eleg=pedidos.filter(p=>!p.pedido_erp && p.factura_cufe && p.estado!=='facturado');
+  // (05/10/2026) los que se SACARON DE LA COLA (DESCARTADO: Quitar / Limpiar ventana) el agente no los toma. Caso real:
+  // PED-0237 y PED-0246 salian en esta lista pero el agente no hacia nada. Se pregunta si vuelven a la cola; si no, no se listan.
+  if(eleg.length){
+    const dq=await SB.from("ingreso_documento").select("pedido_id,estado,error").in("pedido_id",eleg.map(p=>p.id));
+    const fuera=new Map((dq.data||[]).filter(d=>d.estado==="DESCARTADO").map(d=>[d.pedido_id,d]));
+    const desc=eleg.filter(p=>fuera.has(p.id));
+    if(desc.length){
+      const motivo=e=>!e?"":(/YA_EXISTE/.test(e)?" — en el ERP ya hay una factura con ese Su Doc (el agente no crea otra)":" — último error: "+String(e).replace(/\[\d\d:\d\d:\d\d\]\s*/g,"").replace(/❌\s*/g,"").slice(0,90));
+      const volver=confirm(desc.length+" de estos pedidos los SACASTE DE LA COLA (botón Quitar / Limpiar ventana), por eso el agente no los toma:\n\n"+
+        desc.slice(0,15).map(p=>"• "+p.numero+" · "+(p.proveedor_texto||"")+motivo(fuera.get(p.id).error)).join("\n")+(desc.length>15?"\n… y "+(desc.length-15)+" más":"")+
+        "\n\n¿Los vuelvo a poner en la cola para que el agente los ingrese?\n(Aceptar = sí, volverlos a la cola · Cancelar = dejarlos fuera)");
+      if(volver){ const r=await SB.rpc("ingreso_reencolar",{p_ids:desc.map(p=>p.id)}); if(r.error){ alert("No se pudieron volver a la cola: "+r.error.message); return; } }
+      else eleg=eleg.filter(p=>!fuera.has(p.id));
+      if(!eleg.length){ alert("No queda ningún pedido para ingresar (los sacados de la cola se dejaron fuera)."); return; }
+    }
+  }
   if(!eleg.length){
     const pendFac=pedidos.filter(p=>p.pedido_erp && p.factura_cufe);
     if(pendFac.length){
