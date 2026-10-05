@@ -65,6 +65,17 @@ tr:hover td{background:#f1f5f9}
 .modal{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;padding:20px;z-index:20}
 .modal.on{display:flex}
 .modal .card{max-width:470px;width:100%;max-height:94vh;overflow:auto;box-shadow:0 20px 50px rgba(15,23,42,.25);border:none}
+/* (05/10/2026) "Nuevo pedido" en bloques, estilo GCA */
+.np-sec{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-top:12px;background:#fff}
+.np-tit{font-weight:700;color:#12306b;margin-bottom:6px;font-size:13px;letter-spacing:.3px}
+.np-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 12px}
+.np-grid .np-ancho{grid-column:1/-1}
+@media (max-width:900px){.np-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.np-grid{grid-template-columns:1fr}}
+.np-cuenta{background:#dcfce7;color:#166534;border-color:#86efac}
+.np-pie{position:sticky;bottom:-16px;margin:12px -16px -16px;padding:10px 16px 12px;background:#fff;border-top:1px solid var(--line);box-shadow:0 -6px 14px rgba(15,23,42,.06);z-index:5}
+#np_tabla tr.np-con td{background:#ecfdf5}
+#np_tabla tr.np-con input{border-color:#22c55e;font-weight:700}
 .err{color:var(--bad);font-size:13px;min-height:18px}
 .vacio{text-align:center;color:var(--mut);padding:44px;background:#fff;border:1px dashed var(--line);border-radius:14px}
 .login-tag{display:inline-block;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
@@ -567,7 +578,7 @@ function pintarProductos(){
       if(ids.length===1) pista=`<div class="mut" style="font-size:11px">🏷️ ${escAg(nombreProveedorNP(ids[0]))}</div>`;
       else if(ids.length>1) pista=`<div class="mut" style="font-size:11px">🏷️ varios proveedores</div>`;
     }
-    return `<tr><td class="mut">${a.codigo||""}</td><td>${a.nombre||""}${pista}</td>
+    return `<tr${c>0?' class="np-con"':''}><td class="mut">${a.codigo||""}</td><td>${a.nombre||""}${pista}</td>
       <td class="mut">${a.unidad||"—"}</td>
       <td class="num mut" style="white-space:nowrap"${mc.tMin}>${mc.min}</td>
       <td class="num mut" style="white-space:nowrap"${mc.tMax}${mc.dMax}>${mc.max}</td>
@@ -579,6 +590,14 @@ function pintarProductos(){
       </span></td></tr>`;
   }).join("") || '<tr><td colspan="6" class="mut" style="padding:16px">Sin artículos para mostrar.</td></tr>';
   pintarProveedoresPorArticulo(filas);
+  npContar();
+}
+// (05/10/2026) "N con cantidad" junto a PRODUCTOS y en el boton Guardar. Se llama al final de pintarProductos(),
+// que corre en cada cambio de cantidad, busqueda o proveedor y al abrir el modal: nunca queda desfasado.
+function npContar(){
+  const n=Object.keys(npCant).filter(k=>Number(npCant[k])>0).length;
+  const b=$("np_cuenta"); if(b){ b.textContent=n?n+" con cantidad":""; b.style.display=n?"":"none"; }
+  const g=$("np_guardar_n"); if(g) g.textContent=n?" ("+n+")":"";
 }
 function paso(cod,v){
   v=numEs(v); if(v<0) v=0;
@@ -2875,48 +2894,57 @@ async function guardarNov(){
 
 <div id="modalPedido" class="modal"><div class="card" style="max-width:1080px;width:96vw">
   <h1>➕ Nuevo pedido</h1>
-  <div class="row">
-    <div style="flex:1"><label class="mut">Sede</label><select id="np_sede" onchange="cambiarSedeNP()"></select></div>
-    <div style="flex:1"><label class="mut">Tipo</label>
-      <select id="np_tipo"><option>Requisicion</option><option>Pedido</option><option>Traslado</option></select></div>
+  <!-- (05/10/2026) Pantalla ordenada en 3 bloques (estilo del proyecto de referencia GCA). Solo cambia la presentacion: mismos ids y handlers de siempre. -->
+  <div class="np-sec">
+    <div class="np-tit">1. INFORMACIÓN DEL PEDIDO</div>
+    <div class="np-grid">
+      <div><label class="mut">Sede</label><select id="np_sede" onchange="cambiarSedeNP()"></select></div>
+      <div><label class="mut">Tipo</label>
+        <select id="np_tipo"><option>Requisicion</option><option>Pedido</option><option>Traslado</option></select></div>
+      <div><label class="mut">Responsable</label><input id="np_resp" placeholder="quién pide"></div>
+      <div><label class="mut">Fecha</label><input type="date" id="np_fecha"></div>
+      <div><label class="mut">Fecha de entrega</label><input type="date" id="np_entrega"></div>
+      <div class="np-ancho"><label class="mut">Observación</label><input id="np_obs" placeholder="opcional (ej: entregar antes de las 10 a. m.)"></div>
+    </div>
   </div>
-  <label class="mut">Proveedor</label>
-  <div id="np_prov_wrap" style="position:relative">
-    <input id="np_prov_q" placeholder="🔎 Escribí para buscar o elegir proveedor…" autocomplete="off" onfocus="npProvAbrir()" oninput="npProvFiltrar()" onkeydown="npProvTecla(event)">
-    <div id="np_prov_lista" style="display:none;position:absolute;left:0;right:0;top:100%;margin-top:-6px;z-index:40;max-height:300px;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:9px;box-shadow:0 10px 30px rgba(15,23,42,.18)"></div>
+  <div class="np-sec">
+    <div class="np-tit">2. PROVEEDOR</div>
+    <div id="np_prov_wrap" style="position:relative">
+      <input id="np_prov_q" placeholder="🔎 Escribí para buscar o elegir proveedor…" autocomplete="off" onfocus="npProvAbrir()" oninput="npProvFiltrar()" onkeydown="npProvTecla(event)">
+      <div id="np_prov_lista" style="display:none;position:absolute;left:0;right:0;top:100%;margin-top:-6px;z-index:40;max-height:300px;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:9px;box-shadow:0 10px 30px rgba(15,23,42,.18)"></div>
+    </div>
+    <select id="np_prov" onchange="filtrarArticulos()" style="display:none"></select>
+    <div id="np_sinmarca" class="mut" style="margin-top:2px"></div>
+    <div id="np_contacto"></div>
   </div>
-  <select id="np_prov" onchange="filtrarArticulos()" style="display:none"></select>
-  <div id="np_sinmarca" class="mut" style="margin-top:2px"></div>
-  <div id="np_contacto"></div>
-  <div class="row">
-    <div style="flex:1"><label class="mut">Fecha</label><input type="date" id="np_fecha"></div>
-    <div style="flex:1"><label class="mut">Fecha de entrega</label><input type="date" id="np_entrega"></div>
-    <div style="flex:1"><label class="mut">Responsable</label><input id="np_resp" placeholder="quién pide"></div>
+  <div class="np-sec">
+    <div class="row" style="align-items:center">
+      <span class="np-tit" style="margin:0">3. PRODUCTOS <span class="mut" id="np_arts_info"></span></span>
+      <span id="np_cuenta" class="badge np-cuenta" style="display:none"></span>
+      <span class="sp"></span>
+      <button onclick="agregarLinea()">＋ Artículo libre</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="np_q" placeholder="🔍 Buscar artículo..." style="flex:2;margin:0" oninput="pintarProductos()" autocomplete="off">
+      <select id="np_sub" style="flex:1;margin:0" onchange="pintarProductos()"><option value="">Todas las subfamilias</option></select>
+    </div>
+    <div id="np_prov_sugeridos"></div>
+    <div id="np_lineas" style="display:none"></div>
+    <div style="max-height:54vh;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:10px">
+      <table style="margin:0"><thead><tr style="background:#12306b;color:#fff;position:sticky;top:0">
+        <th style="background:#12306b">CÓDIGO</th><th style="background:#12306b">ARTÍCULO</th>
+        <th style="background:#12306b">UNIDAD</th>
+        <th style="background:#12306b;text-align:center">MÍN.</th><th style="background:#12306b;text-align:center">MÁX.</th>
+        <th style="background:#12306b;text-align:right">CANTIDAD</th></tr></thead>
+        <tbody id="np_tabla"></tbody></table>
+    </div>
   </div>
-  <div class="row" style="margin-top:12px;align-items:center">
-    <span style="font-weight:700;color:#12306b">3. PRODUCTOS <span class="mut" id="np_arts_info"></span></span>
-    <span class="sp"></span>
-    <button onclick="agregarLinea()">＋ Artículo libre</button>
+  <div class="np-pie">
+    <div class="err" id="np_err"></div>
+    <div class="row"><b id="np_total" style="margin-right:auto">Total: $ 0</b>
+      <button onclick="$('modalPedido').classList.remove('on')">Cancelar</button>
+      <button class="p" onclick="guardarPedido()">Guardar pedido<span id="np_guardar_n"></span></button></div>
   </div>
-  <div class="row" style="margin-top:8px">
-    <input id="np_q" placeholder="🔍 Buscar artículo..." style="flex:2;margin:0" oninput="pintarProductos()" autocomplete="off">
-    <select id="np_sub" style="flex:1;margin:0" onchange="pintarProductos()"><option value="">Todas las subfamilias</option></select>
-  </div>
-  <div id="np_prov_sugeridos"></div>
-  <div id="np_lineas" style="display:none"></div>
-  <div style="max-height:54vh;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:10px">
-    <table style="margin:0"><thead><tr style="background:#12306b;color:#fff;position:sticky;top:0">
-      <th style="background:#12306b">CÓDIGO</th><th style="background:#12306b">ARTÍCULO</th>
-      <th style="background:#12306b">UNIDAD</th>
-      <th style="background:#12306b;text-align:center">MÍN.</th><th style="background:#12306b;text-align:center">MÁX.</th>
-      <th style="background:#12306b;text-align:right">CANTIDAD</th></tr></thead>
-      <tbody id="np_tabla"></tbody></table>
-  </div>
-  <label class="mut">Observación</label><input id="np_obs" placeholder="opcional">
-  <div class="row"><b id="np_total" style="margin-right:auto">Total: $ 0</b>
-    <button onclick="$('modalPedido').classList.remove('on')">Cancelar</button>
-    <button class="p" onclick="guardarPedido()">Guardar pedido</button></div>
-  <div class="err" id="np_err"></div>
 </div></div>
 
 <div id="modalUsuario" class="modal"><div class="card" style="max-width:520px;width:96vw">
