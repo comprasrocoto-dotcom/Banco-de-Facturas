@@ -69,6 +69,8 @@ EXPORTAR.defs.admin_cat = { nombre: 'que_le_compro_a_cada_proveedor', hoja: 'Qu�
 // Admin > "📋 Catálogo completo" (js/catalogo-completo.js): una fila por articulo-proveedor del catalogo + los articulos sin proveedor
 EXPORTAR.defs.admin_catcompleto = { nombre: 'catalogo_de_compras_completo', hoja: 'Catálogo completo', columnas: [
   { t: 'Situación', v: (x) => (x.tipo === 'catalogo' ? 'En el catálogo' : 'SIN proveedor') }, { t: 'Código', v: (x) => x.codigo }, { t: 'Artículo', v: (x) => x.articulo },
+  { t: 'Nombre comercial', v: (x) => x.comercial }, { t: 'Nombre que ve la sede', v: (x) => (x.nombreSede || []).join(' | ') },
+  { t: 'Nombre de la sede distinto', v: (x) => (x.nombreSedeDistinto ? 'SÍ' : '') },
   { t: 'Unidad de compra', v: (x) => x.unidad }, { t: 'Subfamilia', v: (x) => x.subfamilia }, { t: 'Proveedor', v: (x) => x.proveedor }, { t: 'NIT proveedor', v: (x) => x.nit },
   { t: 'Precio negociado', v: (x) => expNum(x.precio) }, { t: 'Prioridad', v: (x) => x.prioridad }, { t: 'Estado', v: (x) => x.estado }, { t: 'Catálogo', v: () => EXPORTAR.catalogoArt || '' },
   { t: 'Qué falta', v: (x) => x.faltas.join(', ') },

@@ -1275,7 +1275,7 @@ function pintarCatalogoCompleto(c){
   if(!mSel && adminHist===null){
     c.innerHTML='<div class="vacio">⏳ Cargando el catálogo y a quién se le ha comprado cada artículo...</div>';
     if(!adminHistPend){ adminHistPend=true;
-      traerTodo("proveedor_articulos","proveedor_id,proveedor,codigo,veces,ultima",["proveedor_id"]).then(h=>{ adminHist=h||[]; adminHistPend=false; if(adminVista==="catcomp") pintarAdmin(); }); }
+      traerTodo("proveedor_articulos","proveedor_id,proveedor,codigo,insumo,veces,ultima",["proveedor_id"]).then(h=>{ adminHist=h||[]; adminHistPend=false; if(adminVista==="catcomp") pintarAdmin(); }); }
     return;
   }
   const filas=CatalogoCompleto.armarFilas({ cat: mSel?adminMarcaCat.filter(k=>k.marca_id===mSel):adminCat, arts: mSel?MarcaProv.articulosAdmin(adminMarcaArts,mSel):adminArt,
