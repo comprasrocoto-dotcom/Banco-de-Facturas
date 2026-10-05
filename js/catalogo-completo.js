@@ -137,9 +137,11 @@
   const pesos = (n) => '$ ' + Number(n).toLocaleString('es-CO', { maximumFractionDigits: 2 });
 
   // opciones: { ver, resumen (totales del catalogo), conteos (por situacion con los demas filtros), proveedores, subfamilias, prov, sub,
-  //   orden, hayFiltros, limite, amarrar: nombre de la funcion global para amarrar (amarrarA / amarrarMarca) o '', conHist }
+  //   orden, hayFiltros, limite, amarrar: nombre de la funcion global para amarrar (amarrarA / amarrarMarca) o '', conHist,
+  //   quitar: true si quien entra puede borrar lineas (casillas + ✕), seleccion: ids marcados }
   function html(filas, o = {}) {
     const r = o.resumen || resumen(filas), ver = VISTAS[o.ver] ? o.ver : 'todo', limite = o.limite || 400;
+    const sel = new Set([...(o.seleccion || [])].map(Number));   // ids de lineas marcadas para quitar (o.quitar = puede borrar)
     const n = o.conteos || r, prov = String(o.prov || ''), sub = String(o.sub || ''), orden = ORDENES[o.orden] ? o.orden : 'articulo';
     const chip = (v) => `<button class="chip${v === ver ? ' on' : ''}"${n[v] || v === ver ? '' : ' style="opacity:.55"'} onclick="catCompVer('${v}')">${esc(VISTAS[v].t)} (${n[v]})</button>`;
     const vistas = ['todo', 'catalogo', 'sin_proveedor'].concat(o.conHist === false ? [] : ['sugeridos']).concat(['sin_precio', 'sin_nit']).concat(o.conHist === false ? [] : ['nombre_distinto']);
@@ -180,15 +182,36 @@
           ? `<div style="background:#fef3c7;border-radius:6px;padding:3px 6px">${x.nombreSede.map(esc).join('<br>')}<div style="font-size:11px;color:#92400e;font-weight:700">⚠️ ${x.nombreSede.length > 1 ? x.nombreSede.length + ' nombres distintos' : 'distinto al de Artículos'}</div></div>`
           : `<span class="mut">${x.nombreSede.map(esc).join('<br>')}</span>`)
         : '—';
-      return `<tr${x.tipo === 'sin_proveedor' ? ' style="background:#fef2f2"' : ''}><td class="mut" style="white-space:nowrap">${esc(x.codigo)}</td><td style="min-width:190px">${x.articulo ? esc(x.articulo) : '<span style="color:#b91c1c">— no está en Artículos —</span>'}${x.comercial ? `<div class="mut" style="font-size:11.5px">comercial: ${esc(x.comercial)}</div>` : ''}</td>
+      const quitable = o.quitar && x.tipo === 'catalogo' && Number(x.id) > 0, id = Number(x.id);
+      const casilla = o.quitar ? `<td style="width:28px">${quitable ? `<input type="checkbox" style="width:18px;height:18px;margin:0" title="Marcar para quitar"${sel.has(id) ? ' checked' : ''} onchange="catCompMarcar(${id},this.checked)">` : ''}</td>` : '';
+      const quitarBtn = quitable ? ` <button class="d" style="padding:3px 9px;font-size:12px" title="Quitar esta línea del catálogo (el artículo y el proveedor no se borran)" onclick="catCompQuitar([${id}])">✕</button>` : '';
+      return `<tr${x.tipo === 'sin_proveedor' ? ' style="background:#fef2f2"' : (quitable && sel.has(id) ? ' style="background:#fee2e2"' : '')}>${casilla}<td class="mut" style="white-space:nowrap">${esc(x.codigo)}</td><td style="min-width:190px">${x.articulo ? esc(x.articulo) : '<span style="color:#b91c1c">— no está en Artículos —</span>'}${x.comercial ? `<div class="mut" style="font-size:11.5px">comercial: ${esc(x.comercial)}</div>` : ''}</td>
         <td style="min-width:190px">${nomSede}</td>
         <td class="mut">${esc(x.unidad || '—')}</td><td class="mut">${esc(x.subfamilia || '—')}</td><td style="min-width:190px;max-width:340px">${prov}</td><td style="white-space:nowrap">${nit}</td>
-        <td class="num" style="white-space:nowrap">${precio}</td><td class="num mut">${x.prioridad == null ? '—' : esc(x.prioridad)}</td><td>${accion}</td></tr>`;
+        <td class="num" style="white-space:nowrap">${precio}</td><td class="num mut">${x.prioridad == null ? '—' : esc(x.prioridad)}</td><td style="white-space:nowrap">${accion}${quitarBtn}</td></tr>`;
     };
-    return cab + `<div class="card" style="padding:0;overflow-x:auto"><table><thead><tr><th>CÓDIGO</th><th>ARTÍCULO</th><th>NOMBRE QUE VE LA SEDE</th><th>UNIDAD</th><th>SUBFAMILIA</th><th>PROVEEDOR</th><th>NIT</th><th class="num">PRECIO</th><th class="num">PRIOR.</th><th></th></tr></thead>
+    // seleccion para quitar varias: solo lineas del catalogo que se estan viendo
+    const visibles = filas.slice(0, limite).filter((x) => x.tipo === 'catalogo' && Number(x.id) > 0).map((x) => Number(x.id));
+    const todas = visibles.length > 0 && visibles.every((id) => sel.has(id));
+    const barraSel = o.quitar && visibles.length ? `<div class="row" style="flex-wrap:wrap;gap:8px;margin:0 2px 8px;align-items:center">
+        ${sel.size ? `<b>${sel.size} línea(s) marcada(s)</b><button class="d" onclick="catCompQuitarMarcadas()">🗑 Quitar marcadas (${sel.size})</button><button onclick="catCompMarcarTodas(false)">Desmarcar</button>`
+          : '<span class="mut" style="font-size:12px">Marca las casillas para quitar varias líneas a la vez (solo las del catálogo que estás viendo).</span>'}</div>` : '';
+    const thSel = o.quitar ? `<th style="width:28px">${visibles.length ? `<input type="checkbox" style="width:18px;height:18px;margin:0" title="Marcar / desmarcar todas las que se ven"${todas ? ' checked' : ''} onchange="catCompMarcarTodas(this.checked)">` : ''}</th>` : '';
+    return cab + barraSel + `<div class="card" style="padding:0;overflow-x:auto"><table><thead><tr>${thSel}<th>CÓDIGO</th><th>ARTÍCULO</th><th>NOMBRE QUE VE LA SEDE</th><th>UNIDAD</th><th>SUBFAMILIA</th><th>PROVEEDOR</th><th>NIT</th><th class="num">PRECIO</th><th class="num">PRIOR.</th><th></th></tr></thead>
       <tbody>${filas.slice(0, limite).map(fila).join('')}</tbody></table></div>`
       + (filas.length > limite ? `<div class="row" style="justify-content:center;margin:12px 0"><span class="mut">Mostrando ${limite} de ${filas.length}</span><button onclick="adminLimite+=400;pintarAdmin()">Ver 400 más</button></div>` : `<div class="mut" style="text-align:center;margin:10px 0">${filas.length} fila(s)</div>`);
   }
 
-  return { esc, norm, armarFilas, resumen, filtrar, conteos, proveedoresDe, subfamiliasDe, ordenar, html, VISTAS, ORDENES, SIN_SUB };
+  // texto del confirm antes de quitar lineas (ids de catalogo_compras / marca_catalogo); hasta 15 en detalle
+  const PEDIR_ESCRIBIR_DESDE = 20;   // desde 20 lineas se pide escribir QUITAR (un clic de mas no borra medio catalogo)
+  function textoQuitar(filas, ids, catalogo) {
+    const set = new Set((ids || []).map(Number)), l = filas.filter((x) => x.tipo === 'catalogo' && set.has(Number(x.id)));
+    return 'Vas a QUITAR ' + l.length + ' línea(s) del catálogo ' + (catalogo || '') + ':\n\n'
+      + l.slice(0, 15).map((x) => '• ' + (x.articulo || x.codigo) + ' (' + x.codigo + ') — ' + (x.proveedor || 'proveedor #' + x.proveedorId)).join('\n')
+      + (l.length > 15 ? '\n… y ' + (l.length - 15) + ' más' : '')
+      + '\n\nSolo se quita el amarre artículo-proveedor (con su precio): el artículo y el proveedor NO se borran. No se puede deshacer'
+      + (l.length >= PEDIR_ESCRIBIR_DESDE ? ': en el siguiente paso tendrás que escribir QUITAR.' : '.') + '\n\n¿Continuar?';
+  }
+
+  return { esc, norm, armarFilas, resumen, filtrar, conteos, proveedoresDe, subfamiliasDe, ordenar, html, textoQuitar, PEDIR_ESCRIBIR_DESDE, VISTAS, ORDENES, SIN_SUB };
 });
