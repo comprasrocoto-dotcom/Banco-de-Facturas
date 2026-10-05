@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>Banco de Facturas</title>
+  <defs>
+    <linearGradient id="fondo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#14b8a6"/>
+      <stop offset=".55" stop-color="#0f766e"/>
+      <stop offset="1" stop-color="#0b4f4a"/>
+    </linearGradient>
+    <radialGradient id="rocoto" cx=".38" cy=".34" r=".75">
+      <stop offset="0" stop-color="#ff6b5a"/>
+      <stop offset=".55" stop-color="#e11d2e"/>
+      <stop offset="1" stop-color="#9f1239"/>
+    </radialGradient>
+    <linearGradient id="hoja" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eef6f5"/>
+    </linearGradient>
+  </defs>
+
+  <!-- fondo -->
+  <rect width="512" height="512" rx="116" fill="url(#fondo)"/>
+  <circle cx="96" cy="70" r="150" fill="#ffffff" opacity=".07"/>
+
+  <!-- factura de atras (el "banco": un fajo) -->
+  <g transform="rotate(-9 250 250)" opacity=".5">
+    <rect x="128" y="104" width="196" height="268" rx="20" fill="#ffffff"/>
+  </g>
+
+  <!-- factura de adelante: esquina doblada y borde de recibo -->
+  <path d="M158 92 H318 L362 136 V384 l-16 14 -16 -14 -16 14 -16 -14 -16 14 -16 -14 -16 14 -16 -14 -16 14 -16 -14 -16 14 -16 -14 -16 14 -16 -14 V112 a20 20 0 0 1 20 -20 Z" fill="url(#hoja)"/>
+  <path d="M318 92 V122 a14 14 0 0 0 14 14 H362 Z" fill="#cfe7e4"/>
+  <!-- renglones -->
+  <rect x="172" y="132" width="104" height="20" rx="10" fill="#12306b"/>
+  <rect x="172" y="180" width="160" height="12" rx="6" fill="#cbd5e1"/>
+  <rect x="172" y="210" width="128" height="12" rx="6" fill="#cbd5e1"/>
+  <rect x="172" y="240" width="146" height="12" rx="6" fill="#cbd5e1"/>
+  <rect x="172" y="284" width="64" height="16" rx="8" fill="#0f766e"/>
+
+  <!-- sello: rocoto con visto bueno -->
+  <g transform="translate(352 352)">
+    <circle r="96" fill="#ffffff"/>
+    <!-- cuerpo del rocoto (redondo y con lobulos) -->
+    <path d="M0 -56 C38 -66 74 -42 73 -2 C72 30 62 56 42 68 C31 75 20 72 14 65 C7 74 -7 74 -14 65 C-20 72 -31 75 -42 68 C-62 56 -72 30 -73 -2 C-74 -42 -38 -66 0 -56 Z" fill="url(#rocoto)"/>
+    <path d="M-40 -34 C-52 -20 -56 -2 -53 12" stroke="#ffffff" stroke-width="9" stroke-linecap="round" fill="none" opacity=".45"/>
+    <!-- caliz en puntas y tallo -->
+    <path d="M-40 -52 L-26 -66 L-14 -56 L0 -72 L14 -56 L26 -66 L40 -52 C22 -42 -22 -42 -40 -52 Z" fill="#16a34a" stroke="#16a34a" stroke-width="6" stroke-linejoin="round"/>
+    <path d="M0 -66 C0 -82 7 -94 24 -100" stroke="#15803d" stroke-width="11" stroke-linecap="round" fill="none"/>
+    <!-- visto bueno: factura conciliada -->
+    <path d="M-28 8 L-8 28 L30 -14" stroke="#ffffff" stroke-width="15" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+</svg>
