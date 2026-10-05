@@ -1265,8 +1265,10 @@ async function guardarPrecio(pid, cod, precio, btn){
 function verCatalogo(pid){ $("catProv").value=pid; setAdmin("cat"); }
 // (05/10/2026) Admin > "📋 Catálogo completo": todo el catalogo cargado (articulo + proveedor con NIT + precio) y lo que falta
 // subir (articulos sin proveedor, con a quien ya se le ha comprado segun los pedidos). Logica y HTML en js/catalogo-completo.js.
-let adminHist=null, adminHistPend=false, catCompVista="todo";
-function catCompVer(v){ catCompVista=v; adminLimite=400; pintarAdmin(); }
+let adminHist=null, adminHistPend=false, catCompF={ver:"todo", prov:"", sub:"", orden:"articulo"}, catCompMarca=null;
+function catCompVer(v){ catCompF.ver=v; adminLimite=400; pintarAdmin(); }
+function catCompSet(k,v){ catCompF[k]=v; if(k==="prov") catCompF.sub=""; adminLimite=400; pintarAdmin(); }   // otro proveedor: sus subfamilias son otras
+function catCompLimpiar(){ catCompF={ver:"todo", prov:"", sub:"", orden:catCompF.orden}; $("qa").value=""; adminLimite=400; pintarAdmin(); }
 function pintarCatalogoCompleto(c){
   const selCat=$("admCatalogo"); { const cur=selCat.value||"general"; selCat.innerHTML=MarcaProv.opcionesCatalogo(adminMarcas,adminMarcaArts,cur); if(!selCat.value) selCat.value="general"; }
   const mSel=Number(selCat.value)||0;   // 0 = catalogo general; id = marca con catalogo propio (el historial no aplica: sus codigos chocan)
@@ -1278,10 +1280,15 @@ function pintarCatalogoCompleto(c){
   }
   const filas=CatalogoCompleto.armarFilas({ cat: mSel?adminMarcaCat.filter(k=>k.marca_id===mSel):adminCat, arts: mSel?MarcaProv.articulosAdmin(adminMarcaArts,mSel):adminArt,
     provs: adminProv, hist: mSel?[]:adminHist, usarHist: !mSel });
-  const vis=CatalogoCompleto.filtrar(filas,{ver:catCompVista, q:$("qa").value});
+  if(catCompMarca!==mSel){ catCompMarca=mSel; catCompF.prov=""; catCompF.sub=""; }   // otro catalogo: proveedor y subfamilia de antes no aplican
+  const q=$("qa").value, f=catCompF;
+  const vis=CatalogoCompleto.ordenar(CatalogoCompleto.filtrar(filas,{ver:f.ver, q, prov:f.prov, sub:f.sub}), f.orden);
   EXPORTAR.catalogoArt = mSel ? ((adminMarcas.find(m=>m.id===mSel)||{}).nombre||"")+" (catálogo propio)" : "Rocoto y Arrebatao (general)";
   EXPORTAR.actual.admin_catcompleto=vis;
-  c.innerHTML=CatalogoCompleto.html(vis,{ver:catCompVista, resumen:CatalogoCompleto.resumen(filas), limite:adminLimite, amarrar: mSel?"amarrarMarca":"amarrarA", conHist: !mSel});
+  c.innerHTML=CatalogoCompleto.html(vis,{ver:f.ver, resumen:CatalogoCompleto.resumen(filas), conteos:CatalogoCompleto.conteos(filas,{q, prov:f.prov, sub:f.sub}),
+    proveedores:CatalogoCompleto.proveedoresDe(filas), subfamilias:CatalogoCompleto.subfamiliasDe(CatalogoCompleto.filtrar(filas,{prov:f.prov})),
+    prov:f.prov, sub:f.sub, orden:f.orden, hayFiltros: f.ver!=="todo"||!!f.prov||!!f.sub||!!String(q).trim(),
+    limite:adminLimite, amarrar: mSel?"amarrarMarca":"amarrarA", conHist: !mSel});
 }
 let mpProvId=null;
 function asignarA(pid){
