@@ -302,6 +302,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/envio-pedido-ui.js"></script>
 <script src="js/nota-credito.js"></script>
 <script src="js/nota-credito-ui.js"></script>
+<script src="js/desamarrar.js"></script>
 <script src="js/conciliacion-ui.js"></script>
 <script src="js/cruce-dian-ui.js"></script>
 <script>
@@ -1943,7 +1944,7 @@ function bloquearSiYaAmarrado(p){
   // desde estos flujos NO se deja amarrar una segunda factura encima de la que
   // ya tiene el pedido (a diferencia de confirmarSiYaAmarrado, aca no se pregunta).
   if(p && p.factura_cufe){
-    alert("Este pedido ya tiene una factura amarrada. Si necesitas cambiarla, consultá con administración.");
+    alert("Este pedido ya tiene una factura amarrada. Si es la equivocada, primero suéltala con «⛓ Desamarrar factura» (en el pedido) y después amarra la correcta. No borres la factura.");
     return true;
   }
   return false;
@@ -2050,6 +2051,7 @@ async function abrirPedido(id){
      <div class="row" style="margin-top:14px">
        ${!p.factura_cufe?`<button class="s" onclick="abrirAmarre('pedido',${p.id})">🔗 Amarrar a factura</button>`:""}
        ${p.factura_cufe?`<span class="badge st-sellada">Amarrado a ${numFacturaDe(p)||"factura"}</span>`:""}
+       ${(p.factura_cufe&&typeof Desamarrar!=="undefined"&&Desamarrar.puede(perfil))?`<button class="d" title="Suelta la factura de este pedido sin borrar nada: la factura queda libre en el banco" onclick="desamarrarPedido(${p.id})">⛓ Desamarrar factura</button>`:""}
        ${p.observacion_pedido?`<span class="mut">Obs: ${p.observacion_pedido}</span>`:""}
      </div>
      <div class="row" style="margin-top:10px;gap:8px">
@@ -2702,6 +2704,7 @@ function pintar(){
         ${(f.archivo_pdf_sellado&&(f.estado==="sellada"||f.estado==="pagada"))?`<button class="p" onclick="verPdfArchivo('${f.archivo_pdf_sellado}')">✅ Ver sellada</button>`:""}
         ${f.archivo_recibo?`<button onclick="verPdfArchivo('${f.archivo_recibo}')">📸 Ver recibo</button>`:""}
         ${(f.tipo=="factura")?`<button class="s" onclick="abrirAmarre('factura','${f.cufe}')">🔗 Buscar pedido</button>`:""}
+        ${((f.pedido_num||f.pedido_erp)&&typeof Desamarrar!=="undefined"&&Desamarrar.puede(perfil))?`<button class="d" title="Suelta esta factura de su pedido sin borrar nada" onclick="desamarrarFactura('${f.cufe}')">⛓ Desamarrar pedido</button>`:""}
         ${botonNotaCredito(f)}
         ${can("facturas.borrar")?`<button class="d" title="Borrar factura" onclick="borrarFactura('${f.cufe}')">🗑</button>`:""}
         ${(f.estado!="pagada")?`<button onclick="abrirNov('${f.cufe}')">Novedad</button>`:""}
@@ -2783,7 +2786,7 @@ async function borrarFactura(cufe){
   const f=facturas.find(x=>x.cufe===cufe)||{};
   const num=((f.prefijo||"")+(f.folio||""))||f.cufe.slice(0,10);
   let aviso = (f.estado==="sellada") ? "⚠️ OJO: esta factura YA ESTÁ SELLADA y aprobada.\n\n" : "";
-  if(f.pedido_erp||f.pedido_num) aviso += "Está amarrada al pedido "+(f.pedido_erp||f.pedido_num)+" (se suelta el amarre, el pedido queda).\n\n";
+  if(f.pedido_erp||f.pedido_num) aviso += "Está amarrada al pedido "+(f.pedido_erp||f.pedido_num)+". Si solo quieres soltarla del pedido, CANCELA y usa «⛓ Desamarrar pedido»: así la factura no se borra.\n\n";
   if(!confirm(aviso+"¿BORRAR la factura "+num+" de "+(f.emisor||"")+"?\n\nSe borra el registro y su PDF. No se puede deshacer.")) return;
   await SB.from("pedidos").update({factura_cufe:null}).eq("factura_cufe",cufe);
   if(f.archivo_pdf) { const x=await SB.storage.from("facturas").remove([f.archivo_pdf]); if(x.error) console.warn(x.error.message); }
