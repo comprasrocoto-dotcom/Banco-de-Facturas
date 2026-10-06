@@ -166,7 +166,7 @@ tr:hover td{background:#f1f5f9}
         <span class="mut">al</span>
         <input type="date" id="d2" style="width:auto;margin:0">
         <button class="p" onclick="descargarSelladas()">⬇ Descargar ZIP</button>
-        <button class="p" onclick="descargarCicloCompleto()" title="Sellada + aprobada + facturada (con N° de ingreso ERP): un PDF por factura, dentro de un ZIP. Usa las fechas de Descargar selladas del/al (fecha de sellado, hora Colombia)">📄 PDF ciclo completo</button>
+        <button class="p" onclick="descargarCicloCompleto()" title="Lo mismo que la vista ✅ Proceso terminado (con N° de ingreso ERP y sellada, o nota crédito): un PDF por documento, dentro de un ZIP. Las fechas del/al cuentan por FECHA DE INGRESO AL ERP">📄 PDF ciclo completo</button>
         <button class="p" onclick="descargarPendientes()" title="Sin Nº de ingreso ERP o con novedad registrada">📥 Pendientes y novedades</button>
         <span class="mut" id="resDian"></span>
         <span class="mut" id="resdesc"></span>
@@ -2553,8 +2553,16 @@ async function amarrarPedido(id){
   alert("¡Amarrado! "+p.numero+" ↔ "+(numF||"la factura"));
 }
 async function cargar(){
-  const {data:f}=await SB.from("facturas_busqueda").select("*").order("fecha_emision",{ascending:false});
-  facturas=f||[];
+  // (05/10/2026) por paginas: la base corta cada consulta en 1.000 filas (hoy ~740 facturas); sin esto, al pasar de
+  // 1.000 las mas viejas desaparecian de la lista, de "Proceso terminado" y de los ZIP sin ningun aviso.
+  const f=[];
+  for(let i=0;;i+=1000){
+    const {data,error}=await SB.from("facturas_busqueda").select("*").order("fecha_emision",{ascending:false}).order("cufe").range(i,i+999);
+    if(error||!data) break;
+    f.push(...data);
+    if(data.length<1000) break;
+  }
+  facturas=f;
   const {data:n}=await SB.from("novedades").select("cufe,motivo,texto,created_at");
   novedades=n||[];
   await cargarNotaLinks();   // notas credito amarradas a sus facturas (si falla, todo sigue igual)
@@ -2616,7 +2624,7 @@ function pintar(){
   if(vista=="pool")     l=l.filter(f=>f.estado=="pool"||f.estado=="asignada");
   if(vista=="mias")     l=l.filter(f=>f.estado=="asignada");
   if(vista=="selladas") l=l.filter(f=>f.estado=="sellada"||f.estado=="pagada");
-  if(vista=="hecho")    l=l.filter(f=>(f.estado=="sellada"||f.estado=="pagada")&&f.num_ingreso);
+  if(vista=="hecho")    l=l.filter(f=>BancoUtils.esTerminada(f));   // (05/10/2026) con N° de ingreso y sellada, o nota credito (no se sellan)
   if(vista=="nov")      l=l.filter(f=>novDe(f.cufe));
   // Filtro por fecha (usa fecha_ingreso si tiene, sino fecha_emision)
   const fd=$("fdesde").value, fh=$("fhasta").value;
@@ -2899,11 +2907,13 @@ function msgZip(r,extra){
 async function descargarCicloCompleto(){
   const res=$("resdesc"); res.textContent="";
   const g=rangoDescarga(); if(g.error){ res.textContent=g.error; return; }
-  // Ciclo completo = sellada/aprobada + FACTURADA (tiene N° de ingreso ERP) + con PDF
-  const {lista}=BancoUtils.filtrarSelladas(facturas,{desde:g.desde,hasta:g.hasta,sedeId:$("fSede").value,conIngreso:true});
-  if(!lista.length){ res.textContent="No hay documentos con el ciclo completo (sellados y facturados)"+textoRango(g.desde,g.hasta)+"."; return; }
+  // (05/10/2026) Ciclo completo = lo mismo que la vista "✅ Proceso terminado": con N° de ingreso ERP y sellada (o nota
+  // credito, que no se sella), por FECHA DE INGRESO AL ERP (antes: solo selladas y por fecha de sello -> faltaban documentos)
+  const {lista,sinPdf,fueraDeRango}=BancoUtils.filtrarTerminadas(facturas,{desde:g.desde,hasta:g.hasta,sedeId:$("fSede").value});
+  if(!lista.length){ res.textContent="No hay documentos con el proceso terminado"+textoRango(g.desde,g.hasta)+" (fecha de ingreso al ERP)."+(sinPdf?" ("+sinPdf+" sin PDF)":""); return; }
   const r=await bajarPdfsEnZip(lista,BancoUtils.nombreArchivoCiclo,"ciclo_completo_"+etiquetaRango(g.desde,g.hasta)+".zip",res);
-  res.textContent=msgZip(r," Un PDF por factura.");
+  const nc=lista.filter(f=>f.tipo==="nota_credito").length;
+  res.textContent=msgZip(r," Un PDF por documento"+(nc?" ("+nc+" nota(s) crédito)":"")+"."+(sinPdf?" ⚠️ "+sinPdf+" terminado(s) sin PDF en la web.":""));
 }
 
 async function descargarSelladas(){
