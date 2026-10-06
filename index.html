@@ -283,6 +283,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/admin-editar.js"></script>
 <script src="js/marca-proveedores.js"></script>
 <script src="js/catalogo-completo.js"></script>
+<script src="js/separar-pedido.js"></script>
 <script src="js/dian-abierto.js"></script>
 <script src="js/exportar.js"></script>
 <script src="js/exportar-ui.js"></script>
@@ -362,6 +363,9 @@ let arts=[], provs=[], cat=[], minmax=[], provArts=[], npLineas=0;
 // PROVEEDORES POR MARCA (js/marca-proveedores.js): artsGlobal/catGlobal son los de siempre (Rocoto/Arrebatao); las marcas con productos propios (Sin Par) usan marca_articulo / marca_catalogo
 let npProvVis=[], npProvIdx=0;   // proveedores que ofrece el buscador de "Nuevo pedido" y la fila resaltada
 let artsGlobal=null, catGlobal=null, vinculosProv=[], marcaArts=[], marcaCat=[], npMarcaPropia=false;
+let reglasAparte=[];   // (06/10/2026) regla_pedido_aparte: PROVEEDOR + PRODUCTO (por id) que van en un pedido aparte (js/separar-pedido.js)
+// articulos.id de un codigo del catalogo GENERAL (las reglas son por id de articulos; un articulo de catalogo propio de marca no aplica)
+function idArticuloDe(cod){ const a=(artsGlobal||[]).find(x=>x.codigo_barras===cod); return a&&a.id!=null?a.id:null; }
 let npHist=[];   // (05/10/2026) historial proveedor<->articulo (vista proveedor_articulos): a quien se le ha comprado cada articulo
 // Trae TODAS las filas de una tabla (por paginas de 1.000). Si algo falla devuelve lo que alcanzo a traer (como antes: la pantalla sigue).
 async function traerTodo(tabla, cols, orden){
@@ -409,7 +413,7 @@ async function nuevoPedido(){
   if(!provs.length){
     // Se pide por paginas: la API corta en 1.000 filas y maximos_minimos ya tiene mas.
     provs=await traerTodo("proveedores","id,nit,razon_social,nombre_comercial,correo,telefono1,asesor",["razon_social","id"]);
-    arts=await traerTodo("articulos","codigo_barras,articulo_hiopos,articulo_comercial,unimedida_compra,subfamilia",["articulo_comercial","id"]);
+    arts=await traerTodo("articulos","id,codigo_barras,articulo_hiopos,articulo_comercial,unimedida_compra,subfamilia",["articulo_comercial","id"]);   // id: reglas de pedido aparte (06/10/2026)
     cat=await traerTodo("catalogo_compras","codigo_barras,id_proveedor,precio_negociado",["id"]);
     artsGlobal=arts; catGlobal=cat;
     vinculosProv=await traerTodo("proveedor_marca","proveedor_id,marca_id",["proveedor_id"]);   // si la tabla no existe/falla: queda vacío y todo se ve como antes
@@ -417,6 +421,7 @@ async function nuevoPedido(){
     marcaCat=await traerTodo("marca_catalogo","marca_id,codigo_barras,id_proveedor,precio_negociado",["id"]);
     minmax=await traerTodo("maximos_minimos","articulo,almacen,subarticulo,minimo,maximo",["id"]);
     npHist=await traerTodo("proveedor_articulos","proveedor_id,codigo,veces,ultima",["proveedor_id"]);   // ~500 filas; si falla queda vacio y todo sigue como antes (solo catalogo)
+    reglasAparte=await traerTodo("regla_pedido_aparte","proveedor_id,articulo_id,grupo,activo",["id"]);   // (06/10/2026) productos que van en pedido aparte por proveedor; si falla: ninguna regla (como antes)
     await prepararConversiones();
   }
   npProvVis=provs;
@@ -677,7 +682,7 @@ function pintarProductos(){
     }
     const esDest=!!dest && a.codigo===dest;
     const clases=[c>0?"np-con":"", esDest?"np-dest":""].filter(Boolean).join(" ");
-    return `<tr${esDest?' id="np_dest"':''}${clases?` class="${clases}"`:''}><td class="mut">${a.codigo||""}</td><td>${a.nombre||""}${esDest?'<div class="np-dest-tag">👉 El que buscaste</div>':''}${pista}</td>
+    return `<tr${esDest?' id="np_dest"':''}${clases?` class="${clases}"`:''}><td class="mut">${a.codigo||""}</td><td>${a.nombre||""}${esDest?'<div class="np-dest-tag">👉 El que buscaste</div>':''}${(()=>{ const g=(typeof SepararPedido!=="undefined"&&typeof reglasAparte!=="undefined")?SepararPedido.grupoDe(a.codigo,provElegido,reglasAparte,idArticuloDe):null; return g?`<div class="np-dest-tag" style="color:#7c3aed">📦 Va en ${escAg(g)} (pedido aparte)</div>`:""; })()}${pista}</td>
       <td class="mut">${a.unidad||"—"}</td>
       <td class="num mut" style="white-space:nowrap"${mc.tMin}>${mc.min}</td>
       <td class="num mut" style="white-space:nowrap"${mc.tMax}${mc.dMax}>${mc.max}</td>
@@ -890,9 +895,20 @@ async function guardarPedido(){
     if(s.includes("EMPAQUE")) return "empaque";
     if(s.includes("UTENSIL")||s.includes("LOZA")) return "loza";
     return "insumos"; };
+  // (06/10/2026) REGLA POR PROVEEDOR + PRODUCTO (tabla regla_pedido_aparte, por id): p. ej. JUAN D. HOYOS (200) + papa
+  // delgada (490) / papa Surecrisp (769) -> PEDIDO ESPECIAL aparte, con todos los de ese grupo juntos. Con otro proveedor no
+  // aplica. Lo demas sigue la regla de siempre (insumos / aseo-empaque).
+  const sep = (typeof SepararPedido!=="undefined") ? SepararPedido.partir(filas, prov, reglasAparte, idArticuloDe) : {normales:filas, especiales:[]};
   const grupoA=[], grupoB=[];
-  filas.forEach(f=>{ (catDe(f.subfamilia)==="insumos" ? grupoA : grupoB).push(f); });
-  const grupos = grupoB.length && grupoA.length ? [[grupoA,""],[grupoB,"Material de aseo / empaque (separado del pedido de insumos)"]] : [[filas,""]];
+  sep.normales.forEach(f=>{ (catDe(f.subfamilia)==="insumos" ? grupoA : grupoB).push(f); });
+  const ordenes=[];   // {lineas, obs, nota, etiqueta}
+  if(grupoA.length && grupoB.length){
+    ordenes.push({lineas:grupoA, obs:"", nota:"Solo insumos — el aseo/empaque va en otra orden", etiqueta:"insumos"});
+    ordenes.push({lineas:grupoB, obs:"Material de aseo / empaque (separado del pedido de insumos)", nota:"Material de aseo/empaque — va en orden aparte", etiqueta:"material de aseo / empaque"});
+  } else if(sep.normales.length){
+    ordenes.push({lineas:sep.normales, obs:"", nota:sep.especiales.length?"Pedido normal — "+sep.especiales.map(e=>e.grupo).join(", ")+" va en otra orden":"", etiqueta:"pedido normal"});
+  }
+  for(const e of sep.especiales) ordenes.push({lineas:e.filas, obs:e.grupo+" — "+(pv.razon_social||pv.nombre_comercial||"")+" (va en pedido aparte por regla del proveedor)", nota:"", etiqueta:e.grupo});
 
   async function crearPedido(lineas, obsExtra, nota){
     const numero=(await SB.rpc("siguiente_pedido")).data || ("WEB-"+Date.now().toString().slice(-8));
@@ -915,16 +931,12 @@ async function guardarPedido(){
 
   let nums=[];
   try{
-    for(const [lineas,obs] of grupos){
-      const esAseo = grupos.length>1 && lineas.some(f=>catDe(f.subfamilia)!=="insumos");
-      nums.push(await crearPedido(lineas, obs,
-        esAseo ? "Material de aseo/empaque — va en orden aparte" : (grupos.length>1 ? "Solo insumos — el aseo/empaque va en otra orden" : "")));
-    }
-  }catch(e){ $("np_err").textContent="No se pudo guardar: "+e.message; return; }
+    for(const o of ordenes) nums.push(await crearPedido(o.lineas, o.obs, o.nota));
+  }catch(e){ $("np_err").textContent="No se pudo guardar: "+e.message+(nums.length?" (ya se habían creado: "+nums.join(", ")+")":""); return; }
   await SB.from("historial").insert({accion:"pedido creado desde la web",detalle:"PED "+sedeNom+" → "+nums.join(" + "),usuario:usuario.id}).then(()=>{},()=>{});
   $("modalPedido").classList.remove("on");
   pedidosCargados=false; await cargarPedidos();
-  if(nums.length>1) alert("Se crearon DOS órdenes separadas (no se mezclan):\n\n• "+nums[0]+"  → insumos\n• "+nums[1]+"  → material de aseo / empaque");
+  if(nums.length>1) alert("Se crearon "+(nums.length===2?"DOS":nums.length)+" órdenes separadas (no se mezclan):\n\n"+nums.map((n,i)=>"• "+n+"  → "+ordenes[i].etiqueta).join("\n"));
   else alert("Pedido "+nums[0]+" guardado.");
 }
 let adminCargado=false, adminVista="prov", adminProv=[], adminArt=[], adminCat=[];
