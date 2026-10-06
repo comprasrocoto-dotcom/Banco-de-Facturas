@@ -76,6 +76,13 @@ tr:hover td{background:#f1f5f9}
 /* (05/10/2026) "Nuevo pedido" en bloques, estilo GCA */
 .np-sec{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-top:12px;background:#fff}
 .np-tit{font-weight:700;color:#12306b;margin-bottom:6px;font-size:13px;letter-spacing:.3px}
+/* (06/10/2026) cada bloque con su color, suave: franja a la izquierda, titulo y un tinte leve arriba (el fondo sigue blanco) */
+.np-sec[data-paso="1"]{--np-acento:#0f766e;--np-tinte:#f0fdfa;--np-borde:#a7f3d0}   /* informacion: verde de la marca */
+.np-sec[data-paso="2"]{--np-acento:#1d4ed8;--np-tinte:#eff6ff;--np-borde:#bfdbfe}   /* proveedor: azul */
+.np-sec[data-paso="3"]{--np-acento:#b45309;--np-tinte:#fffbeb;--np-borde:#fde68a}   /* productos: ambar */
+.np-sec[data-paso]{border-color:var(--np-borde);border-left:5px solid var(--np-acento);background:linear-gradient(180deg,var(--np-tinte) 0,#fff 44px)}
+.np-sec[data-paso] .np-tit{color:var(--np-acento)}
+.np-sec[data-paso] .np-tit::before{content:"";display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--np-acento);margin-right:8px;vertical-align:0;box-shadow:0 0 0 3px var(--np-tinte)}
 .np-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 12px}
 .np-grid .np-ancho{grid-column:1/-1}
 @media (max-width:900px){.np-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -3141,7 +3148,7 @@ async function guardarNov(){
   <h1>➕ Nuevo pedido</h1>
   <div id="np_clon" class="np-clon" style="display:none"></div>
   <!-- (05/10/2026) Pantalla ordenada en 3 bloques (estilo del proyecto de referencia GCA). Solo cambia la presentacion: mismos ids y handlers de siempre. -->
-  <div class="np-sec">
+  <div class="np-sec" data-paso="1">
     <div class="np-tit">1. INFORMACIÓN DEL PEDIDO</div>
     <div class="np-grid">
       <div><label class="mut">Sede</label><select id="np_sede" onchange="cambiarSedeNP()"></select></div>
@@ -3153,7 +3160,7 @@ async function guardarNov(){
       <div class="np-ancho"><label class="mut">Observación</label><input id="np_obs" placeholder="opcional (ej: entregar antes de las 10 a. m.)"></div>
     </div>
   </div>
-  <div class="np-sec">
+  <div class="np-sec" data-paso="2">
     <div class="np-tit">2. PROVEEDOR</div>
     <div id="np_prov_wrap" style="position:relative">
       <input id="np_prov_q" placeholder="🔎 Escribí para buscar o elegir proveedor…" autocomplete="off" onfocus="npProvAbrir()" oninput="npProvFiltrar()" onkeydown="npProvTecla(event)">
@@ -3171,7 +3178,7 @@ async function guardarNov(){
       <div id="np_art_provs"></div>
     </div>
   </div>
-  <div class="np-sec">
+  <div class="np-sec" data-paso="3">
     <div class="row" style="align-items:center">
       <span class="np-tit" style="margin:0">3. PRODUCTOS <span class="mut" id="np_arts_info"></span></span>
       <span id="np_cuenta" class="badge np-cuenta" style="display:none"></span>
