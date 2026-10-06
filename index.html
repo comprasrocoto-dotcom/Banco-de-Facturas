@@ -291,6 +291,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/marca-proveedores.js"></script>
 <script src="js/catalogo-completo.js"></script>
 <script src="js/separar-pedido.js"></script>
+<script src="js/favorito-dian.js"></script>
 <script src="js/dian-abierto.js"></script>
 <script src="js/exportar.js"></script>
 <script src="js/exportar-ui.js"></script>
@@ -1240,7 +1241,7 @@ function pintarAgente(c,q){
   const dMalas=dn.filter(({m})=>m.estado==="error").length, dEnCurso=dn.filter(({m})=>m.estado!=="subida"&&m.estado!=="error").length;
   h+=`<h3 style="margin:18px 0 8px">Descargas de la DIAN <span class="badge ${dMalas?"st-pool":(dEnCurso?"st-asignada":"st-sellada")}">${dMalas?dMalas+" con problema":(dEnCurso?dEnCurso+" esperando el PDF":"todo al día")}</span> <button class="s" onclick="agToggleDian()">${agDianAbierto?"Ocultar":"Mostrar"}</button></h3>`;
   if(agDianAbierto){
-    h+=`<div class="mut" style="margin-bottom:6px">Las que preparas en el cruce (Cruce DIAN). La DIAN no deja que un robot baje los PDF: los bajas tú con “Abrir en DIAN” y, cuando el PDF cae en Descargas, el robot lo sube solo al banco como “Sin asignar”. “Esperando el PDF” = todavía no lo has bajado.</div>`;
+    h+=`<div class="mut" style="margin-bottom:6px">Las que preparas en el cruce (Cruce DIAN). La DIAN no deja que un robot baje los PDF: los bajas tú con “Abrir en DIAN” y, cuando el PDF cae en Descargas, el robot lo sube solo al banco como “Sin asignar”. “Esperando el PDF” = todavía no lo has bajado. ${typeof botonFavoritoDian==="function"?botonFavoritoDian():""}</div>`;
     h+=dn.length?dn.map(({m,i})=>{const est={subida:"st-sellada",bajando:"st-asignada",pendiente:"st-asignada",error:"st-pool",agotado:"st-pool"}[m.estado]||"";
       return `<div class="card" style="margin:6px 0"><div class="row">
         <div style="flex:3"><div class="emisor">${escAg(m.documento||String(m.cufe||"").slice(0,12))} · ${escAg(m.emisor||"—")}</div>
@@ -1248,7 +1249,7 @@ function pintarAgente(c,q){
         ${m.estado==="subida"?"":`<div class="mut">NIT que pide la DIAN: <b>${escAg(m.nit_emisor)}</b></div>`}
         ${m.ultimo_error&&m.estado!=="subida"?`<div class="mut" style="color:#b45309">Aviso: ${escAg(String(m.ultimo_error).slice(0,300))}</div>`:""}</div>
         <span class="badge ${est}">${escAg(({pendiente:"esperando el PDF",bajando:"esperando el PDF",agotado:"esperando el PDF",subida:"subida al banco",error:"error"})[m.estado]||m.estado)}</span>
-        ${m.estado!=="subida"?`${dianBotonHtml(m.cufe)}`:""}${m.estado==="error"?`<button onclick="agReintentarDian(${i})">Reintentar ahora</button>`:""}
+        ${m.estado!=="subida"?`${dianBotonHtml(m.cufe,{nit:m.nit_emisor,numero:m.documento,tipo:m.tipo})}`:""}${m.estado==="error"?`<button onclick="agReintentarDian(${i})">Reintentar ahora</button>`:""}
       </div></div>`;}).join(""):'<div class="vacio">Todavía no has pedido ninguna descarga.</div>';
   }
   // 2) Lo que decidió el agente (para corregirlo si se equivocó)
@@ -2225,10 +2226,10 @@ function pintarListaDian(){
   const c=cr, el=$("cruceLista"); if(!c||!el) return;
   if(!c.itemsCola||!c.itemsCola.length){ el.innerHTML=""; return; }
   const est=c.estadoPorCufe||{};
-  el.innerHTML=`<div style="margin-top:10px"><b>Lista para bajar de la DIAN</b> <span class="mut">(el PDF que bajes queda en Descargas y se sube solo)</span></div>`+
+  el.innerHTML=`<div style="margin-top:10px"><b>Lista para bajar de la DIAN</b> <span class="mut">(el PDF que bajes queda en Descargas y se sube solo)</span> ${typeof botonFavoritoDian==="function"?botonFavoritoDian():""}</div>`+
     c.itemsCola.map(it=>{ const e=est[it.cufe]; const hecho=e==="subida";
       return `<div class="row" style="border-bottom:1px solid var(--line);padding:6px 0;gap:10px"><div style="flex:3"><b>${escAg(it.documento||"—")}</b> · ${escAg(it.emisor||"—")} <span class="mut">· NIT ${escAg(it.nit_emisor)}</span></div>
-        ${hecho?`<span class="badge st-sellada">✅ subida al banco</span>`:`<button title="Copiar el NIT" onclick="copiarTexto('${escAg(it.nit_emisor)}',this)">📋 NIT</button>${dianBotonHtml(it.cufe)}<span class="badge st-asignada">esperando el PDF</span>`}</div>`; }).join("");
+        ${hecho?`<span class="badge st-sellada">✅ subida al banco</span>`:`<button title="Copiar el NIT" onclick="copiarTexto('${escAg(it.nit_emisor)}',this)">📋 NIT</button>${dianBotonHtml(it.cufe,{nit:it.nit_emisor,numero:it.documento,tipo:it.tipo})}<span class="badge st-asignada">esperando el PDF</span>`}</div>`; }).join("");
 }
 async function enviarADian(){
   const c=cr; if(!c||c.enviando) return;

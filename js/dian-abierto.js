@@ -38,10 +38,11 @@
 
   const ESTILO_ABIERTA = 'background:#dcfce7;border-color:#16a34a;color:#166534;font-weight:700';
   // HTML del boton (y del ↺ para quitar la marca cuando ya esta abierta). url = enlace oficial de la DIAN con el CUFE.
-  function botonHtml(cufe, url, abierta) {
+  // (06/10/2026) bf = datos de la factura para el favorito ⚡ DIAN BOT (js/favorito-dian.js): al pulsar se copian al portapapeles.
+  function botonHtml(cufe, url, abierta, bf) {
     const c = esc(norm(cufe) || cufe);
     return `<span class="dian-abrir" data-cufe="${c}" style="display:inline-flex;gap:4px;align-items:center">` +
-      `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" onclick="dianMarcarAbierto('${c}',this)">` +
+      `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" onclick="dianMarcarAbierto('${c}',this)"${bf ? ` data-bf="${esc(bf)}"` : ''}>` +
       `<button class="${abierta ? '' : 's'}"${abierta ? ` style="${ESTILO_ABIERTA}"` : ''} title="${abierta ? 'Ya la abriste en la DIAN. Toca para abrirla de nuevo.' : 'Abre la DIAN con el CUFE ya escrito'}">${abierta ? '✓ Abierta · abrir de nuevo ↗' : 'Abrir en DIAN ↗'}</button></a>` +
       (abierta ? `<button title="Quitar la marca (dejarla como pendiente)" style="padding:4px 8px" onclick="dianDesmarcar('${c}',this)">↺</button>` : '') + '</span>';
   }
@@ -51,16 +52,22 @@
 
 // ---------------------------------------------------------------- en la pagina
 var DIAN_ABIERTO = (typeof DianAbierto !== 'undefined') ? DianAbierto.crear((function () { try { return window.localStorage; } catch (e) { return null; } })()) : null;
-function dianBotonHtml(cufe) { return DianAbierto.botonHtml(cufe, BancoUtils.urlDian(cufe), DIAN_ABIERTO.esta(cufe)); }
+// d = { nit, numero, tipo } de la factura (opcional): con eso "Abrir en DIAN" deja los datos listos para el favorito ⚡ DIAN BOT
+function dianDatosFavorito(cufe, d) { return d && typeof FavoritoDian !== 'undefined' ? FavoritoDian.datosPortapapeles(Object.assign({ cufe: cufe }, d)) : ''; }
+function dianBotonHtml(cufe, d) { return DianAbierto.botonHtml(cufe, BancoUtils.urlDian(cufe), DIAN_ABIERTO.esta(cufe), dianDatosFavorito(cufe, d)); }
+const dianBfDe = (span) => { try { const a = span && span.querySelector ? span.querySelector('a[data-bf]') : null; return a ? a.getAttribute('data-bf') : ''; } catch (e) { return ''; } };
 // Repinta SOLO ese boton (y resalta/quita el resalte de su fila) sin volver a dibujar la lista; se hace despues del clic (setTimeout) para no quitar el enlace antes de que se abra
 function dianRepintarBoton(span, cufe, abierta) {
   if (!span) return;
   const url = BancoUtils.urlDian(cufe);
-  span.outerHTML = DianAbierto.botonHtml(cufe, url, abierta);
+  span.outerHTML = DianAbierto.botonHtml(cufe, url, abierta, dianBfDe(span));
 }
 function dianResaltarFila(el, abierta) { const f = el && el.closest ? el.closest('.row') : null; if (f) f.style.background = abierta ? '#f0fdf4' : ''; }
 function dianMarcarAbierto(cufe, el) {
   DIAN_ABIERTO.marcar(cufe);
+  // datos para el favorito ⚡ DIAN BOT (si el navegador no deja copiar, el favorito pide el NIT)
+  const bf = el && el.getAttribute ? el.getAttribute('data-bf') : '';
+  if (bf && typeof navigator !== 'undefined' && navigator.clipboard) { try { navigator.clipboard.writeText(bf).catch(() => {}); } catch (e) { /* sin portapapeles */ } }
   const span = el && el.closest ? el.closest('.dian-abrir') : null;
   setTimeout(() => { dianResaltarFila(span, true); dianRepintarBoton(span, cufe, true); }, 60);
 }
