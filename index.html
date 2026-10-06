@@ -76,6 +76,13 @@ tr:hover td{background:#f1f5f9}
 /* (05/10/2026) "Nuevo pedido" en bloques, estilo GCA */
 .np-sec{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-top:12px;background:#fff}
 .np-tit{font-weight:700;color:#12306b;margin-bottom:6px;font-size:13px;letter-spacing:.3px}
+/* (06/10/2026) cada bloque con su color, suave: franja a la izquierda, titulo y un tinte leve arriba (el fondo sigue blanco) */
+.np-sec[data-paso="1"]{--np-acento:#0f766e;--np-tinte:#f0fdfa;--np-borde:#a7f3d0}   /* informacion: verde de la marca */
+.np-sec[data-paso="2"]{--np-acento:#1d4ed8;--np-tinte:#eff6ff;--np-borde:#bfdbfe}   /* proveedor: azul */
+.np-sec[data-paso="3"]{--np-acento:#b45309;--np-tinte:#fffbeb;--np-borde:#fde68a}   /* productos: ambar */
+.np-sec[data-paso]{border-color:var(--np-borde);border-left:5px solid var(--np-acento);background:linear-gradient(180deg,var(--np-tinte) 0,#fff 44px)}
+.np-sec[data-paso] .np-tit{color:var(--np-acento)}
+.np-sec[data-paso] .np-tit::before{content:"";display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--np-acento);margin-right:8px;vertical-align:0;box-shadow:0 0 0 3px var(--np-tinte)}
 .np-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 12px}
 .np-grid .np-ancho{grid-column:1/-1}
 @media (max-width:900px){.np-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -410,6 +417,7 @@ async function nuevoPedido(){
   { const cl=$("np_clon"); if(cl){ cl.style.display="none"; cl.innerHTML=""; } }   // aviso de "clonando" solo cuando viene de clonarPedido()
   const hoy=new Date().toISOString().slice(0,10);
   $("np_fecha").value=hoy; $("np_entrega").value=""; $("np_obs").value=""; $("np_resp").value="";
+  $("np_tipo").value="Pedido";   // (06/10/2026) tipo por defecto al abrir; antes arrancaba en Requisicion o con el ultimo usado (Clonar lo cambia despues)
   if(!provs.length){
     // Se pide por paginas: la API corta en 1.000 filas y maximos_minimos ya tiene mas.
     provs=await traerTodo("proveedores","id,nit,razon_social,nombre_comercial,correo,telefono1,asesor",["razon_social","id"]);
@@ -474,9 +482,17 @@ function aplicarMarcaNP(){
 // BUSCADOR DE PROVEEDOR de "Nuevo pedido": el <select id="np_prov"> queda oculto y sigue siendo la fuente del valor (nada más cambia); esto lo llena y lo lee.
 function npProvNombre(id){ const p=(npProvVis||[]).find(x=>x.id===id)||(provs||[]).find(x=>x.id===id); return p?(p.razon_social||p.nombre_comercial||""):""; }
 function npProvSync(){ const q=$("np_prov_q"); if(!q) return; q.value=npProvNombre(Number($("np_prov").value||0)); }
+// (06/10/2026) cuantos articulos tiene cada proveedor (los mismos que salen al elegirlo: catalogo + historial de compras,
+// sin repetir codigo; con catalogo propio de marca, solo ese catalogo, igual que filtrarArticulos)
+function npConteoArticulos(){
+  const m=new Map(), add=(id,cod)=>{ id=Number(id); if(!id||!cod) return; if(!m.has(id)) m.set(id,new Set()); m.get(id).add(String(cod)); };
+  for(const c of (typeof cat!=="undefined"&&cat)||[]) add(c.id_proveedor, c.codigo_barras);
+  if(!(typeof npMarcaPropia!=="undefined"&&npMarcaPropia)) for(const h of (typeof npHist!=="undefined"&&npHist)||[]) add(h.proveedor_id, h.codigo);
+  return new Map([...m].map(([k,s])=>[k,s.size]));
+}
 function npProvPintar(texto){
   const l=$("np_prov_lista"); if(!l) return;
-  const r=MarcaProv.filasBuscadorPedido(npProvVis,texto,Number($("np_prov").value||0),npProvIdx);
+  const r=MarcaProv.filasBuscadorPedido(npProvVis,texto,Number($("np_prov").value||0),npProvIdx,npConteoArticulos());
   l.innerHTML=r.html; l.style.display="block"; return r;
 }
 function npProvAbrir(){ const q=$("np_prov_q"); if(!q) return; npProvIdx=0; npProvPintar(""); if(q.select) q.select(); }   // al entrar se ven todos; el texto queda seleccionado para escribir encima
@@ -3132,19 +3148,19 @@ async function guardarNov(){
   <h1>➕ Nuevo pedido</h1>
   <div id="np_clon" class="np-clon" style="display:none"></div>
   <!-- (05/10/2026) Pantalla ordenada en 3 bloques (estilo del proyecto de referencia GCA). Solo cambia la presentacion: mismos ids y handlers de siempre. -->
-  <div class="np-sec">
+  <div class="np-sec" data-paso="1">
     <div class="np-tit">1. INFORMACIÓN DEL PEDIDO</div>
     <div class="np-grid">
       <div><label class="mut">Sede</label><select id="np_sede" onchange="cambiarSedeNP()"></select></div>
       <div><label class="mut">Tipo</label>
-        <select id="np_tipo"><option>Requisicion</option><option>Pedido</option><option>Traslado</option></select></div>
+        <select id="np_tipo"><option>Requisicion</option><option selected>Pedido</option><option>Traslado</option></select></div>
       <div><label class="mut">Responsable</label><input id="np_resp" placeholder="quién pide"></div>
       <div><label class="mut">Fecha</label><input type="date" id="np_fecha"></div>
       <div><label class="mut">Fecha de entrega</label><input type="date" id="np_entrega"></div>
       <div class="np-ancho"><label class="mut">Observación</label><input id="np_obs" placeholder="opcional (ej: entregar antes de las 10 a. m.)"></div>
     </div>
   </div>
-  <div class="np-sec">
+  <div class="np-sec" data-paso="2">
     <div class="np-tit">2. PROVEEDOR</div>
     <div id="np_prov_wrap" style="position:relative">
       <input id="np_prov_q" placeholder="🔎 Escribí para buscar o elegir proveedor…" autocomplete="off" onfocus="npProvAbrir()" oninput="npProvFiltrar()" onkeydown="npProvTecla(event)">
@@ -3162,7 +3178,7 @@ async function guardarNov(){
       <div id="np_art_provs"></div>
     </div>
   </div>
-  <div class="np-sec">
+  <div class="np-sec" data-paso="3">
     <div class="row" style="align-items:center">
       <span class="np-tit" style="margin:0">3. PRODUCTOS <span class="mut" id="np_arts_info"></span></span>
       <span id="np_cuenta" class="badge np-cuenta" style="display:none"></span>
