@@ -207,15 +207,15 @@ tr:hover td{background:#f1f5f9}
       </div>
       <div id="filtroMarcaAdm" class="row" style="display:flex;margin-bottom:12px">
         <span class="mut">Marca:</span>
-        <select id="admMarca" style="width:auto;margin:0;min-width:220px" onchange="adminMarcaTocada=true;pintarAdmin()"></select>
+        <select id="admMarca" data-buscable style="width:auto;margin:0;min-width:220px" onchange="adminMarcaTocada=true;pintarAdmin()"></select>
       </div>
       <div id="filtroCatalogoAdm" class="row" style="display:none;margin-bottom:12px">
         <span class="mut">Catálogo:</span>
-        <select id="admCatalogo" style="width:auto;margin:0;min-width:280px" onchange="adminEdit=null;adminLimite=400;pintarAdmin()"></select>
+        <select id="admCatalogo" data-buscable style="width:auto;margin:0;min-width:280px" onchange="adminEdit=null;adminLimite=400;pintarAdmin()"></select>
       </div>
       <div id="filtroCat" class="row" style="display:none;margin-bottom:12px">
         <span class="mut">Proveedor:</span>
-        <select id="catProv" style="width:auto;margin:0;min-width:320px" onchange="pintarAdmin()"></select>
+        <select id="catProv" data-buscable style="width:auto;margin:0;min-width:320px" onchange="pintarAdmin()"></select>
       </div>
       <div id="listaAdmin"></div>
     </div>
@@ -304,6 +304,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/nota-credito-ui.js"></script>
 <script src="js/desamarrar.js"></script>
 <script src="js/fecha-recibido.js"></script>
+<script src="js/select-buscable.js"></script>
 <script src="js/conciliacion-ui.js"></script>
 <script src="js/cruce-dian-ui.js"></script>
 <script>
@@ -1005,7 +1006,7 @@ function pintarAdmin(){
     { const sel=$("admMarca"); let cur=sel.value;
       if(!adminMarcaTocada){ const fs=Number(($("fSede")||{}).value||0); const mm=fs?((sedes.find(s=>s.id===fs)||{}).marca_id):null; cur=mm?String(mm):""; }   // si el encabezado tiene una sede elegida, la marca de esa sede
       sel.innerHTML=MarcaProv.opcionesMarca(adminMarcas,cur); }
-    let l=MarcaProv.proveedoresDeAdmin(adminProv,adminVinc,$("admMarca").value).filter(x=>!q||((x.razon_social||"")+" "+(x.nit||"")+" "+(x.nombre_comercial||"")).toLowerCase().includes(q)).filter(filtraFechaAdmin);
+    let l=MarcaProv.proveedoresDeAdmin(adminProv,adminVinc,$("admMarca").value).filter(x=>!q||SelectBuscable.coincide((x.razon_social||"")+" "+(x.nit||"")+" "+(x.nombre_comercial||"")+" "+(x.asesor||"")+" "+(x.correo||""),q)).filter(filtraFechaAdmin);
     EXPORTAR.actual.admin_prov=l;
     c.innerHTML = l.slice(0,400).map(x=>{ if(adminEdit&&adminEdit.tipo==="prov"&&adminEdit.id===x.id) return AdminEditar.editorProveedor(x,{error:adminEdit.error, marcasHtml:MarcaProv.casillasMarcas(adminMarcas,MarcaProv.marcasDe(adminVinc,x.id),"ep_"+x.id)});
       return `<div class="card" style="margin:6px 0"><div class="row">
