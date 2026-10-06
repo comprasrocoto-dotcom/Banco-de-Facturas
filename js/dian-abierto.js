@@ -39,15 +39,23 @@
   const ESTILO_ABIERTA = 'background:#dcfce7;border-color:#16a34a;color:#166534;font-weight:700';
   // HTML del boton (y del ↺ para quitar la marca cuando ya esta abierta). url = enlace oficial de la DIAN con el CUFE.
   // (06/10/2026) bf = datos de la factura para el favorito ⚡ DIAN BOT (js/favorito-dian.js): al pulsar se copian al portapapeles.
+  // (06/10/2026) con datos, el enlace lleva al final #bfdian=NIT|NUMERO|TIPO: la DIAN lo conserva al redirigir y la extension
+  // de Chrome "Banco de Facturas - DIAN" (extension-dian/ del agente) pone el NIT sola -> solo se pulsa Buscar y Descargar PDF
+  function hashDian(bf) {
+    const p = String(bf || '').split('|');
+    if (p[0] !== 'BFDIAN' || !p[2]) return '';
+    return '#bfdian=' + encodeURIComponent([p[2], p[3] || '', p[4] || 'factura'].join('|'));
+  }
   function botonHtml(cufe, url, abierta, bf) {
     const c = esc(norm(cufe) || cufe);
+    if (bf && url && url !== '#' && url.indexOf('#') < 0) url += hashDian(bf);
     return `<span class="dian-abrir" data-cufe="${c}" style="display:inline-flex;gap:4px;align-items:center">` +
       `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" onclick="dianMarcarAbierto('${c}',this)"${bf ? ` data-bf="${esc(bf)}"` : ''}>` +
       `<button class="${abierta ? '' : 's'}"${abierta ? ` style="${ESTILO_ABIERTA}"` : ''} title="${abierta ? 'Ya la abriste en la DIAN. Toca para abrirla de nuevo.' : 'Abre la DIAN con el CUFE ya escrito'}">${abierta ? '✓ Abierta · abrir de nuevo ↗' : 'Abrir en DIAN ↗'}</button></a>` +
       (abierta ? `<button title="Quitar la marca (dejarla como pendiente)" style="padding:4px 8px" onclick="dianDesmarcar('${c}',this)">↺</button>` : '') + '</span>';
   }
 
-  return { CLAVE, MAX, norm, crear, botonHtml, ESTILO_ABIERTA };
+  return { CLAVE, MAX, norm, crear, botonHtml, hashDian, ESTILO_ABIERTA };
 });
 
 // ---------------------------------------------------------------- en la pagina
