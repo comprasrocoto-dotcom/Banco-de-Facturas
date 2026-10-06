@@ -22,7 +22,8 @@
   }
   const conIngreso = (f) => !!(f && f.num_ingreso && String(f.num_ingreso).trim());
   // Ya ingresada al ERP y todavia sin sellar (sin asignar o en manos de la sede sin sellar)
-  const esIngresadaSinSellar = (f) => !!f && (f.estado === 'pool' || f.estado === 'asignada') && conIngreso(f);
+  // (05/10/2026) las notas credito NO se sellan (no son mercancia que reciba la sede): con N° de ingreso ya estan terminadas
+  const esIngresadaSinSellar = (f) => !!f && f.tipo !== 'nota_credito' && (f.estado === 'pool' || f.estado === 'asignada') && conIngreso(f);
 
   // Que se le dice a la persona: "Ingresada al ERP hace 3 dias · falta sellar"
   function etiqueta(f, hoy) {

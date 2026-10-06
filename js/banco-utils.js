@@ -52,6 +52,34 @@
     });
     return { lista, sinFechaSello };
   }
+  // ---------------------------------------------------------------- PROCESO TERMINADO (05/10/2026)
+  // Reporte del usuario: facturas y notas credito ya ingresadas al ERP no salian en el ZIP del ciclo completo.
+  //  - "terminada" = tiene N° de ingreso del ERP Y (sellada/aprobada, o es NOTA CREDITO: las notas credito no se
+  //    sellan, no son mercancia que reciba la sede; antes nunca quedaban terminadas)
+  //  - su fecha = la de ingreso al ERP (la misma que usa el filtro de la vista "Proceso terminado"); si no tiene,
+  //    la de sello y si no, la de emision. Antes el ZIP contaba por fecha de SELLO: una factura sellada el 1 e
+  //    ingresada el 2 no salia al bajar "del 2 al 5".
+  const conNumIngreso = (f) => !!f && !!f.num_ingreso && String(f.num_ingreso).trim() !== '' && String(f.num_ingreso) !== 'null';
+  const esTerminada = (f) => conNumIngreso(f) && (esSellada(f) || f.tipo === 'nota_credito');
+  function fechaTerminado(f) {
+    if (!f) return null;
+    if (f.fecha_ingreso && f.fecha_ingreso !== 'null') return String(f.fecha_ingreso).slice(0, 10);
+    return fechaColombia(f.sellada_en) || (f.fecha_emision ? String(f.fecha_emision).slice(0, 10) : null);
+  }
+  // o: { desde, hasta, sedeId, tipo } -> { lista (con PDF), sinPdf, fueraDeRango }
+  function filtrarTerminadas(facturas, o) {
+    o = o || {};
+    let sinPdf = 0, fueraDeRango = 0;
+    const lista = (facturas || []).filter((f) => {
+      if (!esTerminada(f)) return false;
+      if (o.tipo && f.tipo !== o.tipo) return false;
+      if (o.sedeId && f.sede_id !== Number(o.sedeId)) return false;
+      if (!enRangoFecha(fechaTerminado(f), o.desde, o.hasta)) { fueraDeRango++; return false; }
+      if (!f.archivo_pdf) { sinPdf++; return false; }
+      return true;
+    });
+    return { lista, sinPdf, fueraDeRango };
+  }
   function validarRango(desde, hasta) {
     if (desde && hasta && desde > hasta) return 'La fecha inicial es posterior a la final.';
     return null;
@@ -301,7 +329,7 @@
   }
 
   return {
-    TZ, fechaColombia, hoyColombia, enRangoFecha, esSellada, filtrarSelladas, validarRango,
+    TZ, fechaColombia, hoyColombia, enRangoFecha, esSellada, filtrarSelladas, validarRango, esTerminada, fechaTerminado, filtrarTerminadas,
     limpiarNombre, partesNumero, nombreArchivoCiclo, nombreUnico,
     normAlnum, soloDigitos, sinCeros, cufeValido, clavesSistema, tipoDian, estadoNoApto,
     interpretarTablaDian, cruzarConSistema, csvPendientes, nitsPropios,
