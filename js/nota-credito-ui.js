@@ -11,7 +11,8 @@ const ncPuede = () => !!(perfil && (perfil.rol === 'admin' || perfil.rol === 'pa
 // Se carga junto con las facturas. Si falla (o la tabla aun no existe), la pantalla sigue como antes sin amarres.
 async function cargarNotaLinks() {
   try {
-    const { data, error } = await SB.from('nota_credito_factura').select('nota_cufe,factura_cufe,creado_por,creado_en').order('creado_en', { ascending: false });
+    let { data, error } = await SB.from('nota_credito_factura').select('nota_cufe,factura_cufe,creado_por,creado_en,anula').order('creado_en', { ascending: false });
+    if (error) ({ data, error } = await SB.from('nota_credito_factura').select('nota_cufe,factura_cufe,creado_por,creado_en').order('creado_en', { ascending: false }));   // base sin la columna anula
     if (error) throw new Error(error.message);
     ncLinks = data || [];
   } catch (e) { ncLinks = ncLinks || []; }
@@ -22,13 +23,14 @@ async function cargarNotaLinks() {
 function chipsNotaCredito(f) {
   if (NotaCredito.esNota(f)) {
     const fs = NotaCredito.facturasDeNota(f, facturas, ncIdx);
-    if (fs.length) return fs.map((x) => `<span class="badge st-asignada" title="Esta nota credito corrige la factura ${escAg(NotaCredito.numero(x))} (${escAg(money(x.total))})">↩ Factura ${escAg(NotaCredito.numero(x) || '—')}</span>`).join('');
+    if (fs.length) return fs.map((x) => `<span class="badge st-asignada" title="Esta nota credito corrige la factura ${escAg(NotaCredito.numero(x))} (${escAg(money(x.total))})">↩ Factura ${escAg(NotaCredito.numero(x) || '—')}${ncIdx.anula && ncIdx.anula[f.cufe + '>' + x.cufe] ? ' · la anula' : ''}</span>`).join('');
     return ncPuede() ? '<span class="badge st-pool" title="Amárrala a la factura que corrige, para la trazabilidad">⚠️ sin factura amarrada</span>' : '';
   }
   if (NotaCredito.esFactura(f)) {
     const ns = NotaCredito.notasDeFactura(f, facturas, ncIdx); if (!ns.length) return '';
     const neto = NotaCredito.netoFactura(f, ns);
-    return ns.map((n) => `<span class="badge st-asignada" title="Nota credito ${escAg(NotaCredito.numero(n))} por ${escAg(money(n.total))}. Queda ${escAg(money(neto))} de la factura.">📎 NC ${escAg(NotaCredito.numero(n) || '—')} −${escAg(money(n.total))}</span>`).join('');
+    const an = NotaCredito.anulacion(f, facturas, ncIdx);   // (06/10/2026) anulada: el agente no la ingresa sola al ERP
+    return (an.anulada ? `<span class="badge st-pool" style="background:#fee2e2;color:#991b1b" title="Anulada: ${escAg(an.motivo)}. El agente no la ingresa sola al ERP (factura + nota, o ninguna).">🚫 Anulada por NC</span>` : '') + ns.map((n) => `<span class="badge st-asignada" title="Nota credito ${escAg(NotaCredito.numero(n))} por ${escAg(money(n.total))}. Queda ${escAg(money(neto))} de la factura.">📎 NC ${escAg(NotaCredito.numero(n) || '—')} −${escAg(money(n.total))}</span>`).join('');
   }
   return '';
 }
