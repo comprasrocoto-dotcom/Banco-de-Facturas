@@ -20,7 +20,7 @@ EXPORTAR.defs.facturas = { nombre: 'facturas', hoja: 'Facturas', columnas: [
   { t: 'Recibido por', v: (f) => f.recibido_por }, { t: 'Pedido amarrado', v: (f) => f.pedido_num }, { t: 'CUFE', v: (f) => f.cufe } ] };
 
 EXPORTAR.defs.pedidos = { nombre: 'pedidos', hoja: 'Pedidos', columnas: [
-  { t: 'N° pedido', v: (p) => p.numero }, { t: 'Fecha', v: (p) => p.fecha }, { t: 'Fecha entrega', v: (p) => p.fecha_entrega }, { t: 'Marca', v: (p) => expMarca(p.marca_id) }, { t: 'Sede', v: (p) => p.sede_texto || expSede(p.sede_id) },
+  { t: 'N° pedido', v: (p) => p.numero }, { t: 'Fecha', v: (p) => p.fecha }, { t: 'Fecha entrega', v: (p) => p.fecha_entrega }, { t: 'Fecha recibido', v: (p) => p.fecha_recibido || '' }, { t: 'Marca', v: (p) => expMarca(p.marca_id) }, { t: 'Sede', v: (p) => p.sede_texto || expSede(p.sede_id) },
   { t: 'Proveedor', v: (p) => p.proveedor_texto || p.proveedor }, { t: 'NIT proveedor', v: (p) => p.nit_proveedor }, { t: 'Tipo', v: (p) => p.tipo }, { t: 'Estado', v: (p) => (p.estado === 'facturado' ? 'Facturado' : p.estado === 'pendiente' ? 'Pendiente' : p.estado) },
   { t: 'N° factura', v: (p) => p.numero_factura }, { t: 'Pedido ERP', v: (p) => p.pedido_erp }, { t: 'Forma de pago', v: (p) => p.forma_pago }, { t: 'Total', v: (p) => expNum(p.total) },
   { t: 'Responsable', v: (p) => p.responsable }, { t: 'Observación', v: (p) => p.observacion || p.observacion_pedido }, { t: 'N° nota crédito', v: (p) => p.numero_nota_credito }, { t: 'Creado', v: (p) => (p.created_at ? String(p.created_at).slice(0, 16).replace('T', ' ') : null) } ] };
