@@ -410,6 +410,7 @@ async function nuevoPedido(){
   { const cl=$("np_clon"); if(cl){ cl.style.display="none"; cl.innerHTML=""; } }   // aviso de "clonando" solo cuando viene de clonarPedido()
   const hoy=new Date().toISOString().slice(0,10);
   $("np_fecha").value=hoy; $("np_entrega").value=""; $("np_obs").value=""; $("np_resp").value="";
+  $("np_tipo").value="Pedido";   // (06/10/2026) tipo por defecto al abrir; antes arrancaba en Requisicion o con el ultimo usado (Clonar lo cambia despues)
   if(!provs.length){
     // Se pide por paginas: la API corta en 1.000 filas y maximos_minimos ya tiene mas.
     provs=await traerTodo("proveedores","id,nit,razon_social,nombre_comercial,correo,telefono1,asesor",["razon_social","id"]);
@@ -3137,7 +3138,7 @@ async function guardarNov(){
     <div class="np-grid">
       <div><label class="mut">Sede</label><select id="np_sede" onchange="cambiarSedeNP()"></select></div>
       <div><label class="mut">Tipo</label>
-        <select id="np_tipo"><option>Requisicion</option><option>Pedido</option><option>Traslado</option></select></div>
+        <select id="np_tipo"><option>Requisicion</option><option selected>Pedido</option><option>Traslado</option></select></div>
       <div><label class="mut">Responsable</label><input id="np_resp" placeholder="quién pide"></div>
       <div><label class="mut">Fecha</label><input type="date" id="np_fecha"></div>
       <div><label class="mut">Fecha de entrega</label><input type="date" id="np_entrega"></div>
