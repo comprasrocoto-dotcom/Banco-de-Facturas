@@ -20,15 +20,16 @@
   const suma = (l) => Math.round(l.reduce((s, x) => s + (Number(x) || 0), 0) * 100) / 100;
 
   // links: filas de nota_credito_factura { nota_cufe, factura_cufe } -> { porNota: { cufeNota: [cufeFactura] }, porFactura: { cufeFactura: [cufeNota] } }
+  // (06/10/2026) anula: { 'nota>factura': true } para los amarres que el agente marco porque el PDF de la nota dice que ANULA la factura
   function indexar(links) {
-    const porNota = {}, porFactura = {}, vistos = new Set();
+    const porNota = {}, porFactura = {}, anula = {}, vistos = new Set();
     for (const l of (links || [])) {
       if (!l || !l.nota_cufe || !l.factura_cufe) continue;
-      const k = l.nota_cufe + '>' + l.factura_cufe; if (vistos.has(k)) continue; vistos.add(k);
+      const k = l.nota_cufe + '>' + l.factura_cufe; if (l.anula === true) anula[k] = true; if (vistos.has(k)) continue; vistos.add(k);
       (porNota[l.nota_cufe] = porNota[l.nota_cufe] || []).push(l.factura_cufe);
       (porFactura[l.factura_cufe] = porFactura[l.factura_cufe] || []).push(l.nota_cufe);
     }
-    return { porNota, porFactura };
+    return { porNota, porFactura, anula };
   }
 
   // Facturas que se le pueden ofrecer a la nota: solo facturas del MISMO proveedor (NIT emisor), la mas reciente primero.
@@ -58,5 +59,22 @@
   // Una nota sin ninguna factura amarrada (por trazabilidad conviene amarrarla)
   const sinAmarrar = (nota, idx) => esNota(nota) && !((idx && idx.porNota && idx.porNota[nota.cufe] || []).length);
 
-  return { digitos, numero, esNota, esFactura, indexar, candidatas, facturasDeNota, notasDeFactura, netoFactura, sinAmarrar };
+  // (06/10/2026) ¿La factura quedo ANULADA por sus notas?  -> { anulada, motivo, notas: [nota], neto }
+  //  - el amarre dice anula (el PDF de la nota lo dice: "se anula esta factura", "ANULACION DE MF448629"), o
+  //  - las notas amarradas SOLO a esta factura suman su total (con $1 de tolerancia). Una nota repartida entre varias
+  //    facturas no cuenta para esto: no se sabe cuanto le toca a cada una.
+  // Una factura anulada no se ingresa sola al ERP: va con su nota o no va.
+  function anulacion(factura, facturas, idx) {
+    const notas = notasDeFactura(factura, facturas, idx);
+    const neto = netoFactura(factura, notas);
+    const marcada = notas.find((n) => idx && idx.anula && idx.anula[n.cufe + '>' + factura.cufe]);
+    if (marcada) return { anulada: true, motivo: 'la nota crédito ' + numero(marcada) + ' dice que la anula', notas, neto };
+    const solas = notas.filter((n) => ((idx && idx.porNota && idx.porNota[n.cufe]) || []).length === 1);
+    const total = Number(factura && factura.total) || 0;
+    if (solas.length && total > 0 && suma(solas.map((n) => n.total)) >= total - 1)
+      return { anulada: true, motivo: solas.length === 1 ? 'la nota crédito ' + numero(solas[0]) + ' cubre todo su total' : 'las notas crédito ' + solas.map(numero).join(', ') + ' cubren todo su total', notas, neto };
+    return { anulada: false, motivo: '', notas, neto };
+  }
+
+  return { digitos, numero, esNota, esFactura, indexar, candidatas, facturasDeNota, notasDeFactura, netoFactura, sinAmarrar, anulacion };
 });
