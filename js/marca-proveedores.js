@@ -102,11 +102,18 @@
   }
 
   // Lista del buscador de proveedores de "Nuevo pedido": primera fila "sin proveedor", luego las coincidencias; resalta la fila `idx` (0 = la de "sin proveedor")
-  function filasBuscadorPedido(provs, q, seleccionadoId, idx) {
+  // conteos (opcional, 06/10/2026): Map/objeto proveedor_id -> cuantos articulos tiene (catalogo + historial), se muestra a la derecha
+  function filasBuscadorPedido(provs, q, seleccionadoId, idx, conteos) {
     const l = buscarProveedores(provs, q).slice(0, 200);
     const fila = (id, html, i, sel) => `<div data-i="${i}" onclick="npProvElegir(${id})" style="padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer;${i === idx ? 'background:#e0f2fe;' : ''}${sel ? 'font-weight:700;' : ''}">${html}</div>`;
+    const cuantos = (id) => { if (!conteos) return null; const n = typeof conteos.get === 'function' ? conteos.get(id) : conteos[id]; return Number(n) || 0; };
+    const etiqueta = (id) => { const n = cuantos(id); if (n === null) return ''; return `<span class="mut" style="white-space:nowrap;font-size:12px;font-weight:600">${n ? n + (n === 1 ? ' artículo' : ' artículos') : 'sin artículos registrados'}</span>`; };
     let h = fila(0, '<span class="mut">— sin proveedor —</span>', 0, false);
-    l.forEach((p, k) => { h += fila(p.id, esc(p.razon_social || p.nombre_comercial || '—') + (p.nit ? ' <span class="mut">· NIT ' + esc(p.nit) + '</span>' : ''), k + 1, p.id === seleccionadoId); });
+    l.forEach((p, k) => {
+      const nombre = esc(p.razon_social || p.nombre_comercial || '—') + (p.nit ? ' <span class="mut">· NIT ' + esc(p.nit) + '</span>' : '');
+      const e = etiqueta(p.id);
+      h += fila(p.id, e ? `<span style="display:flex;gap:10px;align-items:baseline"><span style="flex:1;min-width:0">${nombre}</span>${e}</span>` : nombre, k + 1, p.id === seleccionadoId);
+    });
     if (!l.length) h += '<div class="mut" style="padding:10px 12px">Ningún proveedor coincide con "' + esc(q) + '".</div>';
     return { html: h, cantidad: l.length, ids: [0].concat(l.map((p) => p.id)) };
   }

@@ -475,9 +475,17 @@ function aplicarMarcaNP(){
 // BUSCADOR DE PROVEEDOR de "Nuevo pedido": el <select id="np_prov"> queda oculto y sigue siendo la fuente del valor (nada más cambia); esto lo llena y lo lee.
 function npProvNombre(id){ const p=(npProvVis||[]).find(x=>x.id===id)||(provs||[]).find(x=>x.id===id); return p?(p.razon_social||p.nombre_comercial||""):""; }
 function npProvSync(){ const q=$("np_prov_q"); if(!q) return; q.value=npProvNombre(Number($("np_prov").value||0)); }
+// (06/10/2026) cuantos articulos tiene cada proveedor (los mismos que salen al elegirlo: catalogo + historial de compras,
+// sin repetir codigo; con catalogo propio de marca, solo ese catalogo, igual que filtrarArticulos)
+function npConteoArticulos(){
+  const m=new Map(), add=(id,cod)=>{ id=Number(id); if(!id||!cod) return; if(!m.has(id)) m.set(id,new Set()); m.get(id).add(String(cod)); };
+  for(const c of (typeof cat!=="undefined"&&cat)||[]) add(c.id_proveedor, c.codigo_barras);
+  if(!(typeof npMarcaPropia!=="undefined"&&npMarcaPropia)) for(const h of (typeof npHist!=="undefined"&&npHist)||[]) add(h.proveedor_id, h.codigo);
+  return new Map([...m].map(([k,s])=>[k,s.size]));
+}
 function npProvPintar(texto){
   const l=$("np_prov_lista"); if(!l) return;
-  const r=MarcaProv.filasBuscadorPedido(npProvVis,texto,Number($("np_prov").value||0),npProvIdx);
+  const r=MarcaProv.filasBuscadorPedido(npProvVis,texto,Number($("np_prov").value||0),npProvIdx,npConteoArticulos());
   l.innerHTML=r.html; l.style.display="block"; return r;
 }
 function npProvAbrir(){ const q=$("np_prov_q"); if(!q) return; npProvIdx=0; npProvPintar(""); if(q.select) q.select(); }   // al entrar se ven todos; el texto queda seleccionado para escribir encima
