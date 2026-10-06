@@ -303,6 +303,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/nota-credito.js"></script>
 <script src="js/nota-credito-ui.js"></script>
 <script src="js/desamarrar.js"></script>
+<script src="js/fecha-recibido.js"></script>
 <script src="js/conciliacion-ui.js"></script>
 <script src="js/cruce-dian-ui.js"></script>
 <script>
@@ -1655,7 +1656,7 @@ function pintarPedidos(){
   cont.innerHTML=l.slice(0,300).map(p=>{
     const est = p.estado==="facturado" ? '<span class="badge st-sellada">Facturado</span>' : '<span class="badge st-pool">Pendiente</span>';
     const amFecha = p.factura_cufe && p.factura_amarrada_en
-      ? ' title="Enlazada el '+new Date(p.factura_amarrada_en).toLocaleString('es-CO',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})+'"' : '';
+      ? ' title="'+(p.fecha_recibido?'Recibida el '+FechaRecibido.mostrar(p.fecha_recibido)+' · ':'')+'Enlazada el '+new Date(p.factura_amarrada_en).toLocaleString('es-CO',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})+'"' : '';
     const am  = p.factura_cufe ? '<span class="badge st-asignada"'+amFecha+'>Amarrado a '+(p.numero_factura||"factura")+'</span>' : '';
     const erp = p.pedido_erp ? '<span class="badge">ERP '+p.pedido_erp+'</span>' : '';
     return `<div class="card" style="padding:0;overflow:hidden">
@@ -1810,6 +1811,7 @@ async function abrirAmarre(modo, id){
     // Las sedes solo ven sus propios pedidos; admin/pagos ven todos. Y de esos, SOLO los que aun esperan factura (pendientes, sin factura amarrada)
     amDatos = ((perfil.rol==="sede") ? pedidos.filter(p=>p.sede_id===perfil.sede_id) : pedidos).filter(SinSellar.pendienteDeAmarrar);
   }
+  if(typeof prepararFechaRecibido==="function") prepararFechaRecibido(modo==="pedido"?(pedidos.find(x=>x.id===id)||null):null);
   pintarAmarre();
   $("modalAmarre").classList.add("on");
   setTimeout(()=>$("amBuscar").focus(),120);
@@ -1952,9 +1954,10 @@ function bloquearSiYaAmarrado(p){
 async function amarrarConFactura(cufe){
   const pAntes=pedidos.find(x=>x.id===amId);
   if(bloquearSiYaAmarrado(pAntes)) return;
+  const fRec=fechaRecibidoPara(pAntes); if(!fRec) return;   // (06/10/2026) Fecha Recibido obligatoria
   const f=facturas.find(x=>x.cufe===cufe)||{};
   const dec=confirmarAmarreProveedor(f,pAntes); if(!dec.ok) return;
-  const up=await SB.rpc("pedido_factura_amarrar",{p_pedido_id:amId,p_cufe:cufe,p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||null,p_forzar:dec.forzar,p_motivo:dec.motivo});
+  const up=await SB.rpc("pedido_factura_amarrar",{p_pedido_id:amId,p_cufe:cufe,p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||null,p_forzar:dec.forzar,p_motivo:dec.motivo,p_fecha_recibido:fRec});
   if(up.error){$("amErr").textContent="No se pudo: "+up.error.message;return;}
   await SB.from("historial").insert({cufe,accion:"pedido amarrado",detalle:"pedido "+(pedidos.find(x=>x.id===amId)||{}).numero,usuario:usuario.id}).then(()=>{},()=>{});
   $("modalAmarre").classList.remove("on");
@@ -1964,9 +1967,10 @@ async function amarrarConFactura(cufe){
 async function amarrarConPedido(pid){
   const pAntes=pedidos.find(x=>x.id===pid);
   if(bloquearSiYaAmarrado(pAntes)) return;
+  const fRec=fechaRecibidoPara(pAntes); if(!fRec) return;   // (06/10/2026) Fecha Recibido obligatoria
   const f=facturas.find(x=>x.cufe===amId);
   const dec=confirmarAmarreProveedor(f,pAntes); if(!dec.ok) return;
-  const up=await SB.rpc("pedido_factura_amarrar",{p_pedido_id:pid,p_cufe:amId,p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||null,p_forzar:dec.forzar,p_motivo:dec.motivo});
+  const up=await SB.rpc("pedido_factura_amarrar",{p_pedido_id:pid,p_cufe:amId,p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||null,p_forzar:dec.forzar,p_motivo:dec.motivo,p_fecha_recibido:fRec});
   if(up.error){$("amErr").textContent="No se pudo: "+up.error.message;return;}
   await SB.from("historial").insert({cufe:amId,accion:"pedido amarrado",detalle:"pedido "+(pedidos.find(x=>x.id===pid)||{}).numero,usuario:usuario.id}).then(()=>{},()=>{});
   $("modalAmarre").classList.remove("on");
@@ -2041,6 +2045,7 @@ async function abrirPedido(id){
        <div style="font-weight:700;color:#1e3a8a">📄 DATOS DE FACTURA</div>
        <div class="row" style="gap:40px;margin-top:8px;align-items:flex-start">
          <div><div class="mut" style="font-weight:700">N. FACTURA</div><div>${numFacturaDe(p)||"—"}</div></div>
+         <div><div class="mut" style="font-weight:700">FECHA RECIBIDO</div><div>${p.fecha_recibido?FechaRecibido.mostrar(p.fecha_recibido):(p.factura_cufe?"—":"")}</div></div>
          <div><div class="mut" style="font-weight:700">ENLAZADA EL</div><div>${p.factura_amarrada_en?new Date(p.factura_amarrada_en).toLocaleString('es-CO',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):(p.factura_cufe?"—":"")}</div></div>
          <div><div class="mut" style="font-weight:700">TIPO</div><div>${p.forma_pago||p.tipo||"—"}</div></div>
          <div><div class="mut" style="font-weight:700">OBSERVACIÓN</div><div>${p.observacion_factura||"—"}</div></div>
@@ -2573,10 +2578,13 @@ async function amarrarPedido(id){
   const busc=(elegido||"").trim().toUpperCase();
   const f=facturas.find(x=>(((x.prefijo||"")+(x.folio||"")).toUpperCase()===busc) || (x.cufe||"").toUpperCase().startsWith(busc));
   if(!f){alert("No encontré esa factura.");return;}
+  const fTxt=prompt("📅 Fecha Recibido de la factura (DD/MM/AAAA): el día que llegó la mercancía. Igual o posterior a la fecha del pedido ("+FechaRecibido.mostrar(p.fecha)+") y no futura.","");
+  if(fTxt===null) return;
+  const vRec=FechaRecibido.validar(fTxt,p.fecha,FechaRecibido.hoyCO()); if(!vRec.ok){alert(vRec.error);return;}
   const dec=confirmarAmarreProveedor(f,p); if(!dec.ok) return;
   // Guardar tambien el NUMERO de la factura en el pedido: asi el detalle muestra N. FACTURA.
   const numF = (((f.prefijo||"")+(f.folio||"")).replace(/[^A-Za-z0-9]/g,"")) || (f.documento||"").replace(/[^A-Za-z0-9]/g,"") || "";
-  const up=await SB.rpc("pedido_factura_amarrar",{p_pedido_id:id,p_cufe:f.cufe,p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||null,p_forzar:dec.forzar,p_motivo:dec.motivo});
+  const up=await SB.rpc("pedido_factura_amarrar",{p_pedido_id:id,p_cufe:f.cufe,p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||null,p_forzar:dec.forzar,p_motivo:dec.motivo,p_fecha_recibido:vRec.fecha});
   if(up.error){alert("No se pudo amarrar: "+up.error.message);return;}
   if(numF) await SB.from("pedidos").update({numero_factura:numF}).eq("id",id);
   await SB.from("historial").insert({cufe:f.cufe,accion:"pedido amarrado",detalle:p.numero,usuario:usuario.id});
@@ -3123,6 +3131,11 @@ async function guardarNov(){
 
 <div id="modalAmarre" class="modal"><div class="card" style="max-width:640px">
   <h1 id="amTitulo">🔗 Amarrar</h1>
+  <div id="amFechaBox" style="margin:4px 0 8px;padding:8px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:9px">
+    <label for="amFechaRec" style="font-weight:700;color:#1e3a8a">📅 Fecha Recibido de la factura <span style="color:#b91c1c">*</span></label>
+    <input type="date" id="amFechaRec" style="width:auto;margin:4px 0 2px;display:block" oninput="this.style.borderColor='';$('amErr').textContent=''">
+    <div class="mut" id="amFechaAyuda" style="font-size:12px">El día que llegó la mercancía. Igual o posterior a la fecha del pedido, y no futura.</div>
+  </div>
   <input id="amBuscar" placeholder="🔎 Escribí para buscar..." oninput="pintarAmarre()" autocomplete="off">
   <div id="amLista" style="max-height:52vh;overflow:auto;margin-top:6px"></div>
   <div class="err" id="amErr"></div>
