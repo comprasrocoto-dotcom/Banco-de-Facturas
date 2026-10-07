@@ -214,6 +214,7 @@
     const e = String(enlace).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
     return `<h1>⚡ Favorito DIAN BOT <span class="mut" style="font-size:13px">v${VERSION}</span></h1>
 <div class="mut" style="margin-bottom:8px">Baja los PDF de la DIAN con menos clics: pone el NIT, espera a que marques la verificación y da Buscar; en el detalle baja la factura y su nota crédito. El vigilante los sube solos al banco.</div>
+<div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;padding:8px 10px;margin:4px 0 10px"><b>Recomendado: la extensión «Banco de Facturas - DIAN»</b> (Chrome). Con ella no hace falta el favorito: al pulsar «Abrir en DIAN» el NIT se pone solo y únicamente pulsas <b>Buscar</b> y <b>Descargar PDF</b>. Se instala una vez con <b>INSTALAR-EXTENSION-DIAN.bat</b> (carpeta del agente).</div>
 <b>Instalarlo (una sola vez por navegador)</b>
 <ol style="margin:6px 0 10px 18px;padding:0">
 <li>Si ya tenías un favorito "⚡ DIAN BOT", <b>bórralo</b> (clic derecho → Eliminar).</li>

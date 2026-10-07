@@ -158,8 +158,8 @@
       <div class="mut" style="margin-top:6px">${o.conHist === false ? '' : '“Se le ha comprado a” sale de los pedidos: es una pista de a quién amarrarlo, no está en el catálogo. “Nombre que ve la sede” es como aparece en Nuevo pedido: si ya se le pidió a ese proveedor, el nombre que quedó en esos pedidos; si no, el de Artículos con su unidad. '}Descarga con ⬇ Excel lo que estás viendo para completarlo e importarlo.</div></div>
       <div class="card" style="margin-bottom:10px;padding:12px 14px">
         <div class="row" style="flex-wrap:wrap;gap:10px;align-items:flex-end">
-          ${campo('Proveedor', `<select style="width:100%;margin:0" onchange="catCompSet('prov',this.value)">${selProv}</select>`, 2.5)}
-          ${campo('Subfamilia', `<select style="width:100%;margin:0" onchange="catCompSet('sub',this.value)">${selSub}</select>`)}
+          ${campo('Proveedor', `<select data-buscable style="width:100%;margin:0" onchange="catCompSet('prov',this.value)">${selProv}</select>`, 2.5)}
+          ${campo('Subfamilia', `<select data-buscable style="width:100%;margin:0" onchange="catCompSet('sub',this.value)">${selSub}</select>`)}
           ${campo('Ordenar por', `<select style="width:100%;margin:0" onchange="catCompSet('orden',this.value)">${selOrd}</select>`)}
           ${o.hayFiltros ? '<button style="flex:0 0 auto" onclick="catCompLimpiar()">✕ Limpiar filtros</button>' : ''}
         </div>
