@@ -49,10 +49,15 @@ async function orgHCargarBanco() {
     const { data: pl } = await SB.from('pedido_lineas').select('pedido_id,insumo,cantidad,unidad,codigo').limit(10000);
     orgH.lineas = {};
     (pl || []).forEach((l) => { (orgH.lineas[l.pedido_id] = orgH.lineas[l.pedido_id] || []).push({ insumo: l.insumo, cant: l.cantidad, unidad: l.unidad, codigo: l.codigo }); });
-    // (10/10/2026) pedidos: cufe -> pedido (para cruzar lineas) + documento -> cufe (para cruzar Su Doc del Hiopos)
-    const { data: peds } = await SB.from('pedidos').select('id,factura_cufe,numero,pedido_erp,centro_costo').limit(5000);
+    // (10/10/2026) pedidos: cufe -> pedido + numero_factura -> pedido + documento factura -> pedido
+    const { data: peds } = await SB.from('pedidos').select('id,numero,numero_factura,factura_cufe,centro_costo,sede_id,marca_id,proveedor,nit_proveedor,pedido_erp').limit(5000);
     orgH.pedidos = {};
-    (peds || []).forEach((p) => { if (p.factura_cufe) orgH.pedidos[p.factura_cufe] = p; });
+    orgH.numeroFacturaToPedido = {};
+    (peds || []).forEach((p) => {
+      if (p.factura_cufe) orgH.pedidos[p.factura_cufe] = p;
+      const nf = String(p.numero_factura || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      if (nf) orgH.numeroFacturaToPedido[nf] = p;
+    });
     // (10/10/2026) mapa documento (Su Doc normalizado) -> cufe: para buscar el pedido desde el Excel de Hiopos
     orgH.docToCufe = {};
     facturas.forEach((f) => {
