@@ -261,36 +261,113 @@
     return { ingresos, detalles };
   }
 
-  // reglas: { cuentaCobro: [contactos], cajaMenor: [contactos] } (nombres tal cual; se comparan sin tildes/mayusculas)
-  // -> { documentos: [fila], cajaMenor: [fila], revision: [{fila, motivo}] }   (cada fila: { fila, v (con Nota final), cuentaCobro, cajaMenor })
-  function clasificar(filas, reglas) {
-    const cc = new Set(((reglas && reglas.cuentaCobro) || []).map(contactoClave));
-    const cm = new Set(((reglas && reglas.cajaMenor) || []).map(contactoClave));
+  // ---- (09/10/2026) CLASIFICACION POR EVIDENCIA ("PROMPT MAESTRO") ----
+  // Tipo de documento (cuenta de cobro o no), SIEMPRE con la evidencia que lo sostiene. Hiopos no trae NIT ni tipo de documento:
+  // la identidad sale del NUMERO del documento (Su Doc = Prefijo+Folio de la factura electronica) y, si se conoce, del NIT del
+  // proveedor (nombres homologados del Banco: proveedor_nombre_pos / proveedores). El parecido de nombres solo DESEMPATA un
+  // mismo numero entre proveedores; nunca confirma por si solo. Nada se marca si no hay evidencia suficiente: va a "Por revisar".
+  const TIPO = { CC: 'cuenta_cobro', ORD: 'ordinario', CONOCIDO: 'proveedor_conocido', REVISAR: 'cc_por_revisar', SIN: 'sin_evidencia' };
+  const TIPO_TXT = {
+    cuenta_cobro: 'Cuenta de cobro identificada', ordinario: 'Documento ordinario identificado',
+    proveedor_conocido: 'Proveedor conocido, tipo de documento pendiente', cc_por_revisar: 'Cuenta de cobro por revisar',
+    sin_evidencia: 'Sin evidencia del tipo de documento',
+  };
+  const ORDEN_REVISION = [TIPO.REVISAR, TIPO.CONOCIDO, TIPO.SIN];
+  // clave de proveedor sin S.A.S., puntos, "y", "de"... (normaliza, no compara por parecido): "DEL RIO Y DEL MAR S.A.S." = "Del Rio y del Mar SAS"
+  const claveProveedor = (s) => tokens(s).join(' ');
+  // indicio (NO prueba) de cuenta de cobro: el Su Doc empieza por CC o dice COBRO. Solo manda el documento a revision.
+  const indicioCuentaCobro = (suDoc) => /^CC/.test(alnum(suDoc)) || /COBRO/.test(alnum(suDoc));
+
+  // reglas confirmadas (hiopos_contacto_regla) -> Map(contactoClave -> regla activa). Acepta tambien { cuentaCobro:[nombres], cajaMenor:[nombres] }
+  function mapaReglas(reglas) {
+    const m = new Map();
+    if (Array.isArray(reglas)) {
+      for (const r of reglas) if (r && r.activo !== false) m.set(r.contacto_norm || contactoClave(r.contacto), r);
+    } else if (reglas) {
+      for (const c of reglas.cuentaCobro || []) m.set(contactoClave(c), Object.assign(m.get(contactoClave(c)) || {}, { cuenta_cobro: true }));
+      for (const c of reglas.cajaMenor || []) m.set(contactoClave(c), Object.assign(m.get(contactoClave(c)) || {}, { caja_menor: true }));
+      for (const c of reglas.noCuentaCobro || []) m.set(contactoClave(c), Object.assign(m.get(contactoClave(c)) || {}, { no_cuenta_cobro: true }));
+    }
+    return m;
+  }
+
+  // Evidencia del Banco de Facturas y de la DIAN para clasificar. Todo opcional.
+  //  facturas: [{ doc|documento|prefijo+folio, emisor, nit }] (Banco: tabla facturas; DIAN: registros de leerDian)
+  //  proveedores: [{ nombre, nit }] (proveedores.razon_social/nombre_comercial, proveedor_nombre_pos.nombre_pos, facturas.emisor)
+  function armarEvidencia({ facturas, proveedores } = {}) {
+    const porDoc = new Map(), conocidos = new Map();
+    for (const f of facturas || []) {
+      const docs = new Set([alnum(f.doc), alnum(f.documento), alnum((f.prefijo || '') + (f.folio || ''))].filter(Boolean));
+      for (const d of docs) (porDoc.get(d) || porDoc.set(d, []).get(d)).push({ emisor: f.emisor || '', nit: String(f.nit || f.nit_emisor || '').replace(/\D/g, ''), fuente: f.fuente || 'Banco' });
+    }
+    for (const p of proveedores || []) {
+      const k = claveProveedor(p.nombre); if (!k) continue;
+      const nit = String(p.nit || '').replace(/\D/g, '');
+      const prev = conocidos.get(k);
+      conocidos.set(k, prev && prev !== nit ? '' : nit);   // dos NIT con el mismo nombre: se conoce el nombre, no el NIT
+    }
+    return { porDoc, conocidos };
+  }
+  // ¿este documento es una factura electronica (de ESTE proveedor)? -> { fuente } | null
+  function facturaElectronica(ev, v) {
+    const l = (ev && ev.porDoc && ev.porDoc.get(alnum(v['Su Doc']))) || [];
+    if (!l.length) return null;
+    const nit = ev.conocidos && ev.conocidos.get(claveProveedor(v.Contacto));
+    const f = l.find((x) => nit && x.nit && x.nit === nit) || l.find((x) => x.emisor && parecido(x.emisor, v.Contacto) >= 0.5);
+    return f ? { fuente: f.fuente + (nit && f.nit === nit ? ' (mismo NIT)' : ' (mismo número y proveedor)') } : null;
+  }
+
+  // reglas: ver mapaReglas. evidencia: armarEvidencia(...). correcciones: Map(fila -> { cuenta_cobro?: bool, caja_menor?: bool }) de ESTE archivo.
+  // -> { documentos: TODAS las filas, cajaMenor: las de caja menor (tambien estan en documentos), revision: [{fila, v, tipo, motivo, falta}] }
+  //    cada fila: { fila, v (Nota final), tipo, evidencia, cuentaCobro, cajaMenor, evidenciaCM }
+  function clasificar(filas, reglas, evidencia, correcciones) {
+    const R = mapaReglas(reglas), ev = evidencia || {}, cor = correcciones || new Map();
     const documentos = [], caja = [], revision = [];
     for (const f of filas || []) {
-      const k = contactoClave(f.v.Contacto);
-      const esCC = cc.has(k), esCM = cm.has(k);
+      const k = contactoClave(f.v.Contacto), r = R.get(k) || {}, c = cor.get(f.fila) || {};
+      const nota = plano(f.v.Nota), suDoc = f.v['Su Doc'];
+      const ccNota = nota.includes('cuenta de cobro'), cmNota = nota.includes('caja menor') || /\bcontado\b/.test(nota);
+      const fe = facturaElectronica(ev, f.v);
+      let tipo, evid = '', motivo = '', falta = '';
+      if (c.cuenta_cobro === true) { tipo = TIPO.CC; evid = 'corrección manual en este archivo'; }
+      else if (c.cuenta_cobro === false) { tipo = TIPO.ORD; evid = 'corrección manual en este archivo'; }
+      else if (r.cuenta_cobro || ccNota) {
+        const fuente = ccNota ? 'la nota del documento dice cuenta de cobro' : 'regla confirmada del proveedor';
+        if (fe) { tipo = TIPO.REVISAR; motivo = 'Según ' + fuente + ', pero el documento aparece como factura electrónica en ' + fe.fuente; falta = 'Confirmar el tipo de este documento (y revisar la regla del proveedor)'; }
+        else { tipo = TIPO.CC; evid = fuente; }
+      } else if (fe) { tipo = TIPO.ORD; evid = 'factura electrónica en ' + fe.fuente; }
+      else if (r.no_cuenta_cobro) { tipo = TIPO.ORD; evid = 'regla confirmada: el proveedor no cobra con cuenta de cobro'; }
+      else if (indicioCuentaCobro(suDoc)) { tipo = TIPO.REVISAR; motivo = 'El Su Doc "' + suDoc + '" tiene forma de cuenta de cobro, pero no hay regla del proveedor ni otra evidencia'; falta = 'Confirmar si es cuenta de cobro (si todos sus documentos lo son, guardar la regla del proveedor)'; }
+      else if (ev.conocidos && ev.conocidos.has(claveProveedor(f.v.Contacto))) { tipo = TIPO.CONOCIDO; motivo = 'El proveedor está en el Banco de Facturas, pero no hay evidencia del tipo de este documento'; falta = 'Cargar el reporte de la DIAN (si es factura electrónica queda identificado) o guardar una regla del proveedor'; }
+      else { tipo = TIPO.SIN; motivo = 'El proveedor no está en el Banco de Facturas y no hay regla ni factura electrónica para este documento'; falta = 'Cargar el reporte de la DIAN o confirmar el tipo (y guardar la regla si aplica a todo el proveedor)'; }
+      const cm = c.caja_menor != null ? !!c.caja_menor : !!(r.caja_menor || cmNota);
+      const evidCM = !cm ? '' : (c.caja_menor != null ? 'corrección manual en este archivo' : (r.caja_menor ? 'regla confirmada del proveedor' : 'la nota del documento dice caja menor / contado'));
       const v = Object.assign({}, f.v);
-      if (esCC) v.Nota = agregarLeyenda(v.Nota, LEYENDA_CC);
-      if (esCM) v.Nota = agregarLeyenda(v.Nota, LEYENDA_CM);
-      const x = { fila: f.fila, v, cuentaCobro: esCC, cajaMenor: esCM };
-      if (esCM) caja.push(x); else documentos.push(x);
-      if (esCC && esCM) revision.push({ fila: f.fila, v, motivo: 'El proveedor está en las dos listas (cuenta de cobro y caja menor): va en Caja menor (prioridad) con las dos notas' });
+      if (tipo === TIPO.CC) v.Nota = agregarLeyenda(v.Nota, LEYENDA_CC);
+      if (cm) v.Nota = agregarLeyenda(v.Nota, LEYENDA_CM);
+      const x = { fila: f.fila, v, tipo, evidencia: evid, cuentaCobro: tipo === TIPO.CC, cajaMenor: cm, evidenciaCM: evidCM };
+      documentos.push(x);
+      if (cm) caja.push(x);
+      if (ORDEN_REVISION.includes(tipo)) revision.push({ fila: f.fila, v, tipo, motivo, falta });
     }
+    revision.sort((a, b) => ORDEN_REVISION.indexOf(a.tipo) - ORDEN_REVISION.indexOf(b.tipo) || a.fila - b.fila);
     return { documentos, cajaMenor: caja, revision };
   }
 
   const suma = (l) => Math.round(l.reduce((s, x) => s + (Number(x.v.Neto) || 0), 0) * 100) / 100;
+  // Totales sin duplicar: el total general es el de Documentos (la hoja Caja menor es una VISTA de algunos de ellos)
   function resumen(lectura, cl) {
     const cc = cl.documentos.filter((x) => x.cuentaCobro);
-    const restantes = cl.documentos.filter((x) => !x.cuentaCobro);
+    const restantes = cl.documentos.filter((x) => !x.cuentaCobro && !x.cajaMenor);
+    const ambos = cl.documentos.filter((x) => x.cuentaCobro && x.cajaMenor);
+    const porTipo = {}; for (const t of Object.values(TIPO)) porTipo[t] = cl.documentos.filter((x) => x.tipo === t).length;
     return {
       leidos: lectura.filas.length + lectura.errores.length + lectura.repetidas.length,
       validos: lectura.filas.length,
-      cuentasCobro: cc.length, cajaMenor: cl.cajaMenor.length, restantes: restantes.length,
-      revision: cl.revision.length + lectura.repetidas.length, errores: lectura.errores.length, repetidas: lectura.repetidas.length,
+      cuentasCobro: cc.length, cajaMenor: cl.cajaMenor.length, ambos: ambos.length, restantes: restantes.length,
+      revision: cl.revision.length + lectura.repetidas.length, errores: lectura.errores.length, repetidas: lectura.repetidas.length, porTipo,
       sinIngreso: lectura.filas.filter((x) => !x.v.INGRESO).length, sinDetalle: lectura.filas.filter((x) => !x.v.DETALLE).length, ingresoWeb: lectura.filas.filter((x) => x.v.ingresoWeb).length,
-      neto: { documentos: suma(cl.documentos), cuentasCobro: suma(cc), cajaMenor: suma(cl.cajaMenor), restantes: suma(restantes), total: suma(cl.documentos) + suma(cl.cajaMenor) },
+      neto: { documentos: suma(cl.documentos), cuentasCobro: suma(cc), cajaMenor: suma(cl.cajaMenor), ambos: suma(ambos), restantes: suma(restantes), total: suma(cl.documentos) },
     };
   }
   // contactos del archivo (para elegir a quien se le aplica cada regla) -> [{ contacto, n, neto }]
@@ -303,7 +380,7 @@
   const filaExcel = (v) => COLUMNAS.map((c) => (v[c] == null ? '' : v[c]));
 
   // ---- Excel final (ExcelJS se pasa: en la web se carga del CDN; en las pruebas, el de node) ----
-  const COLOR = { encabezado: 'FF0F766E', cuentaCobro: 'FFFEF3C7', cajaMenor: 'FFDBEAFE', ambos: 'FFEDE9FE', distinto: 'FFFCA5A5' };
+  const COLOR = { encabezado: 'FF0F766E', cuentaCobro: 'FFFEF3C7', cajaMenor: 'FFDBEAFE', ambos: 'FFEDE9FE', distinto: 'FFFCA5A5' };   // cuenta de cobro amarillo suave, caja menor azul suave, las dos lila
   const fechaExcel = (iso) => { const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) : null; };
   const horaExcel = (h) => { const m = String(h || '').match(/^(\d{2}):(\d{2}):(\d{2})$/); return m ? (+m[1] * 3600 + +m[2] * 60 + +m[3]) / 86400 : null; };
   function hojaDocumentos(wb, nombre, lista, dif) {
@@ -342,16 +419,54 @@
     ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: COLUMNAS.length } };
     return ws;
   }
-  // -> el libro (ExcelJS.Workbook) con Documentos, Caja menor y Resumen
+  // hoja de tabla simple (Por revisar, Clasificacion): encabezado, filtro, primera fila fija, anchos
+  function hojaTabla(wb, nombre, titulos, filas, anchos, colorFila) {
+    const ws = wb.addWorksheet(nombre, { views: [{ state: 'frozen', ySplit: 1 }] });
+    ws.addRow(titulos);
+    for (const f of filas) {
+      const r = ws.addRow(f.celdas);
+      r.alignment = { vertical: 'top', wrapText: true };
+      const color = colorFila && colorFila(f);
+      if (color) r.eachCell({ includeEmpty: true }, (cel, n) => { if (n <= titulos.length) cel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: color } }; });
+    }
+    const enc = ws.getRow(1);
+    enc.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    enc.eachCell((cel) => { cel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.encabezado } }; });
+    titulos.forEach((t, i) => { const col = ws.getColumn(i + 1); col.width = anchos[i] || 14; if (/^(Neto|Base|Impuestos)$/.test(t)) col.numFmt = '#,##0'; if (t === 'Fecha Doc') col.numFmt = 'dd/mm/yyyy'; });
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: titulos.length } };
+    return ws;
+  }
+  // -> el libro (ExcelJS.Workbook): Documentos (todos), Caja menor (vista), Por revisar, Clasificacion (trazabilidad) y Resumen
   function armarLibro(ExcelJS, { lectura, clasificacion, nombreArchivo, ahora, comparacion }) {
     const dif = comparacion && comparacion.porFila;
+    const cl = clasificacion;
     const wb = new ExcelJS.Workbook();
     wb.creator = 'Banco de Facturas - Organizador Hiopos';
-    hojaDocumentos(wb, 'Documentos', clasificacion.documentos, dif);
-    hojaDocumentos(wb, 'Caja menor', clasificacion.cajaMenor, dif);
-    const R = resumen(lectura, clasificacion);
+    hojaDocumentos(wb, 'Documentos', cl.documentos, dif);
+    hojaDocumentos(wb, 'Caja menor', cl.cajaMenor, dif);
+
+    // Por revisar: lo que no se pudo clasificar con certeza + lo que hay que corregir en Hiopos + repetidos/errores/columnas
+    const T = ['Fila del archivo', 'Revisión', 'INGRESO', 'Fecha Doc', 'Su Doc', 'Contacto', 'Neto', 'Motivo', 'Qué falta para resolverlo'];
+    const fila = (tipo, x, motivo, falta) => ({ tipo, celdas: [x ? x.fila : '', tipo, (x && x.v.INGRESO) || '', x && x.v['Fecha Doc'] ? fechaExcel(x.v['Fecha Doc']) : null, (x && x.v['Su Doc']) || '', (x && x.v.Contacto) || '', x && x.v.Neto != null ? x.v.Neto : null, motivo, falta] });
+    const rev = [
+      ...cl.revision.map((x) => fila(TIPO_TXT[x.tipo], x, x.motivo, x.falta)),
+      ...cl.documentos.filter((x) => dif && dif.has(x.fila)).map((x) => fila('Valores distintos a la factura', x, textoDiferencia(dif.get(x.fila)), 'Modificar en Hiopos la base, el impuesto o el total')),
+      ...lectura.repetidas.map((x) => fila('Repetido en el archivo', x, 'Igual a la fila ' + x.igualA + ' del archivo', 'Nada: se incluyó una sola vez')),
+      ...lectura.errores.map((x) => fila('Error de lectura', x.v ? x : { fila: x.fila, v: {} }, x.motivo, 'Corregir el dato en Hiopos y volver a exportar; no se incluyó')),
+    ];
+    if (lectura.faltan.length) rev.unshift(fila('Columna faltante', null, 'El archivo no trae: ' + lectura.faltan.join(', '), 'Exportar de Hiopos con esas columnas; esas celdas quedaron vacías'));
+    if (!lectura.ingresoDe) rev.unshift(fila('Columna faltante', null, 'El archivo no trae Serie / Número (INGRESO)', 'En Hiopos mostrar la columna Serie / Número antes de exportar'));
+    const colorRev = { 'Cuenta de cobro por revisar': COLOR.cuentaCobro, 'Valores distintos a la factura': COLOR.distinto, 'Error de lectura': 'FFFEE2E2' };
+    hojaTabla(wb, 'Por revisar', T, rev, [10, 30, 18, 12, 16, 36, 14, 60, 50], (f) => colorRev[f.tipo] || null);
+
+    // Clasificacion: cada documento con su tipo y la evidencia (trazabilidad de las reglas aplicadas)
+    hojaTabla(wb, 'Clasificación', ['Fila del archivo', 'INGRESO', 'Su Doc', 'Contacto', 'Neto', 'Tipo de documento', 'Evidencia', 'Caja menor', 'Evidencia caja menor'],
+      cl.documentos.map((x) => ({ celdas: [x.fila, x.v.INGRESO || '', x.v['Su Doc'] || '', x.v.Contacto || '', x.v.Neto, TIPO_TXT[x.tipo], x.evidencia || '—', x.cajaMenor ? 'Sí' : 'No', x.evidenciaCM || ''] })),
+      [10, 18, 16, 36, 14, 32, 46, 11, 40]);
+
+    const R = resumen(lectura, cl);
     const ws = wb.addWorksheet('Resumen');
-    ws.columns = [{ width: 46 }, { width: 18 }, { width: 22 }, { width: 46 }];
+    ws.columns = [{ width: 58 }, { width: 14 }, { width: 20 }];
     const titulo = (t) => { const r = ws.addRow([t]); r.font = { bold: true, size: 13, color: { argb: COLOR.encabezado } }; };
     titulo('Organizador Hiopos');
     ws.addRow(['Archivo', nombreArchivo || '']);
@@ -359,16 +474,21 @@
     ws.addRow([]);
     const enc = ws.addRow(['Concepto', 'Documentos', 'Neto']); enc.font = { bold: true };
     const lin = (t, n, v) => { const r = ws.addRow([t, n, v]); r.getCell(3).numFmt = '#,##0'; return r; };
+    const pinta = (r, c) => { r.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: c } }; return r; };
     lin('Total de documentos leídos', R.leidos, null);
-    lin('Cuentas de cobro (hoja Documentos)', R.cuentasCobro, R.neto.cuentasCobro).getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.cuentaCobro } };
-    lin('Pagos de contado (hoja Caja menor)', R.cajaMenor, R.neto.cajaMenor).getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.cajaMenor } };
-    lin('Documentos restantes', R.restantes, R.neto.restantes);
-    lin('Total organizado (Documentos + Caja menor, sin repetir)', R.validos, R.neto.total).font = { bold: true };
-    lin('Requieren revisión', R.revision, null);
+    lin('Total general (hoja Documentos, cada documento una sola vez)', R.validos, R.neto.total).font = { bold: true };
+    pinta(lin('Cuentas de cobro identificadas', R.cuentasCobro, R.neto.cuentasCobro), COLOR.cuentaCobro);
+    pinta(lin('Pagos de contado (también en la hoja Caja menor)', R.cajaMenor, R.neto.cajaMenor), COLOR.cajaMenor);
+    pinta(lin('   de ellos, cuenta de cobro y caja menor a la vez', R.ambos, R.neto.ambos), COLOR.ambos);
+    lin('Documentos sin cuenta de cobro ni caja menor', R.restantes, R.neto.restantes);
+    lin('Pendientes de revisión (hoja Por revisar)', R.revision, null).font = { bold: true };
     lin('Errores de lectura (no se incluyeron)', R.errores, null);
     lin('Repetidos en el archivo (se incluyeron una sola vez)', R.repetidas, null);
-    if (lectura.totalArchivo != null) { const d = Math.round((R.neto.total - lectura.totalArchivo) * 100) / 100; lin('Total que trae el archivo de Hiopos (su fila de totales)', null, lectura.totalArchivo); lin(d === 0 ? 'Cuadra con el total organizado' : 'DIFERENCIA con el total organizado (revisar errores y repetidos)', null, d).font = { bold: true, color: { argb: d === 0 ? 'FF166534' : 'FFB91C1C' } }; }
-    lin('INGRESO tomado de la web (el archivo no lo traia)', R.ingresoWeb, null);
+    if (lectura.totalArchivo != null) { const d = Math.round((R.neto.total - lectura.totalArchivo) * 100) / 100; lin('Total que trae el archivo de Hiopos (su fila de totales)', null, lectura.totalArchivo); lin(d === 0 ? 'Cuadra con el total general' : 'DIFERENCIA con el total general (revisar errores y repetidos)', null, d).font = { bold: true, color: { argb: d === 0 ? 'FF166534' : 'FFB91C1C' } }; }
+    ws.addRow([]); titulo('Clasificación del tipo de documento');
+    for (const t of Object.values(TIPO)) lin(TIPO_TXT[t], R.porTipo[t], null);
+    ws.addRow([]); titulo('INGRESO, DETALLE y factura');
+    lin('INGRESO tomado de la web (el archivo no lo traía)', R.ingresoWeb, null);
     lin('Sin INGRESO (ni en el archivo ni en la web)', R.sinIngreso, null);
     lin('Sin DETALLE (la serie no dice el centro de costo)', R.sinDetalle, null);
     if (comparacion) {
@@ -376,22 +496,9 @@
       lin('CON VALORES DISTINTOS A LA FACTURA (modificar en Hiopos)', dif.size, null).font = { bold: true, color: { argb: dif.size ? 'FFB91C1C' : 'FF166534' } };
       lin('No están en el reporte de la DIAN', comparacion.sinFactura, null);
     }
-    const det = [
-      ...clasificacion.revision.map((x) => ['Revisión', x.fila, x.v['Su Doc'] + ' · ' + x.v.Contacto, x.motivo]),
-      ...lectura.repetidas.map((x) => ['Repetido', x.fila, (x.v['Su Doc'] || '') + ' · ' + (x.v.Contacto || ''), 'igual a la fila ' + x.igualA + ' del archivo']),
-      ...[...clasificacion.documentos, ...clasificacion.cajaMenor].filter((x) => dif && dif.has(x.fila)).map((x) => ['MODIFICAR EN HIOPOS', x.fila, (x.v.INGRESO ? x.v.INGRESO + ' · ' : '') + x.v['Su Doc'] + ' · ' + x.v.Contacto, textoDiferencia(dif.get(x.fila))]),
-      ...lectura.errores.map((x) => ['Error de lectura', x.fila, ((x.v && x.v['Su Doc']) || '') + ' · ' + ((x.v && x.v.Contacto) || ''), x.motivo]),
-    ];
-    if (lectura.faltan.length) det.unshift(['Columna faltante', '', lectura.faltan.join(', '), 'no viene en el archivo: esas celdas quedan vacías']);
-    if (!lectura.ingresoDe) det.unshift(['Columna faltante', '', 'Serie / Número (INGRESO)', 'el archivo no la trae: en Hiopos muestra la columna Serie / Número antes de exportar. Se tomó de la web lo que se pudo']);
-    if (det.length) {
-      ws.addRow([]); titulo('Para revisar');
-      const e2 = ws.addRow(['Tipo', 'Fila del archivo', 'Documento', 'Motivo']); e2.font = { bold: true };
-      for (const d of det) ws.addRow(d).getCell(4).alignment = { wrapText: true };
-    }
     return wb;
   }
 
   return { COLUMNAS, NUMERICAS, REQUERIDAS, LEYENDA_CC, LEYENDA_CM, DETALLE_SERIE, COLOR, plano, columnaDe, contactoClave, serieDe, detalleDeSerie,
-    aNumero, aFecha, aHora, aBooleano, agregarLeyenda, leerCsv, leerTabla, completarDesdeWeb, ingresoLegible, leerDian, compararConDian, textoDiferencia, IMPUESTOS_DIAN, clasificar, resumen, contactos, filaExcel, armarLibro };
+    aNumero, aFecha, aHora, aBooleano, agregarLeyenda, leerCsv, leerTabla, completarDesdeWeb, ingresoLegible, leerDian, compararConDian, textoDiferencia, IMPUESTOS_DIAN, TIPO, TIPO_TXT, claveProveedor, indicioCuentaCobro, mapaReglas, armarEvidencia, facturaElectronica, clasificar, resumen, contactos, filaExcel, armarLibro };
 });

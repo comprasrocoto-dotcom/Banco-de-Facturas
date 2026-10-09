@@ -2616,6 +2616,7 @@ async function amarrarPedido(id){
   // (09/10/2026) centro de costo (solo marcas que lo usan): se elige por numero
   await cargarCentrosCosto();
   let cc=null; const opsCC=CentroCosto.opciones(centrosCosto,p.marca_id);
+  if(opsCC.length) opsCC.push({centro:"VARIOS CENTROS (mixta) → queda pendiente de revisión",serie_erp:CentroCosto.VARIOS});
   if(opsCC.length){
     const r=prompt("🏷️ Centro de costo de la factura (con esta serie entra al ERP). Escribe el número:\n\n"+opsCC.map((o,i)=>(i+1)+". "+o.centro+" ("+o.serie_erp+")").join("\n"),"");
     if(r===null) return;
