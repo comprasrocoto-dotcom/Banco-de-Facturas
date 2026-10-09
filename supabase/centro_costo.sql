@@ -33,7 +33,13 @@ join (values
   ('123 wok', 'EMPAQUES', 'FC.EMPAQUES', 4), ('123 wok', 'UTILES Y PAPELERIA', 'FC.UTILESYPAPELERIA', 5),
   ('Casa de Nadie', 'COCINA', 'FC.COCINA', 1), ('Casa de Nadie', 'BAR', 'FC.BAR', 2), ('Casa de Nadie', 'ELEMENTOS DE ASEO Y CAFETERIA', 'FC. ASEO', 3),
   ('Casa de Nadie', 'EMPAQUES', 'FC.EMPAQUES', 4),
-  ('Sin Par', 'COCINA', 'FC.COCINA', 1), ('Sin Par', 'BAR', 'FC.BAR', 2)
+  ('Sin Par', 'COCINA', 'FC.COCINA', 1), ('Sin Par', 'BAR', 'FC.BAR', 2),
+  -- (10/10/2026) Rocoto y Arrebatao: centro de costo obligatorio al amarrar (la serie real del ERP es FCRC/FCAR,
+  -- pero el centro se elige y se guarda en pedidos.centro_costo; el organizador lo lee de ahi)
+  ('Rocoto', 'COCINA', 'FCRC.COCINA', 1), ('Rocoto', 'BAR', 'FCRC.BAR', 2), ('Rocoto', 'ASEO', 'FCRC.ASEO', 3),
+  ('Rocoto', 'EMPAQUE', 'FCRC.EMPAQUE', 4), ('Rocoto', 'UTENSILIOS', 'FCRC.UTENSILIOS', 5),
+  ('Arrebatao', 'COCINA', 'FCAR.COCINA', 1), ('Arrebatao', 'BAR', 'FCAR.BAR', 2), ('Arrebatao', 'ASEO', 'FCAR.ASEO', 3),
+  ('Arrebatao', 'EMPAQUE', 'FCAR.EMPAQUE', 4), ('Arrebatao', 'UTENSILIOS', 'FCAR.UTENSILIOS', 5)
 ) as v(marca, centro, serie, orden) on m.nombre = v.marca
 on conflict (marca_id, serie_erp) do nothing;
 
