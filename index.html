@@ -125,6 +125,7 @@ tr:hover td{background:#f1f5f9}
     <button class="chip"    id="m-pedidos" onclick="setModulo('pedidos')">📋 Pedidos</button>
     <button class="chip"  id="m-cruce" style="display:none" onclick="setModulo('cruce')">🧾 Cruce DIAN</button>
     <button class="chip"  id="m-precios" style="display:none" onclick="setModulo('precios')">💲 Precios</button>
+    <button class="chip"  id="m-hiopos" style="display:none" onclick="setModulo('hiopos')">📊 Organizador Hiopos</button>
     <button class="chip"  id="m-admin" style="display:none" onclick="setModulo('admin')">⚙️ Admin</button>
     <span id="sede" class="badge"></span>
     <select id="fSede" style="width:auto;margin:0;display:none" onchange="cambiarFiltroSede()">
@@ -184,6 +185,7 @@ tr:hover td{background:#f1f5f9}
 
     <div id="vistaCruce" style="display:none"><div id="cruceRaiz"></div><input type="file" id="fileConcDian" accept=".csv,.xlsx,.xls" style="display:none" onchange="concLeerDian(event)"></div>
     <div id="vistaPrecios" style="display:none"><div id="preciosRaiz"></div></div>
+    <div id="vistaHiopos" style="display:none"><div id="hioposRaiz"></div></div>
     <div id="vistaAdmin" style="display:none">
       <div class="row" style="margin-bottom:14px">
         <button class="chip on" id="ad-prov" onclick="setAdmin('prov')">Proveedores</button>
@@ -192,7 +194,6 @@ tr:hover td{background:#f1f5f9}
         <button class="chip"    id="ad-catcomp" onclick="setAdmin('catcomp')">📋 Catálogo completo</button>
         <button class="chip"    id="ad-agente" onclick="setAdmin('agente')">🤖 Agente</button>
         <button class="chip"    id="ad-import" onclick="setAdmin('import')">📥 Importar bases</button>
-        <button class="chip"    id="ad-hiopos" onclick="setAdmin('hiopos')">📊 Organizador Hiopos</button>
         <button class="chip"    id="ad-usuarios" style="display:none" onclick="setAdmin('usuarios')">👥 Usuarios y perfiles</button>
         <span class="sp"></span>
         <input id="qa" placeholder="🔎 buscar..." style="width:240px;margin:0" oninput="adminLimite=400;pintarAdmin()">
@@ -306,6 +307,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/desamarrar.js"></script>
 <script src="js/fecha-recibido.js"></script>
 <script src="js/select-buscable.js"></script>
+<script src="js/centro-costo.js"></script>
 <script src="js/organizador-hiopos.js"></script>
 <script src="js/organizador-hiopos-ui.js"></script>
 <script src="js/conciliacion-ui.js"></script>
@@ -341,7 +343,7 @@ async function sesion(u){
   try{ pintarBotonManual(); }catch(e){}     // 📖 Manual: solo si su perfil tiene algun manual habilitado
   if(perfil.debe_cambiar_clave) await exigirCambioClave();     // contraseña temporal: hay que cambiarla antes de seguir
   const s=perfil.sedes;
-  if(perfil.rol==="admin"||perfil.rol==="pagos"){$("btnsubir").style.display="inline-block";$("barraDescarga").style.display="flex";$("m-cruce").style.display="inline-block";$("m-precios").style.display="inline-block";}
+  if(perfil.rol==="admin"||perfil.rol==="pagos"){$("btnsubir").style.display="inline-block";$("barraDescarga").style.display="flex";$("m-hiopos").style.display="inline-block";$("m-cruce").style.display="inline-block";$("m-precios").style.display="inline-block";}
   if(perfil.rol==="admin"){ $("m-admin").style.display="inline-block"; $("btnIngresos").style.display="inline-block"; }
   const {data:ss}=await SB.from("sedes").select("id,nombre,marca_id,marcas(nombre)").order("nombre");
   sedes=ss||[];
@@ -968,13 +970,13 @@ let adminMarcas=[], adminVinc=[], adminMarcaTocada=false;   // marcas y proveedo
 let adminLimite=400;   // cuántos artículos se pintan de una vez en Admin > Artículos (hay más de 700: "Ver 400 más")
 let adminEdit=null;   // {tipo:"prov"|"art", id, error} = la tarjeta que se está editando (ver js/admin-editar.js)
 function setAdmin(v){ adminVista=v; adminEdit=null; adminLimite=400;
-  ["prov","art","cat","catcomp","agente","import","hiopos","usuarios"].forEach(x=>$("ad-"+x).classList.toggle("on", x==v));
+  ["prov","art","cat","catcomp","agente","import","usuarios"].forEach(x=>$("ad-"+x).classList.toggle("on", x==v));
   $("filtroCat").style.display = (v=="cat")?"flex":"none";
   $("filtroMarcaAdm").style.display = (v=="prov")?"flex":"none";
   $("filtroCatalogoAdm").style.display = (v=="art"||v=="catcomp")?"flex":"none";
-  $("btnAdmNuevo").style.display = (v=="agente"||v=="import"||v=="usuarios"||v=="catcomp"||v=="hiopos")?"none":"";
-  $("qa").style.display = (v=="import"||v=="hiopos")?"none":"";
-  $("vistaAdmin").classList.toggle("adm-import", v=="import"||v=="hiopos");
+  $("btnAdmNuevo").style.display = (v=="agente"||v=="import"||v=="usuarios"||v=="catcomp")?"none":"";
+  $("qa").style.display = (v=="import")?"none":"";
+  $("vistaAdmin").classList.toggle("adm-import", v=="import");
   $("vistaAdmin").classList.toggle("adm-sinfecha", v=="catcomp");
   pintarAdmin();
 }
@@ -1053,8 +1055,6 @@ function pintarAdmin(){
     pintarUsuarios(c,q);
   } else if(adminVista==="import"){
     impPintar(c);
-  } else if(adminVista==="hiopos"){
-    pintarOrganizadorHiopos(c);   // (09/10/2026) Admin > Organizador Hiopos
   } else {
     const pid=Number($("catProv").value||0);
     if(!pid){ c.innerHTML='<div class="vacio">Elegí un proveedor para ver qué se le compra.</div>'; return; }
@@ -1619,6 +1619,9 @@ function setModulo(m){
   $("m-precios").classList.toggle("on",m=="precios");
   $("vistaPrecios").style.display = (m=="precios")?"block":"none";
   if(m=="precios") precAbrir();
+  $("m-hiopos").classList.toggle("on",m=="hiopos");   // (09/10/2026) Organizador Hiopos: modulo propio (admin y analistas)
+  $("vistaHiopos").style.display = (m=="hiopos")?"block":"none";
+  if(m=="hiopos") orgHPintar();
 }
 function toggleFiltros(which){
   const panel=$("panelFiltros"+which), btn=$("btnFiltros"+which);
@@ -1803,6 +1806,19 @@ async function ponerErp(id){
   pintarPedidos();
 }
 let amModo=null, amId=null, amDatos=[], amLineas={};
+// (09/10/2026) centros de costo por marca (tabla centro_costo_serie). Si no carga, la base igual lo exige al amarrar.
+let centrosCosto=[], centrosCostoCargados=false;
+async function cargarCentrosCosto(){
+  if(centrosCostoCargados) return;
+  try{ const {data,error}=await SB.from("centro_costo_serie").select("marca_id,centro,serie_erp,orden,activo"); if(error) throw error; centrosCosto=data||[]; centrosCostoCargados=true; }
+  catch(e){ centrosCosto=[]; }
+}
+// lo elegido para el amarre (null si la marca no usa centro de costo); undefined = falta y ya se aviso
+function centroCostoPara(p, idSelect){
+  const v=CentroCosto.validar(centrosCosto,p&&p.marca_id,($(idSelect)||{}).value);
+  if(!v.ok){ $("amErr").textContent=v.error; alert("🏷️ "+v.error); const el=$(idSelect); if(el){ el.style.borderColor="#b91c1c"; el.focus(); } return undefined; }
+  return v.serie;
+}
 async function abrirAmarre(modo, id){
   amModo=modo; amId=id; amLineas={}; $("amErr").textContent=""; $("amBuscar").value="";
   if(modo==="pedido"){
@@ -1818,6 +1834,13 @@ async function abrirAmarre(modo, id){
     amDatos = ((perfil.rol==="sede") ? pedidos.filter(p=>p.sede_id===perfil.sede_id) : pedidos).filter(SinSellar.pendienteDeAmarrar);
   }
   if(typeof prepararFechaRecibido==="function") prepararFechaRecibido(modo==="pedido"?(pedidos.find(x=>x.id===id)||null):null);
+  // (09/10/2026) centro de costo: en modo pedido va arriba; en modo factura va en cada pedido, junto a "Confirmar amarrado"
+  if(typeof cargarCentrosCosto==="function" && typeof CentroCosto!=="undefined"){
+    await cargarCentrosCosto();
+    const pCC=modo==="pedido"?(pedidos.find(x=>x.id===id)||{}):{};
+    const htmlCC=modo==="pedido"?CentroCosto.selectHtml(centrosCosto,pCC.marca_id,"amCentro",""):"";
+    if($("amCentroSel")){ $("amCentroSel").innerHTML=htmlCC; $("amCentroBox").style.display=htmlCC?"":"none"; }
+  }
   pintarAmarre();
   $("modalAmarre").classList.add("on");
   setTimeout(()=>$("amBuscar").focus(),120);
@@ -1908,7 +1931,7 @@ async function verResumenPedido(id){
     const lineas=data.slice(0,8).map(l=>`• ${l.insumo||"?"} (${l.cantidad||0} ${l.unidad||""})`).join("<br>");
     const extra=data.length>8 ? `<br><i>...y ${data.length-8} articulo(s) mas</i>`:"";
     const totalArts=data.reduce((t,l)=>t+Number(l.cantidad||0),0);
-    div.innerHTML=`<b>Articulos del pedido (${data.length}):</b><br>${lineas}${extra}<br><b>Total: ${totalArts} unidades</b><br><br><button class="p" onclick="event.stopPropagation();amarrarConPedido(${id})">✅ Confirmar amarrado</button>`;
+    div.innerHTML=`<b>Articulos del pedido (${data.length}):</b><br>${lineas}${extra}<br><b>Total: ${totalArts} unidades</b><br><br>${(()=>{const pp=pedidos.find(x=>x.id===id)||{}, h=CentroCosto.selectHtml(centrosCosto,pp.marca_id,'amCC_'+id,''); return h?`<div style="margin-bottom:8px;padding:6px 10px;background:#f0fdf4;border:1px solid #86efac;border-radius:9px"><b style="color:#166534">🏷️ Centro de costo <span style="color:#b91c1c">*</span></b><br>${h}</div>`:'';})()}<button class="p" onclick="event.stopPropagation();amarrarConPedido(${id})">✅ Confirmar amarrado</button>`;
     div.dataset.cargado="1";
   }catch(e){
     div.textContent="Error: "+e.message;
@@ -1961,9 +1984,10 @@ async function amarrarConFactura(cufe){
   const pAntes=pedidos.find(x=>x.id===amId);
   if(bloquearSiYaAmarrado(pAntes)) return;
   const fRec=fechaRecibidoPara(pAntes); if(!fRec) return;   // (06/10/2026) Fecha Recibido obligatoria
+  const cc=centroCostoPara(pAntes,"amCentro"); if(cc===undefined) return;   // (09/10/2026) centro de costo (solo marcas que lo usan)
   const f=facturas.find(x=>x.cufe===cufe)||{};
   const dec=confirmarAmarreProveedor(f,pAntes); if(!dec.ok) return;
-  const up=await SB.rpc("pedido_factura_amarrar",{p_pedido_id:amId,p_cufe:cufe,p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||null,p_forzar:dec.forzar,p_motivo:dec.motivo,p_fecha_recibido:fRec});
+  const up=await SB.rpc("pedido_factura_amarrar",{p_pedido_id:amId,p_cufe:cufe,p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||null,p_forzar:dec.forzar,p_motivo:dec.motivo,p_fecha_recibido:fRec,p_centro_costo:cc});
   if(up.error){$("amErr").textContent="No se pudo: "+up.error.message;return;}
   await SB.from("historial").insert({cufe,accion:"pedido amarrado",detalle:"pedido "+(pedidos.find(x=>x.id===amId)||{}).numero,usuario:usuario.id}).then(()=>{},()=>{});
   $("modalAmarre").classList.remove("on");
@@ -1974,9 +1998,10 @@ async function amarrarConPedido(pid){
   const pAntes=pedidos.find(x=>x.id===pid);
   if(bloquearSiYaAmarrado(pAntes)) return;
   const fRec=fechaRecibidoPara(pAntes); if(!fRec) return;   // (06/10/2026) Fecha Recibido obligatoria
+  const cc=centroCostoPara(pAntes,"amCC_"+pid); if(cc===undefined) return;   // (09/10/2026) centro de costo (solo marcas que lo usan)
   const f=facturas.find(x=>x.cufe===amId);
   const dec=confirmarAmarreProveedor(f,pAntes); if(!dec.ok) return;
-  const up=await SB.rpc("pedido_factura_amarrar",{p_pedido_id:pid,p_cufe:amId,p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||null,p_forzar:dec.forzar,p_motivo:dec.motivo,p_fecha_recibido:fRec});
+  const up=await SB.rpc("pedido_factura_amarrar",{p_pedido_id:pid,p_cufe:amId,p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||null,p_forzar:dec.forzar,p_motivo:dec.motivo,p_fecha_recibido:fRec,p_centro_costo:cc});
   if(up.error){$("amErr").textContent="No se pudo: "+up.error.message;return;}
   await SB.from("historial").insert({cufe:amId,accion:"pedido amarrado",detalle:"pedido "+(pedidos.find(x=>x.id===pid)||{}).numero,usuario:usuario.id}).then(()=>{},()=>{});
   $("modalAmarre").classList.remove("on");
@@ -2052,6 +2077,7 @@ async function abrirPedido(id){
        <div class="row" style="gap:40px;margin-top:8px;align-items:flex-start">
          <div><div class="mut" style="font-weight:700">N. FACTURA</div><div>${numFacturaDe(p)||"—"}</div></div>
          <div><div class="mut" style="font-weight:700">FECHA RECIBIDO</div><div>${p.fecha_recibido?FechaRecibido.mostrar(p.fecha_recibido):(p.factura_cufe?"—":"")}</div></div>
+         ${p.centro_costo||CentroCosto.requiere(centrosCosto,p.marca_id)?`<div><div class="mut" style="font-weight:700">CENTRO DE COSTO</div><div>${p.centro_costo?escAg(CentroCosto.etiqueta(p.centro_costo)):(p.factura_cufe?"—":"")}</div></div>`:""}
          <div><div class="mut" style="font-weight:700">ENLAZADA EL</div><div>${p.factura_amarrada_en?new Date(p.factura_amarrada_en).toLocaleString('es-CO',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):(p.factura_cufe?"—":"")}</div></div>
          <div><div class="mut" style="font-weight:700">TIPO</div><div>${p.forma_pago||p.tipo||"—"}</div></div>
          <div><div class="mut" style="font-weight:700">OBSERVACIÓN</div><div>${p.observacion_factura||"—"}</div></div>
@@ -2587,10 +2613,19 @@ async function amarrarPedido(id){
   const fTxt=prompt("📅 Fecha Recibido de la factura (DD/MM/AAAA): el día que llegó la mercancía. Igual o posterior a la fecha del pedido ("+FechaRecibido.mostrar(p.fecha)+") y no futura.","");
   if(fTxt===null) return;
   const vRec=FechaRecibido.validar(fTxt,p.fecha,FechaRecibido.hoyCO()); if(!vRec.ok){alert(vRec.error);return;}
+  // (09/10/2026) centro de costo (solo marcas que lo usan): se elige por numero
+  await cargarCentrosCosto();
+  let cc=null; const opsCC=CentroCosto.opciones(centrosCosto,p.marca_id);
+  if(opsCC.length){
+    const r=prompt("🏷️ Centro de costo de la factura (con esta serie entra al ERP). Escribe el número:\n\n"+opsCC.map((o,i)=>(i+1)+". "+o.centro+" ("+o.serie_erp+")").join("\n"),"");
+    if(r===null) return;
+    const o=opsCC[Number(String(r).trim())-1]; if(!o){alert("Elige un número de la lista.");return;}
+    cc=o.serie_erp;
+  }
   const dec=confirmarAmarreProveedor(f,p); if(!dec.ok) return;
   // Guardar tambien el NUMERO de la factura en el pedido: asi el detalle muestra N. FACTURA.
   const numF = (((f.prefijo||"")+(f.folio||"")).replace(/[^A-Za-z0-9]/g,"")) || (f.documento||"").replace(/[^A-Za-z0-9]/g,"") || "";
-  const up=await SB.rpc("pedido_factura_amarrar",{p_pedido_id:id,p_cufe:f.cufe,p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||null,p_forzar:dec.forzar,p_motivo:dec.motivo,p_fecha_recibido:vRec.fecha});
+  const up=await SB.rpc("pedido_factura_amarrar",{p_pedido_id:id,p_cufe:f.cufe,p_usuario:(perfil&&perfil.nombre)||(usuario&&usuario.email)||null,p_forzar:dec.forzar,p_motivo:dec.motivo,p_fecha_recibido:vRec.fecha,p_centro_costo:cc});
   if(up.error){alert("No se pudo amarrar: "+up.error.message);return;}
   if(numF) await SB.from("pedidos").update({numero_factura:numF}).eq("id",id);
   await SB.from("historial").insert({cufe:f.cufe,accion:"pedido amarrado",detalle:p.numero,usuario:usuario.id});
@@ -2705,7 +2740,7 @@ function pintar(){
         <span class="badge ${st[1]}">${st[0]}</span>
         <span class="badge">${(f.categoria||"otro").replace("_"," ")}</span>
         ${nv?`<span class="badge st-pool">CON NOVEDAD: ${nv.motivo}</span>`:""}
-        ${f.num_ingreso?`<span class="badge st-sellada" style="font-size:13px;padding:5px 12px;font-weight:700">Ingreso ERP: ${f.num_ingreso}</span>`:""}
+        ${f.num_ingreso?`<span class="badge st-sellada" style="font-size:13px;padding:5px 12px;font-weight:700">Ingreso ERP: ${f.num_ingreso}${CentroCosto.detalle(f.num_ingreso)?" · "+CentroCosto.detalle(f.num_ingreso):""}</span>`:""}
         ${SinSellar.esIngresadaSinSellar(f)?badgeSinSellar(f):""}
         ${(f.pedido_erp||f.pedido_num)?`<span class="badge st-asignada">🔗 Pedido ${f.pedido_erp||f.pedido_num}</span>`:""}
         ${chipsNotaCredito(f)}
@@ -3141,6 +3176,11 @@ async function guardarNov(){
     <label for="amFechaRec" style="font-weight:700;color:#1e3a8a">📅 Fecha Recibido de la factura <span style="color:#b91c1c">*</span></label>
     <input type="date" id="amFechaRec" style="width:auto;margin:4px 0 2px;display:block" oninput="this.style.borderColor='';$('amErr').textContent=''">
     <div class="mut" id="amFechaAyuda" style="font-size:12px">El día que llegó la mercancía. Igual o posterior a la fecha del pedido, y no futura.</div>
+  </div>
+  <div id="amCentroBox" style="display:none;margin:0 0 8px;padding:8px 12px;background:#f0fdf4;border:1px solid #86efac;border-radius:9px">
+    <label style="font-weight:700;color:#166534">🏷️ Centro de costo de la factura <span style="color:#b91c1c">*</span></label>
+    <div id="amCentroSel"></div>
+    <div class="mut" style="font-size:12px">Con esta serie entra la factura al ERP (FC.BAR = BAR, FC.COCINA = COCINA...). Una sola por factura.</div>
   </div>
   <input id="amBuscar" placeholder="🔎 Escribí para buscar..." oninput="pintarAmarre()" autocomplete="off">
   <div id="amLista" style="max-height:52vh;overflow:auto;margin-top:6px"></div>

@@ -1,10 +1,12 @@
 // ============================================================
-//  organizador-hiopos-ui.js  -  Admin > "📊 Organizador Hiopos"  (09/10/2026)
+//  organizador-hiopos-ui.js  -  modulo "📊 Organizador Hiopos" (barra de arriba; admin y analistas/pagos)  (09/10/2026)
 //  Cargar el Excel de Facturas de compra de Hiopos -> vista previa -> marcar que proveedores cobran con CUENTA DE COBRO
 //  y cuales se pagan por CAJA MENOR (se guarda en hiopos_contacto_regla) -> descargar el Excel organizado
 //  (Documentos, Caja menor, Resumen). El archivo original no se toca. Logica en js/organizador-hiopos.js.
 //  Usa las globales de index.html: $, SB, perfil, usuario, escAg, money, XLSX (SheetJS ya cargado).
 // ============================================================
+// pinta el modulo en su contenedor (#hioposRaiz)
+function orgHPintar() { const c = document.getElementById('hioposRaiz'); if (c) pintarOrganizadorHiopos(c); }
 let orgH = { nombre: '', lectura: null, reglas: new Map(), cargadas: false, ver: 'documentos', q: '', error: '', procesando: false };
 
 async function orgHCargarReglas() {
@@ -41,7 +43,7 @@ async function orgHArchivo(input) {
     orgH.lectura = mejor;
   } catch (e) { orgH.error = e.message; }
   input.value = '';
-  pintarAdmin();
+  orgHPintar();
 }
 
 async function orgHMarcar(norm, campo, valor) {
@@ -49,9 +51,9 @@ async function orgHMarcar(norm, campo, valor) {
   const actual = orgH.reglas.get(norm) || { contacto_norm: norm, contacto: fila ? fila.contacto : norm, cuenta_cobro: false, caja_menor: false };
   const nuevo = Object.assign({}, actual, { [campo]: !!valor, actualizado_por: (perfil && perfil.nombre) || (usuario && usuario.email) || null, actualizado_en: new Date().toISOString() });
   const { error } = await SB.from('hiopos_contacto_regla').upsert(nuevo, { onConflict: 'contacto_norm' });
-  if (error) { alert('No se pudo guardar: ' + error.message); pintarAdmin(); return; }
+  if (error) { alert('No se pudo guardar: ' + error.message); orgHPintar(); return; }
   orgH.reglas.set(norm, nuevo);
-  pintarAdmin();
+  orgHPintar();
 }
 
 let orgHExcelJS = null;
@@ -82,7 +84,7 @@ async function orgHDescargar() {
   } catch (e) { alert('No se pudo armar el Excel: ' + e.message); }
   if (btn) { btn.disabled = false; btn.textContent = '⬇ Descargar Excel organizado'; }
 }
-function orgHVer(v) { orgH.ver = v; pintarAdmin(); }
+function orgHVer(v) { orgH.ver = v; orgHPintar(); }
 function orgHBuscar(q) { orgH.q = q; const el = document.getElementById('orgHProvs'); if (el) el.innerHTML = orgHTablaProveedores(); }
 
 function orgHTablaProveedores() {
@@ -96,7 +98,7 @@ function orgHTablaProveedores() {
 }
 
 function pintarOrganizadorHiopos(c) {
-  if (!orgH.cargadas) { c.innerHTML = '<div class="vacio">⏳ Cargando...</div>'; orgHCargarReglas().then(() => pintarAdmin()); return; }
+  if (!orgH.cargadas) { c.innerHTML = '<div class="vacio">⏳ Cargando...</div>'; orgHCargarReglas().then(() => orgHPintar()); return; }
   let h = `<div class="card" style="margin:6px 0"><div class="emisor">📊 Organizador Hiopos</div>
     <div class="mut" style="margin:4px 0 10px">Carga el Excel de <b>Facturas de compra</b> que bajas de Hiopos. Se ordena en las 16 columnas de las planillas (INGRESO = Serie / Número, DETALLE = centro de costo según la serie), las <b>cuentas de cobro</b> quedan marcadas en la Nota y los pagos de <b>caja menor</b> pasan a su propia hoja. Tu archivo no se modifica.</div>
     <label class="s" style="display:inline-block;cursor:pointer;padding:8px 14px;border-radius:8px;background:#0f766e;color:#fff;font-weight:700">📂 Cargar Excel de Hiopos<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="orgHArchivo(this)"></label>
