@@ -3018,77 +3018,59 @@ async function descargarContabilidad(){
   const res=$("resdesc"); res.textContent="";
   const fSedeVal=$("fSede").value;
   const fd=$("fdesde").value, fh=$("fhasta").value;
-  // Solo facturas con num_ingreso (ya ingresadas al ERP)
   let l=facturas.filter(f=>f.num_ingreso && f.archivo_pdf);
   if(fSedeVal) l=l.filter(f=>f.sede_id===Number(fSedeVal));
   if(fd) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe>=fd;});
   if(fh) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe<=fh;});
   if(!l.length){res.textContent="No hay facturas con ingreso ERP en ese rango.";return;}
   res.textContent="Cargando cuentas contables...";
-  // 1. Tabla cuentas_contables: articulo -> {grupo, centro}
+  // 1. cuentas_contables: articulo -> {grupo, centro}
   let cuentas={};
   try{
     const {data}=await SB.from("cuentas_contables").select("articulo,grupo_cuenta,centro_costo");
-    if(data) data.forEach(c=>{
-      const key=(c.articulo||"").toUpperCase().trim();
-      if(key) cuentas[key]={grupo:c.grupo_cuenta,centro:c.centro_costo};
-    });
+    if(data) data.forEach(c=>{const key=(c.articulo||"").toUpperCase().trim();if(key)cuentas[key]={grupo:c.grupo_cuenta,centro:c.centro_costo};});
   }catch(e){res.textContent="Error cargando cuentas: "+e.message;return;}
-  // 2. Pedidos con su centro_costo guardado al amarrar
+  // 2. pedidos con centro_costo + pedido_erp
   let pedidosMap={};
-  try{
-    const {data:ps}=await SB.from("pedidos").select("factura_cufe,centro_costo,numero,pedido_erp");
-    if(ps) ps.forEach(p=>{if(p.factura_cufe) pedidosMap[p.factura_cufe]={centro:p.centro_costo,numero:p.numero,erp:p.pedido_erp};});
+  try{const {data:ps}=await SB.from("pedidos").select("id,factura_cufe,centro_costo,numero,pedido_erp");
+    if(ps)ps.forEach(p=>{if(p.factura_cufe)pedidosMap[p.factura_cufe]={id:p.id,centro:p.centro_costo,numero:p.numero,erp:p.pedido_erp};});
   }catch(e){}
-  // 3. Lineas de cada pedido (insumos) para cruzar con cuentas_contables
+  // 3. lineas de pedidos (insumo) para cruzar con cuentas_contables
   let lineasPorPedido={};
-  try{
-    const {data:ls}=await SB.from("pedido_lineas").select("pedido_id,insumo");
-    if(ls) ls.forEach(l=>{(lineasPorPedido[l.pedido_id]=lineasPorPedido[l.pedido_id]||[]).push(l.insumo);});
+  try{const {data:ls}=await SB.from("pedido_lineas").select("pedido_id,insumo,cantidad,unidad,codigo");
+    if(ls)ls.forEach(l=>{(lineasPorPedido[l.pedido_id]=lineasPorPedido[l.pedido_id]||[]).push({insumo:l.insumo,cant:l.cantidad,unidad:l.unidad,codigo:l.codigo});});
   }catch(e){}
-  // 4. Mapeo cufe de factura -> id de pedido (para traer las lineas)
-  let cufeToPedidoId={};
-  try{
-    const {data:ps2}=await SB.from("pedidos").select("id,factura_cufe");
-    if(ps2) ps2.forEach(p=>{if(p.factura_cufe) cufeToPedidoId[p.factura_cufe]=p.id;});
-  }catch(e){}
-  res.textContent="Generando informe...";
+  res.textContent="Generando Excel...";
   const sedeNombre=(id)=>{const s=sedes.find(x=>x.id===id);return s?s.nombre:"";};
-  // Funcion: cruzar lineas del pedido con cuentas_contables y sacar el centro
+  // centro de costo: primero del pedido amarrado; si no, cruzando lineas con cuentas_contables
   function centroDeLineas(cufe){
-    // Primero: si el pedido ya tiene centro_costo guardado al amarrar, usarlo
     const p=pedidosMap[cufe];
-    if(p&&p.centro){return p.centro;}
-    // Si no: cruzar los insumos del pedido con cuentas_contables
-    const pid=cufeToPedidoId[cufe];
-    if(!pid) return null;
-    const ins=lineasPorPedido[pid];
-    if(!ins||!ins.length) return null;
+    if(p&&p.centro)return p.centro;
+    if(!p||!p.id)return null;
+    const ins=lineasPorPedido[p.id];if(!ins||!ins.length)return null;
     const centros={};
-    for(const insumo of ins){
-      const key=(insumo||"").toUpperCase().trim();
-      const c=cuentas[key];
-      if(c&&c.centro){centros[c.centro]=(centros[c.centro]||0)+1;}
-    }
-    const entries=Object.entries(centros);
-    if(!entries.length) return null;
-    entries.sort((a,b)=>b[1]-a[1]);
-    // Si hay uno mayoritario (mas del 60%), usarlo; si no, "VARIOS"
-    const total=entries.reduce((s,e)=>s+e[1],0);
-    if(entries.length===1) return entries[0][0];
-    if(entries[0][1]/total>0.6) return entries[0][0];
+    for(const it of ins){const key=(it.insumo||"").toUpperCase().trim();const c=cuentas[key];if(c&&c.centro)centros[c.centro]=(centros[c.centro]||0)+(Number(it.cant)||1);}
+    const es=Object.entries(centros);if(!es.length)return null;
+    es.sort((a,b)=>b[1]-a[1]);
+    const tot=es.reduce((s,e)=>s+e[1],0);
+    if(es.length===1)return es[0][0];
+    if(es[0][1]/tot>0.6)return es[0][0];
     return "VARIOS";
   }
-  function grupoDeCentro(centro){
-    if(!centro) return "";
-    if(centro==="BAR") return "INSUMO BAR";
-    if(centro.includes("ASEO")) return "MATERIAL DE ASEO";
-    if(centro.includes("EMPAQUE")) return "MATERIAL DE EMPAQUE";
-    if(centro.includes("UTENSIL")) return "UTENSILIOS Y PAPELERIA";
+  function grupoDeCentro(c){
+    if(!c)return "";if(c==="BAR")return "INSUMO BAR";
+    if(c.includes("ASEO"))return "MATERIAL DE ASEO";
+    if(c.includes("EMPAQUE"))return "MATERIAL DE EMPAQUE";
+    if(c.includes("UTENSIL"))return "UTENSILIOS Y PAPELERIA";
     return "INSUMOS DE COCINA";
   }
-  const BOM="\uFEFF";
-  let csv=BOM+"Fecha Ingreso;N. Factura;Proveedor;NIT Emisor;Sede;Centro de Costo;Grupo Cuenta;Base;IVA;Total;N. Ingreso ERP;N. Pedido ERP\n";
+  // Cargar ExcelJS
+  const ExcelJS=await new Promise((res,rej)=>{if(window.ExcelJS)return res(window.ExcelJS);const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';s.onload=()=>window.ExcelJS?res(window.ExcelJS):rej(new Error('ExcelJS no cargó'));s.onerror=()=>rej(new Error('No se pudo cargar ExcelJS'));document.head.appendChild(s);});
+  const wb=new ExcelJS.Workbook();wb.creator='Banco de Facturas';
+  // ---- HOJA 1: Contabilidad (una fila por factura) ----
+  const ws1=wb.addWorksheet('Contabilidad',{views:[{state:'frozen',ySplit:1}]});
+  const COLS=['Fecha Ingreso','N. Factura','Proveedor','NIT Emisor','Sede','Centro de Costo','Grupo Cuenta','Base','IVA','Total','N. Ingreso ERP','N. Pedido ERP'];
+  ws1.addRow(COLS);
   for(const f of l){
     const fecha=f.fecha_ingreso||f.fecha_emision||"";
     const num=f.documento||((f.prefijo||"")+(f.folio||""))||"";
@@ -3097,18 +3079,68 @@ async function descargarContabilidad(){
     const ivaPct=Number(f.iva||0);
     const base=ivaPct>0?Math.round((total/(1+ivaPct/100))*100)/100:total;
     const ivaVal=Math.round((total-base)*100)/100;
-    // Centro de costo: primero del pedido (amarrado), luego cruzando lineas con cuentas_contables
-    let centro=centroDeLineas(f.cufe);
-    if(!centro) centro="POR REVISAR";
+    let centro=centroDeLineas(f.cufe);if(!centro)centro="POR REVISAR";
     const grupo=grupoDeCentro(centro);
-    const numPed=pedidosMap[f.cufe]?pedidosMap[f.cufe].erp||pedidosMap[f.cufe].numero||"":(f.pedido_erp||"");
-    csv+=[fecha,num,f.emisor||"",f.nit_emisor||"",sede,centro,grupo,base,ivaVal,total,f.num_ingreso||"",numPed].join(";")+"\n";
+    const numPed=pedidosMap[f.cufe]?(pedidosMap[f.cufe].erp||pedidosMap[f.cufe].numero||""):(f.pedido_erp||"");
+    ws1.addRow([fecha,num,f.emisor||"",f.nit_emisor||"",sede,centro,grupo,base,ivaVal,total,f.num_ingreso||"",numPed]);
   }
-  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
-  const a=document.createElement("a");
-  a.href=URL.createObjectURL(blob);
-  a.download="contabilidad_"+(fd||"inicio")+"_"+(fh||"hoy")+".csv";
-  a.click(); a.remove();
+  const enc1=ws1.getRow(1);enc1.font={bold:true,color:{argb:'FFFFFFFF'}};enc1.alignment={vertical:'middle',horizontal:'center'};
+  enc1.eachCell(c=>{c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF1E40AF'}}});
+  COLS.forEach((c,i)=>{const col=ws1.getColumn(i+1);if(/^(Base|IVA|Total)$/.test(c))col.numFmt='#,##0';col.width=Math.max(c.length+2,16);});
+  ws1.autoFilter={from:{row:1,column:1},to:{row:1,column:COLS.length}};
+  // ---- HOJA 2: Detalle por artículo ----
+  const ws2=wb.addWorksheet('Detalle por artículo',{views:[{state:'frozen',ySplit:1}]});
+  const COLS2=['Fecha Ingreso','N. Factura','Proveedor','Sede','Insumo','Cantidad','Unidad','Código','Centro de Costo','Grupo Cuenta','Cuenta Contable'];
+  ws2.addRow(COLS2);
+  for(const f of l){
+    const fecha=f.fecha_ingreso||f.fecha_emision||"";
+    const num=f.documento||((f.prefijo||"")+(f.folio||""))||"";
+    const sede=sedeNombre(f.sede_id);
+    const p=pedidosMap[f.cufe];
+    const lineas=p&&p.id?lineasPorPedido[p.id]||[]:[];
+    if(!lineas.length){
+      ws2.addRow([fecha,num,f.emisor||"",sede,"(sin items)","","","","POR REVISAR","",""]);
+      continue;
+    }
+    for(const it of lineas){
+      const key=(it.insumo||"").toUpperCase().trim();
+      const c=cuentas[key]||{};
+      const centro=c.centro||"POR REVISAR";
+      const grupo=c.grupo||"";
+      ws2.addRow([fecha,num,f.emisor||"",sede,it.insumo||"",it.cant||"",it.unidad||"",it.codigo||"",centro,grupo,""]);
+    }
+  }
+  const enc2=ws2.getRow(1);enc2.font={bold:true,color:{argb:'FFFFFFFF'}};enc2.alignment={vertical:'middle',horizontal:'center'};
+  enc2.eachCell(c=>{c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF0F766E'}}});
+  COLS2.forEach((c,i)=>{const col=ws2.getColumn(i+1);col.width=Math.max(c.length+2,14);});
+  ws2.autoFilter={from:{row:1,column:1},to:{row:1,column:COLS2.length}};
+  // ---- HOJA 3: Resumen por centro de costo ----
+  const ws3=wb.addWorksheet('Resumen por centro',{views:[{state:'frozen',ySplit:1}]});
+  ws3.addRow(['Centro de Costo','Grupo Cuenta','Documentos','Base','IVA','Total']);
+  const porCentro={};
+  for(const f of l){
+    const total=Number(f.total||0);
+    const ivaPct=Number(f.iva||0);
+    const base=ivaPct>0?Math.round((total/(1+ivaPct/100))*100)/100:total;
+    const ivaVal=Math.round((total-base)*100)/100;
+    let centro=centroDeLineas(f.cufe);if(!centro)centro="POR REVISAR";
+    const grupo=grupoDeCentro(centro);
+    if(!porCentro[centro])porCentro[centro]={grupo,docs:0,base:0,iva:0,total:0};
+    porCentro[centro].docs++;porCentro[centro].base+=base;porCentro[centro].iva+=ivaVal;porCentro[centro].total+=total;
+  }
+  for(const [centro,v]of Object.entries(porCentro)){
+    ws3.addRow([centro,v.grupo,v.docs,Math.round(v.base),Math.round(v.iva),Math.round(v.total)]);
+  }
+  const enc3=ws3.getRow(1);enc3.font={bold:true,color:{argb:'FFFFFFFF'}};
+  enc3.eachCell(c=>{c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF7C2D12'}}});
+  ws3.getColumn(1).width=28;ws3.getColumn(2).width=24;
+  ['Documentos','Base','IVA','Total'].forEach((c,i)=>{ws3.getColumn(i+3).numFmt='#,##0';ws3.getColumn(i+3).width=16;});
+  // Descargar
+  const buf=await wb.xlsx.writeBuffer();
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+  a.download="contabilidad_"+(fd||"inicio")+"_"+(fh||"hoy")+".xlsx";
+  a.click();a.remove();
   res.textContent="✅ "+l.length+" factura(s) exportadas para contabilidad.";
 }
 async function descargarPendientes(){
