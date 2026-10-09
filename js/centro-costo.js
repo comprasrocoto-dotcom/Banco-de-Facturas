@@ -10,7 +10,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
   // serie -> DETALLE (como en las planillas: FC.BAR = BAR). Se compara sin espacios: "FC. ASEO" (Casa de Nadie) = FC.ASEO
-  const DETALLE = { 'FC.COCINA': 'COCINA', 'FC.BAR': 'BAR', 'FC.ASEO': 'ELEMENTOS DE ASEO Y CAFETERIA', 'FC.EMPAQUES': 'EMPAQUES', 'FC.UTILESYPAPELERIA': 'UTILES Y PAPELERIA' };
+  const DETALLE = { 'FC.COCINA': 'COCINA', 'FC.BAR': 'BAR', 'FC.ASEO': 'MATERIAL DE ASEO', 'FC.EMPAQUES': 'MATERIAL DE EMPAQUE', 'FC.UTILESYPAPELERIA': 'UTENSILIOS Y PAPELERIA' };
   const sinEspacios = (s) => String(s == null ? '' : s).replace(/\s+/g, '').toUpperCase();
 
   // filas de centro_costo_serie [{marca_id, centro, serie_erp, orden, activo}] -> las activas de esa marca, en orden

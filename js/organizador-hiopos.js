@@ -23,12 +23,15 @@
   const NUMERICAS = ['Base', 'Impuestos', 'Retenciones', 'Neto', 'Pendiente'];
   const REQUERIDAS = ['Fecha Doc', 'Su Doc', 'Contacto', 'Neto'];
   const LEYENDA_CC = 'CUENTA DE COBRO', LEYENDA_CM = 'PAGADO CAJA MENOR';
-  // serie del ERP -> nombre del centro de costo (DETALLE), como en las planillas reales (FC.ASEO = ELEMENTOS DE ASEO Y CAFETERIA)
-  const DETALLE_SERIE = { 'FC.COCINA': 'COCINA', 'FC.BAR': 'BAR', 'FC.ASEO': 'ELEMENTOS DE ASEO Y CAFETERIA', 'FC.EMPAQUES': 'EMPAQUES', 'FC.UTILESYPAPELERIA': 'UTILES Y PAPELERIA' };
+  // serie del ERP -> nombre del centro de costo (DETALLE), con los nombres que pidio el usuario (09/10/2026; los mismos de centro_costo_serie)
+  const DETALLE_SERIE = { 'FC.COCINA': 'COCINA', 'FC.BAR': 'BAR', 'FC.ASEO': 'MATERIAL DE ASEO', 'FC.EMPAQUES': 'MATERIAL DE EMPAQUE', 'FC.UTILESYPAPELERIA': 'UTENSILIOS Y PAPELERIA' };
 
   const plano = (t) => String(t == null ? '' : t).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   // encabezado del archivo -> columna destino
-  const ALIAS = { 'serie numero': 'INGRESO', 'serie': 'INGRESO', 'ingreso': 'INGRESO', 'detalle': 'DETALLE', 'nota': 'Nota', 'notas': 'Nota', 'observacion': 'Nota', 'observaciones': 'Nota' };
+  // (09/10/2026) "Serie" y "Numero" SEPARADOS no van aqui: leerTabla los junta ("FC.BAR / 1890")
+  const ALIAS = { 'serie numero': 'INGRESO', 'serie y numero': 'INGRESO', 'serie numero documento': 'INGRESO', 'ingreso': 'INGRESO', 'n ingreso': 'INGRESO', 'no ingreso': 'INGRESO',
+    'detalle': 'DETALLE', 'centro de costo': 'DETALLE', 'centro de costos': 'DETALLE', 'nota': 'Nota', 'notas': 'Nota', 'observacion': 'Nota', 'observaciones': 'Nota' };
+  const SOLO_SERIE = ['serie'], SOLO_NUMERO = ['numero', 'num', 'n', 'no', 'numero documento', 'num documento', 'n documento', 'no documento'];
   for (const c of COLUMNAS) ALIAS[plano(c)] = c;
   const columnaDe = (titulo) => ALIAS[plano(titulo)] || null;
   const contactoClave = (t) => plano(t);
@@ -94,7 +97,17 @@
     }
     if (fe < 0 || mejor < 4) return { filaEncabezado: -1, columnas: {}, faltan: REQUERIDAS.slice(), noUsadas: [], filas: [], errores: [{ fila: null, motivo: 'No encontré el encabezado de Hiopos (Fecha Doc, Su Doc, Contacto, Neto...). ¿Es el Excel de Facturas de compra?' }], repetidas: [] };
     const columnas = {}, noUsadas = [];
-    datos[fe].forEach((t, i) => { const c = columnaDe(t); if (c && columnas[c] == null) columnas[c] = i; else if (String(t || '').trim()) noUsadas.push(String(t).trim()); });
+    let colSerie = null, colNumero = null;
+    datos[fe].forEach((t, i) => {
+      const c = columnaDe(t), p = plano(t);
+      if (c && columnas[c] == null) columnas[c] = i;
+      else if (!c && SOLO_SERIE.includes(p) && colSerie == null) colSerie = i;
+      else if (!c && SOLO_NUMERO.includes(p) && colNumero == null) colNumero = i;
+      else if (String(t || '').trim()) noUsadas.push(String(t).trim());
+    });
+    // de donde sale el INGRESO (el FC de Hiopos): su columna, o "Serie" + "Numero" separados, o nada (se avisa)
+    const ingresoDe = columnas.INGRESO != null ? 'columna' : (colSerie != null ? (colNumero != null ? 'serie+numero' : 'serie') : null);
+    if (ingresoDe !== 'serie+numero' && colNumero != null) noUsadas.push(String(datos[fe][colNumero]).trim());
     const faltan = REQUERIDAS.filter((c) => columnas[c] == null);
     const filas = [], errores = [], repetidas = [], vistos = new Map();
     for (let i = fe + 1; i < datos.length; i++) {
@@ -110,6 +123,10 @@
         else if (c === 'Procesado') v[c] = aBooleano(x);
         else v[c] = String(x == null ? '' : x).trim();
       }
+      if (ingresoDe === 'serie' || ingresoDe === 'serie+numero') {
+        const se = String(r[colSerie] == null ? '' : r[colSerie]).trim(), nu = colNumero != null ? String(r[colNumero] == null ? '' : r[colNumero]).trim() : '';
+        v.INGRESO = se ? (nu ? se + ' / ' + nu : se) : '';
+      }
       if (!v['Su Doc'] && !v['Contacto']) problemas.push('sin Su Doc ni Contacto');
       if (!v.DETALLE) v.DETALLE = detalleDeSerie(v.INGRESO);
       const fila = { fila: i + 1, v };
@@ -119,7 +136,32 @@
       vistos.set(clave, i + 1);
       filas.push(fila);
     }
-    return { filaEncabezado: fe + 1, columnas, faltan, noUsadas, filas, errores, repetidas };
+    return { filaEncabezado: fe + 1, columnas, faltan, noUsadas, filas, errores, repetidas, ingresoDe };
+  }
+
+  // (09/10/2026) Lo que el archivo NO trae (INGRESO) se busca en la web: la factura con ese Su Doc que ya tiene N° de ingreso.
+  // facturasWeb: [{ sudoc (Su Doc tal como lo guarda el agente: letras y numeros), num_ingreso, centro_costo }]
+  // Solo si hay UNA factura con ese Su Doc (si hay dos, no se adivina). El DETALLE sale de la serie; si la serie no lo dice
+  // (FCRC/FCAR), del centro de costo elegido al amarrar. Cambia lectura.filas en el sitio. -> { ingresos, detalles }
+  const alnum = (s) => String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  function ingresoLegible(num) {
+    const m = String(num || '').trim().toUpperCase().match(/^(FC[A-Z]*(?:\.\s?[A-Z]+)?)\s*\/?\s*(\d+)$/);
+    return m ? m[1] + ' / ' + m[2] : String(num || '').trim();
+  }
+  function completarDesdeWeb(lectura, facturasWeb) {
+    const por = new Map();
+    for (const f of facturasWeb || []) { const k = alnum(f.sudoc); if (!k || !f.num_ingreso) continue; (por.get(k) || por.set(k, []).get(k)).push(f); }
+    let ingresos = 0, detalles = 0;
+    for (const x of (lectura && lectura.filas) || []) {
+      const v = x.v, l = por.get(alnum(v['Su Doc'])) || [];
+      const f = l.length === 1 ? l[0] : null;
+      if (!v.INGRESO && f) { v.INGRESO = ingresoLegible(f.num_ingreso); v.ingresoWeb = true; ingresos++; }
+      if (!v.DETALLE) {
+        const d = detalleDeSerie(v.INGRESO) || (f && f.centro_costo ? detalleDeSerie(f.centro_costo) : '');
+        if (d) { v.DETALLE = d; detalles++; }
+      }
+    }
+    return { ingresos, detalles };
   }
 
   // reglas: { cuentaCobro: [contactos], cajaMenor: [contactos] } (nombres tal cual; se comparan sin tildes/mayusculas)
@@ -150,6 +192,7 @@
       validos: lectura.filas.length,
       cuentasCobro: cc.length, cajaMenor: cl.cajaMenor.length, restantes: restantes.length,
       revision: cl.revision.length + lectura.repetidas.length, errores: lectura.errores.length, repetidas: lectura.repetidas.length,
+      sinIngreso: lectura.filas.filter((x) => !x.v.INGRESO).length, sinDetalle: lectura.filas.filter((x) => !x.v.DETALLE).length, ingresoWeb: lectura.filas.filter((x) => x.v.ingresoWeb).length,
       neto: { documentos: suma(cl.documentos), cuentasCobro: suma(cc), cajaMenor: suma(cl.cajaMenor), restantes: suma(restantes), total: suma(cl.documentos) + suma(cl.cajaMenor) },
     };
   }
@@ -223,12 +266,16 @@
     lin('Requieren revisión', R.revision, null);
     lin('Errores de lectura (no se incluyeron)', R.errores, null);
     lin('Repetidos en el archivo (se incluyeron una sola vez)', R.repetidas, null);
+    lin('INGRESO tomado de la web (el archivo no lo traia)', R.ingresoWeb, null);
+    lin('Sin INGRESO (ni en el archivo ni en la web)', R.sinIngreso, null);
+    lin('Sin DETALLE (la serie no dice el centro de costo)', R.sinDetalle, null);
     const det = [
       ...clasificacion.revision.map((x) => ['Revisión', x.fila, x.v['Su Doc'] + ' · ' + x.v.Contacto, x.motivo]),
       ...lectura.repetidas.map((x) => ['Repetido', x.fila, (x.v['Su Doc'] || '') + ' · ' + (x.v.Contacto || ''), 'igual a la fila ' + x.igualA + ' del archivo']),
       ...lectura.errores.map((x) => ['Error de lectura', x.fila, ((x.v && x.v['Su Doc']) || '') + ' · ' + ((x.v && x.v.Contacto) || ''), x.motivo]),
     ];
     if (lectura.faltan.length) det.unshift(['Columna faltante', '', lectura.faltan.join(', '), 'no viene en el archivo: esas celdas quedan vacías']);
+    if (!lectura.ingresoDe) det.unshift(['Columna faltante', '', 'Serie / Número (INGRESO)', 'el archivo no la trae: en Hiopos muestra la columna Serie / Número antes de exportar. Se tomó de la web lo que se pudo']);
     if (det.length) {
       ws.addRow([]); titulo('Para revisar');
       const e2 = ws.addRow(['Tipo', 'Fila del archivo', 'Documento', 'Motivo']); e2.font = { bold: true };
@@ -238,5 +285,5 @@
   }
 
   return { COLUMNAS, NUMERICAS, REQUERIDAS, LEYENDA_CC, LEYENDA_CM, DETALLE_SERIE, COLOR, plano, columnaDe, contactoClave, serieDe, detalleDeSerie,
-    aNumero, aFecha, aHora, aBooleano, agregarLeyenda, leerTabla, clasificar, resumen, contactos, filaExcel, armarLibro };
+    aNumero, aFecha, aHora, aBooleano, agregarLeyenda, leerTabla, completarDesdeWeb, ingresoLegible, clasificar, resumen, contactos, filaExcel, armarLibro };
 });

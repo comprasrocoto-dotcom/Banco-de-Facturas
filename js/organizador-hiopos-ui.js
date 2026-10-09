@@ -40,10 +40,36 @@ async function orgHArchivo(input) {
       if (l.filaEncabezado > 0 && (!mejor || l.filas.length > mejor.filas.length)) mejor = l;
     }
     if (!mejor) throw new Error('No encontré el encabezado de Hiopos (Fecha Doc, Su Doc, Contacto, Neto...) en ninguna hoja. ¿Es el Excel de Facturas de compra?');
-    orgH.lectura = mejor;
+    orgH.lectura = mejor; orgH.web = null;
+    // (09/10/2026) INGRESO / DETALLE que el archivo no trae: se buscan en la web por el Su Doc
+    if (mejor.filas.some((x) => !x.v.INGRESO || !x.v.DETALLE)) {
+      try { orgH.web = OrganizadorHiopos.completarDesdeWeb(mejor, await orgHFacturasWeb()); }
+      catch (e) { orgH.web = { error: e.message }; }
+    }
   } catch (e) { orgH.error = e.message; }
   input.value = '';
   orgHPintar();
+}
+
+// facturas de la web que ya tienen N° de ingreso (con el centro de costo elegido al amarrar) -> [{ sudoc, num_ingreso, centro_costo }]
+async function orgHFacturasWeb() {
+  const todas = [], cc = new Map();
+  for (let d = 0; ; d += 1000) {
+    const { data, error } = await SB.from('facturas').select('cufe,documento,prefijo,folio,num_ingreso').not('num_ingreso', 'is', null).range(d, d + 999);
+    if (error) throw new Error(error.message);
+    todas.push(...(data || [])); if (!data || data.length < 1000) break;
+  }
+  try {
+    const { data } = await SB.from('pedidos').select('factura_cufe,centro_costo').not('centro_costo', 'is', null);
+    (data || []).forEach((p) => cc.set(p.factura_cufe, p.centro_costo));
+  } catch (e) { /* sin centros: el DETALLE sale solo de la serie */ }
+  const sola = (s) => String(s || '').replace(/[^A-Za-z0-9]/g, '');
+  const r = [];
+  for (const f of todas) {
+    const claves = new Set([sola(f.documento), sola(f.prefijo) + sola(f.folio)].filter(Boolean));
+    for (const k of claves) r.push({ sudoc: k, num_ingreso: f.num_ingreso, centro_costo: cc.get(f.cufe) || null });
+  }
+  return r;
 }
 
 async function orgHMarcar(norm, campo, valor) {
@@ -116,6 +142,13 @@ function pintarOrganizadorHiopos(c) {
     ${tarjeta('Para revisar', R.revision, null, R.revision ? '#ede9fe' : '', 'revision')}
     ${tarjeta('Errores de lectura', R.errores, null, R.errores ? '#fee2e2' : '', 'errores')}</div>`;
   if (L.faltan.length) h += `<div class="err">Faltan columnas en el archivo: <b>${escAg(L.faltan.join(', '))}</b>. Esas celdas quedan vacías (no se inventan).</div>`;
+  // (09/10/2026) INGRESO (el FC de Hiopos) y DETALLE: de donde salieron y cuantos quedaron vacios
+  const W = orgH.web || {};
+  if (!L.ingresoDe) h += `<div class="err">Tu Excel no trae la columna <b>Serie / Número</b> (el FC de Hiopos, ej. FC.BAR / 1890). En Hiopos, en la lista de Facturas de compra, muestra esa columna antes de exportar.${W.ingresos ? ` Mientras tanto se tomaron <b>${W.ingresos}</b> de la web (facturas que ya tienen N° de ingreso).` : ''}</div>`;
+  else if (W.ingresos) h += `<div class="mut">INGRESO tomado de la web en ${W.ingresos} documento(s) que venían sin él.</div>`;
+  if (W.error) h += `<div class="err">No pude buscar en la web los INGRESOS que faltan: ${escAg(W.error)}</div>`;
+  if (R.sinIngreso) h += `<div class="mut">⚠️ ${R.sinIngreso} documento(s) quedan <b>sin INGRESO</b> (ni en el archivo ni en la web).</div>`;
+  if (R.sinDetalle) h += `<div class="mut">⚠️ ${R.sinDetalle} documento(s) quedan <b>sin DETALLE</b>: su serie no dice el centro de costo (FCRC/FCAR) o no tienen INGRESO.</div>`;
   if (L.noUsadas.length) h += `<div class="mut">Columnas del archivo que no van en la planilla: ${escAg(L.noUsadas.join(', '))}</div>`;
   h += `<div class="row" style="margin:10px 0"><button class="p" id="orgHBajar" onclick="orgHDescargar()">⬇ Descargar Excel organizado</button><span class="mut">Hojas: Documentos · Caja menor · Resumen</span></div>`;
   // vista previa
