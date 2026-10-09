@@ -503,53 +503,72 @@
       lin('No están en el reporte de la DIAN', comparacion.sinFactura, null);
     }
     // ---- HOJA CONTABILIDAD (para SIIGO) ----
-    // Una fila por ARTICULO de cada documento (no por factura). Formato del Excel de contabilidad:
-    // Familia | Fecha | Provedor | Factura | Ingreso | ARTICULO | REFERENCIA | SUBFAMILIA | CUENTA CONTABLE | DEVOLUCION | GRUPO CUENTA | Observacion
-    // Datos de Hiopos: Fecha, Provedor (Contacto), Factura (Su Doc), Ingreso (INGRESO)
-    // Datos de cuentas_contables: Familia, ARTICULO, REFERENCIA, SUBFAMILIA, CUENTA CONTABLE, GRUPO CUENTA (cruzado por nombre de articulo)
+    // Una fila por ARTICULO de cada documento. Cruza 4 fuentes:
+    //   Hiopos (encabezado: Fecha, Provedor, Factura=Su Doc, Ingreso=INGRESO)
+    //   Pedido web (articulos via pedido_lineas + centro_costo del pedido)
+    //   DIAN (validacion: si trae detalle, contrastar; si no, señalar)
+    //   cuentas_contables (homologacion: Familia, SUBFAMILIA, CUENTA CONTABLE, GRUPO CUENTA)
     const cuentas = (typeof orgH !== 'undefined' && orgH.cuentas) ? orgH.cuentas : {};
     const lineasPed = (typeof orgH !== 'undefined' && orgH.lineas) ? orgH.lineas : {};
     const pedsMap = (typeof orgH !== 'undefined' && orgH.pedidos) ? orgH.pedidos : {};
+    const docToCufe = (typeof orgH !== 'undefined' && orgH.docToCufe) ? orgH.docToCufe : {};
     const wsC = wb.addWorksheet('Contabilidad', { views: [{ state: 'frozen', ySplit: 1 }] });
     const COL_C = ['Familia', 'Fecha', 'Provedor', 'Factura', 'Ingreso', 'ARTICULO', 'REFERENCIA', 'SUBFAMILIA', 'CUENTA CONTABLE', 'DEVOLUCION', 'GRUPO CUENTA', 'Observacion'];
     wsC.addRow(COL_C);
+    // Acumulador para "Por revisar"
+    const revisar = [];
     for (const x of cl.documentos) {
       const v = x.v;
       const fecha = v['Fecha Doc'] ? fechaExcel(v['Fecha Doc']) : '';
       const provedor = v.Contacto || '';
       const factura = v['Su Doc'] || '';
       const ingreso = v.INGRESO || '';
-      // Buscar las lineas del pedido amarrado: Su Doc (Hiopos) -> documento en la web -> cufe -> pedido -> lineas
+      const filaArchivo = x.fila;
+      // --- CRUCE: Hiopos Su Doc -> web documento -> cufe -> pedido -> lineas ---
       const docNorm = String(v['Su Doc'] || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-      let lineas = [];
-      const cufe = pedsMap ? (function() {
-        // Buscar por docToCufe (mapeo documento -> cufe cargado en orgHCargarBanco)
-        if (orgH && orgH.docToCufe && orgH.docToCufe[docNorm]) return orgH.docToCufe[docNorm];
-        return null;
-      })() : null;
-      if (cufe && pedsMap[cufe]) { lineas = lineasPed[pedsMap[cufe].id] || []; }
+      let pedido = null, lineas = [], obs = [];
+      // 1. Buscar por cufe (pedido.factura_cufe = factura.cufe, mapeado via docToCufe)
+      const cufe = docToCufe[docNorm] || null;
+      if (cufe && pedsMap[cufe]) { pedido = pedsMap[cufe]; lineas = lineasPed[pedido.id] || []; }
+      // 2. Si no encontro por cufe, buscar por numero_factura (pedidos.numero_factura = documento)
+      if (!pedido) {
+        for (const [k, p] of Object.entries(pedsMap)) {
+          const nf = String(p.numero_factura || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+          if (nf && nf === docNorm) { pedido = p; lineas = lineasPed[p.id] || []; break; }
+        }
+      }
+      // 3. Si no encontro pedido, señalar
+      if (!pedido) {
+        obs.push('Pedido no encontrado en la web');
+        revisar.push({ fila: filaArchivo, factura, ingreso, provedor, obs: obs.join('; ') });
+        wsC.addRow(['', fecha, provedor, factura, ingreso, '', '', '', '', '', '', obs.join('; ')]);
+        continue;
+      }
+      // --- CENTRO DE COSTOS: del pedido ---
+      const centroCosto = pedido.centro_costo || '';
+      if (!centroCosto) obs.push('Pedido sin centro de costos');
+      // --- LINEAS DEL PEDIDO: una fila por articulo ---
       if (!lineas.length) {
-        // Sin lineas: una fila con los datos del documento y el articulo vacio
-        wsC.addRow(['', fecha, provedor, factura, ingreso, '', '', '', '', '', '', '']);
+        obs.push('Pedido sin lineas/detalle');
+        revisar.push({ fila: filaArchivo, factura, ingreso, provedor, obs: obs.join('; ') });
+        wsC.addRow(['', fecha, provedor, factura, ingreso, '', '', '', '', centroCosto, '', obs.join('; ')]);
         continue;
       }
       for (const it of lineas) {
         const key = String(it.insumo || '').toUpperCase().trim();
-        const c = cuentas[key] || {};
-        wsC.addRow([
-          c.familia || c.clasificacion || '',
-          fecha,
-          provedor,
-          factura,
-          ingreso,
-          it.insumo || '',
-          it.codigo || '',
-          c.subfamilia || '',
-          c.centro_costo || '',
-          '', // DEVOLUCION (va vacio)
-          c.grupo_cuenta || '',
-          ''
-        ]);
+        const cc = cuentas[key] || null;
+        const fam = cc ? (cc.familia || cc.clasificacion || '') : '';
+        const subfam = cc ? (cc.subfamilia || '') : '';
+        const ccta = cc ? (cc.centro_costo || '') : '';
+        const grupo = cc ? (cc.grupo_cuenta || '') : '';
+        const ref = it.codigo || (cc ? (cc.articulo || '') : '');
+        // Si el articulo no esta en cuentas_contables, señalar
+        const artObs = [];
+        if (!cc) artObs.push('Producto sin homologacion contable');
+        if (!centroCosto) artObs.push('Centro de costos faltante');
+        const obsLinea = artObs.length ? obs.concat(artObs).join('; ') : (obs.length ? obs.join('; ') : '');
+        wsC.addRow([fam, fecha, provedor, factura, ingreso, it.insumo || '', ref, subfam, ccta, centroCosto, grupo, obsLinea]);
+        if (artObs.length) revisar.push({ fila: filaArchivo, factura, ingreso, provedor, articulo: it.insumo, obs: artObs.join('; ') });
       }
     }
     const encC = wsC.getRow(1);
@@ -561,6 +580,11 @@
       col.width = Math.max(c.length + 2, 18);
     });
     wsC.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: COL_C.length } };
+    // ---- HOJA "Por revisar" ----
+    if (revisar.length) {
+      const T_R = ['Fila archivo', 'Factura', 'Ingreso', 'Proveedor', 'Articulo', 'Motivo'];
+      hojaTabla(wb, 'Por revisar', T_R, revisar.map(r => ({ celdas: [r.fila, r.factura, r.ingreso, r.provedor, r.articulo || '', r.obs] })), [12, 18, 18, 36, 36, 60]);
+    }
     return wb;
   }
 
