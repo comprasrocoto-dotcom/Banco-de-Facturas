@@ -176,6 +176,7 @@ tr:hover td{background:#f1f5f9}
         <button class="p" onclick="descargarSelladas()">⬇ Descargar ZIP</button>
         <button class="p" onclick="descargarCicloCompleto()" title="Lo mismo que la vista ✅ Proceso terminado (con N° de ingreso ERP y sellada, o nota crédito): un PDF por documento, dentro de un ZIP. Las fechas del/al cuentan por FECHA DE INGRESO AL ERP">📄 PDF ciclo completo</button>
         <button class="p" onclick="descargarPendientes()" title="Sin Nº de ingreso ERP o con novedad registrada">📥 Pendientes y novedades</button>
+        <button class="p" onclick="descargarContabilidad()" title="Exporta Excel con centro de costo, cuenta contable, base, IVA y total para SIIGO" style="background:#1e40af;border-color:#1e40af">📊 Exportar contabilidad</button>
         <span class="mut" id="resDian"></span>
         <span class="mut" id="resdesc"></span>
       </div>
@@ -2616,6 +2617,7 @@ async function amarrarPedido(id){
   // (09/10/2026) centro de costo (solo marcas que lo usan): se elige por numero
   await cargarCentrosCosto();
   let cc=null; const opsCC=CentroCosto.opciones(centrosCosto,p.marca_id);
+  if(opsCC.length) opsCC.push({centro:"VARIOS CENTROS (mixta) → queda pendiente de revisión",serie_erp:CentroCosto.VARIOS});
   if(opsCC.length){
     const r=prompt("🏷️ Centro de costo de la factura (con esta serie entra al ERP). Escribe el número:\n\n"+opsCC.map((o,i)=>(i+1)+". "+o.centro+" ("+o.serie_erp+")").join("\n"),"");
     if(r===null) return;
@@ -3009,6 +3011,67 @@ async function descargarSelladas(){
   };
   const r=await bajarPdfsEnZip(lista,nombreSellada,"facturas_selladas_"+etiquetaRango(g.desde,g.hasta)+".zip",res);
   res.textContent=msgZip(r);
+}
+// Exporta un Excel/CSV listo para contabilidad (SIIGO o cualquier ERP)
+// con centro de costo, cuenta contable, base, IVA y total por factura
+async function descargarContabilidad(){
+  const res=$("resdesc"); res.textContent="";
+  const fSedeVal=$("fSede").value;
+  const fd=$("fdesde").value, fh=$("fhasta").value;
+  // Solo facturas con num_ingreso (ya ingresadas al ERP)
+  let l=facturas.filter(f=>f.num_ingreso && f.archivo_pdf);
+  if(fSedeVal) l=l.filter(f=>f.sede_id===Number(fSedeVal));
+  if(fd) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe>=fd;});
+  if(fh) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe<=fh;});
+  if(!l.length){res.textContent="No hay facturas con ingreso ERP en ese rango.";return;}
+  res.textContent="Cargando cuentas contables...";
+  // Traer la tabla de cuentas contables
+  let cuentas={};
+  try{
+    const {data}=await SB.from("cuentas_contables").select("articulo,grupo_cuenta,centro_costo");
+    if(data) data.forEach(c=>{
+      const key=(c.articulo||"").toUpperCase().trim();
+      if(key) cuentas[key]={grupo:c.grupo_cuenta,centro:c.centro_costo};
+    });
+  }catch(e){res.textContent="Error cargando cuentas: "+e.message;return;}
+  // Tambien traer las lineas de cada factura para detalle por articulo
+  res.textContent="Generando informe...";
+  const sedeNombre=(id)=>{const s=sedes.find(x=>x.id===id);return s?s.nombre:"";};
+  // Encabezado del CSV: lo que un contador necesita para SIIGO
+  const BOM="\uFEFF";
+  let csv=BOM+"Fecha Ingreso;N. Factura;Proveedor;NIT Emisor;Sede;Centro de Costo;Grupo Cuenta;Base;IVA;Total;N. Ingreso ERP;N. Pedido ERP\n";
+  for(const f of l){
+    const fecha=f.fecha_ingreso||f.fecha_emision||"";
+    const num=f.documento||((f.prefijo||"")+(f.folio||""))||"";
+    const sede=sedeNombre(f.sede_id);
+    const total=Number(f.total||0);
+    // IVA: asumir 19% sobre la base (la mayoria), o 0 si no hay
+    const iva=Number(f.iva||0);
+    const base=iva>0 ? Math.round((total/(1+iva/100))*100)/100 : total;
+    const ivaVal=Math.round((total-base)*100)/100;
+    // Buscar centro de costo por el nombre del emisor o por las lineas
+    // Como no tenemos el detalle por articulo aqui, usamos la categoria de la factura
+    const cat=f.categoria||"otro";
+    let centro="COCINA"; // default
+    if(cat==="aseo") centro="ASEO SEDES";
+    else if(cat==="empaque") centro="EMPAQUE";
+    else if(cat==="loza_utensilios") centro="UTENSILIOS";
+    // Si es licor/vino por el nombre del proveedor
+    const nomEmisor=(f.emisor||"").toUpperCase();
+    if(/VINO|LICOR|CERVEZA|DISTRIBUIDORA.*VINO|VINPAR|GLOBAL WINE/i.test(nomEmisor)) centro="BAR";
+    let grupo="INSUMOS DE COCINA";
+    if(centro==="BAR") grupo="INSUMO BAR";
+    else if(centro==="ASEO SEDES"||centro==="ASEO ADMIN") grupo="MATERIAL DE ASEO SEDES";
+    else if(centro==="EMPAQUE") grupo="MATERIAL DE EMPAQUE";
+    else if(centro==="UTENSILIOS") grupo="UTENSILIOS";
+    csv+=[fecha,num,f.emisor||"",f.nit_emisor||"",sede,centro,grupo,base,ivaVal,total,f.num_ingreso||"",f.pedido_erp||""].join(";")+"\n";
+  }
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="contabilidad_"+(fd||"inicio")+"_"+(fh||"hoy")+".csv";
+  a.click(); a.remove();
+  res.textContent="✅ "+l.length+" factura(s) exportadas para contabilidad.";
 }
 async function descargarPendientes(){
   console.log("DEBUG descargarPendientes: facturas totales=",facturas.length,
