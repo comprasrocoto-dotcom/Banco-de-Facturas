@@ -32,16 +32,16 @@ async function orgHCargarBanco() {
   const facturas = [], proveedores = [];
   try {
     for (let d = 0; ; d += 1000) {
-      const { data, error } = await SB.from('facturas').select('documento,prefijo,folio,emisor,nit_emisor').range(d, d + 999);
+      const { data, error } = await SB.from('facturas').select('cufe,documento,prefijo,folio,emisor,nit_emisor').range(d, d + 999);
       if (error) throw new Error(error.message);
-      (data || []).forEach((f) => { facturas.push({ documento: f.documento, prefijo: f.prefijo, folio: f.folio, emisor: f.emisor, nit: f.nit_emisor, fuente: 'el Banco de Facturas' }); proveedores.push({ nombre: f.emisor, nit: f.nit_emisor }); });
+      (data || []).forEach((f) => { facturas.push({ cufe: f.cufe, documento: f.documento, prefijo: f.prefijo, folio: f.folio, emisor: f.emisor, nit: f.nit_emisor, fuente: 'el Banco de Facturas' }); proveedores.push({ nombre: f.emisor, nit: f.nit_emisor }); });
       if (!data || data.length < 1000) break;
     }
     const { data: pv } = await SB.from('proveedores').select('nit,razon_social,nombre_comercial').limit(5000);
     (pv || []).forEach((p) => { proveedores.push({ nombre: p.razon_social, nit: p.nit }); if (p.nombre_comercial) proveedores.push({ nombre: p.nombre_comercial, nit: p.nit }); });
     const { data: np } = await SB.from('proveedor_nombre_pos').select('nit,nombre_pos');
     (np || []).forEach((p) => proveedores.push({ nombre: p.nombre_pos, nit: p.nit }));
-    // (10/10/2026) cuentas_contables: articulo -> {familia, subfamilia, grupo, centro, referencia, cuenta}
+    // (10/10/2026) cuentas_contables: articulo -> {familia, subfamilia, grupo, centro, clasificacion}
     const { data: cc } = await SB.from('cuentas_contables').select('articulo,familia,subfamilia,grupo_cuenta,centro_costo,clasificacion').limit(2000);
     orgH.cuentas = {};
     (cc || []).forEach((c) => { const k = String(c.articulo || '').toUpperCase().trim(); if (k) orgH.cuentas[k] = c; });
@@ -49,10 +49,18 @@ async function orgHCargarBanco() {
     const { data: pl } = await SB.from('pedido_lineas').select('pedido_id,insumo,cantidad,unidad,codigo').limit(10000);
     orgH.lineas = {};
     (pl || []).forEach((l) => { (orgH.lineas[l.pedido_id] = orgH.lineas[l.pedido_id] || []).push({ insumo: l.insumo, cant: l.cantidad, unidad: l.unidad, codigo: l.codigo }); });
-    // pedidos: cufe -> id para cruzar lineas
+    // (10/10/2026) pedidos: cufe -> pedido (para cruzar lineas) + documento -> cufe (para cruzar Su Doc del Hiopos)
     const { data: peds } = await SB.from('pedidos').select('id,factura_cufe,numero,pedido_erp,centro_costo').limit(5000);
     orgH.pedidos = {};
     (peds || []).forEach((p) => { if (p.factura_cufe) orgH.pedidos[p.factura_cufe] = p; });
+    // (10/10/2026) mapa documento (Su Doc normalizado) -> cufe: para buscar el pedido desde el Excel de Hiopos
+    orgH.docToCufe = {};
+    facturas.forEach((f) => {
+      const doc = String(f.documento || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      if (doc) orgH.docToCufe[doc] = f.cufe || null;
+      const pf = String((f.prefijo || '') + (f.folio || '')).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      if (pf) orgH.docToCufe[pf] = f.cufe || null;
+    });
     orgH.bancoError = '';
   } catch (e) { orgH.bancoError = 'No pude leer el Banco de Facturas (la clasificación queda solo con reglas y el reporte DIAN): ' + e.message; }
   orgH.banco = { facturas, proveedores };
