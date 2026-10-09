@@ -503,26 +503,60 @@
       lin('No están en el reporte de la DIAN', comparacion.sinFactura, null);
     }
     // ---- HOJA CONTABILIDAD (para SIIGO) ----
-    // Una fila por documento con: Marca, Fecha, Comprobante (INGRESO), Tercero (Contacto), Centro de Costo,
-    // Base, IVA, Total. La marca se identifica por la serie (FCRC=Rocoto, FCAR=Arrebatao, FC.*=123 Wok).
+    // Una fila por ARTICULO de cada documento (no por factura). Formato del Excel de contabilidad:
+    // Familia | Fecha | Provedor | Factura | Ingreso | ARTICULO | REFERENCIA | SUBFAMILIA | CUENTA CONTABLE | DEVOLUCION | GRUPO CUENTA | Observacion
+    // Datos de Hiopos: Fecha, Provedor (Contacto), Factura (Su Doc), Ingreso (INGRESO)
+    // Datos de cuentas_contables: Familia, ARTICULO, REFERENCIA, SUBFAMILIA, CUENTA CONTABLE, GRUPO CUENTA (cruzado por nombre de articulo)
+    const cuentas = (typeof orgH !== 'undefined' && orgH.cuentas) ? orgH.cuentas : {};
+    const lineasPed = (typeof orgH !== 'undefined' && orgH.lineas) ? orgH.lineas : {};
+    const pedsMap = (typeof orgH !== 'undefined' && orgH.pedidos) ? orgH.pedidos : {};
     const wsC = wb.addWorksheet('Contabilidad', { views: [{ state: 'frozen', ySplit: 1 }] });
-    const COL_C = ['Marca', 'Fecha', 'Comprobante (Ingreso ERP)', 'Su Doc (N. Factura)', 'Tercero (Proveedor)', 'Centro de Costo', 'Cuenta Contable', 'Base', 'IVA', 'Total', 'N. Pedido ERP'];
+    const COL_C = ['Familia', 'Fecha', 'Provedor', 'Factura', 'Ingreso', 'ARTICULO', 'REFERENCIA', 'SUBFAMILIA', 'CUENTA CONTABLE', 'DEVOLUCION', 'GRUPO CUENTA', 'Observacion'];
     wsC.addRow(COL_C);
     for (const x of cl.documentos) {
       const v = x.v;
-      const base = v.Base != null ? v.Base : null;
-      const iva = v.Impuestos != null ? v.Impuestos : null;
-      const total = v.Neto != null ? v.Neto : null;
-      const centro = v.DETALLE || detalleDeSerie(v.INGRESO) || '';
-      const marca = v.Marca || marcaDeSerie(v.INGRESO) || '';
-      wsC.addRow([marca, v['Fecha Doc'] ? fechaExcel(v['Fecha Doc']) : null, v.INGRESO || '', v['Su Doc'] || '', v.Contacto || '', centro, '', base, iva, total, '']);
+      const fecha = v['Fecha Doc'] ? fechaExcel(v['Fecha Doc']) : '';
+      const provedor = v.Contacto || '';
+      const factura = v['Su Doc'] || '';
+      const ingreso = v.INGRESO || '';
+      // Buscar las lineas del pedido amarrado a este documento (por Su Doc -> factura en la web -> cufe -> pedido)
+      // Intentar cruzar por el numero de factura (Su Doc)
+      const docNorm = String(v['Su Doc'] || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      let lineas = [];
+      // buscar en pedsMap por numero o por cufe
+      for (const [cufe, p] of Object.entries(pedsMap)) {
+        const pedDoc = String(p.numero || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+        if (pedDoc === docNorm) { lineas = lineasPed[p.id] || []; break; }
+      }
+      if (!lineas.length) {
+        // Sin lineas: una fila con los datos del documento y el articulo vacio
+        wsC.addRow(['', fecha, provedor, factura, ingreso, '', '', '', '', '', '', '']);
+        continue;
+      }
+      for (const it of lineas) {
+        const key = String(it.insumo || '').toUpperCase().trim();
+        const c = cuentas[key] || {};
+        wsC.addRow([
+          c.familia || c.clasificacion || '',
+          fecha,
+          provedor,
+          factura,
+          ingreso,
+          it.insumo || '',
+          it.codigo || '',
+          c.subfamilia || '',
+          c.centro_costo || '',
+          '', // DEVOLUCION (va vacio)
+          c.grupo_cuenta || '',
+          ''
+        ]);
+      }
     }
     const encC = wsC.getRow(1);
     encC.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     encC.eachCell((cel) => { cel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E40AF' } }; });
     COL_C.forEach((c, i) => {
       const col = wsC.getColumn(i + 1);
-      if (/^(Base|IVA|Total)$/.test(c)) col.numFmt = '#,##0';
       if (c === 'Fecha') col.numFmt = 'dd/mm/yyyy';
       col.width = Math.max(c.length + 2, 18);
     });
