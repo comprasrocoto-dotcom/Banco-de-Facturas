@@ -3069,11 +3069,13 @@ async function descargarContabilidad(){
   const wb=new ExcelJS.Workbook();wb.creator='Banco de Facturas';
   // ---- HOJA 1: Contabilidad (una fila por factura) ----
   const ws1=wb.addWorksheet('Contabilidad',{views:[{state:'frozen',ySplit:1}]});
-  const COLS=['Fecha Ingreso','N. Factura','Proveedor','NIT Emisor','Sede','Centro de Costo','Grupo Cuenta','Base','IVA','Total','N. Ingreso ERP','N. Pedido ERP'];
+  const COLS=['Marca','Fecha Ingreso','N. Factura','Proveedor','NIT Emisor','Sede','Centro de Costo','Grupo Cuenta','Base','IVA','Total','N. Ingreso ERP','N. Pedido ERP'];
   ws1.addRow(COLS);
+  const marcaNombre=(id)=>{const s=sedes.find(x=>x.id===id);return s&&s.marcas?s.marcas.nombre:"";};
   for(const f of l){
     const fecha=f.fecha_ingreso||f.fecha_emision||"";
     const num=f.documento||((f.prefijo||"")+(f.folio||""))||"";
+    const marca=marcaNombre(f.sede_id);
     const sede=sedeNombre(f.sede_id);
     const total=Number(f.total||0);
     const ivaPct=Number(f.iva||0);
@@ -3082,7 +3084,7 @@ async function descargarContabilidad(){
     let centro=centroDeLineas(f.cufe);if(!centro)centro="POR REVISAR";
     const grupo=grupoDeCentro(centro);
     const numPed=pedidosMap[f.cufe]?(pedidosMap[f.cufe].erp||pedidosMap[f.cufe].numero||""):(f.pedido_erp||"");
-    ws1.addRow([fecha,num,f.emisor||"",f.nit_emisor||"",sede,centro,grupo,base,ivaVal,total,f.num_ingreso||"",numPed]);
+    ws1.addRow([marca,fecha,num,f.emisor||"",f.nit_emisor||"",sede,centro,grupo,base,ivaVal,total,f.num_ingreso||"",numPed]);
   }
   const enc1=ws1.getRow(1);enc1.font={bold:true,color:{argb:'FFFFFFFF'}};enc1.alignment={vertical:'middle',horizontal:'center'};
   enc1.eachCell(c=>{c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF1E40AF'}}});
@@ -3090,16 +3092,17 @@ async function descargarContabilidad(){
   ws1.autoFilter={from:{row:1,column:1},to:{row:1,column:COLS.length}};
   // ---- HOJA 2: Detalle por artículo ----
   const ws2=wb.addWorksheet('Detalle por artículo',{views:[{state:'frozen',ySplit:1}]});
-  const COLS2=['Fecha Ingreso','N. Factura','Proveedor','Sede','Insumo','Cantidad','Unidad','Código','Centro de Costo','Grupo Cuenta','Cuenta Contable'];
+  const COLS2=['Marca','Fecha Ingreso','N. Factura','Proveedor','Sede','Insumo','Cantidad','Unidad','Código','Centro de Costo','Grupo Cuenta','Cuenta Contable'];
   ws2.addRow(COLS2);
   for(const f of l){
     const fecha=f.fecha_ingreso||f.fecha_emision||"";
     const num=f.documento||((f.prefijo||"")+(f.folio||""))||"";
     const sede=sedeNombre(f.sede_id);
+    const marca=marcaNombre(f.sede_id);
     const p=pedidosMap[f.cufe];
     const lineas=p&&p.id?lineasPorPedido[p.id]||[]:[];
     if(!lineas.length){
-      ws2.addRow([fecha,num,f.emisor||"",sede,"(sin items)","","","","POR REVISAR","",""]);
+      ws2.addRow([marca,fecha,num,f.emisor||"",sede,"(sin items)","","","","POR REVISAR","",""]);
       continue;
     }
     for(const it of lineas){
@@ -3107,7 +3110,7 @@ async function descargarContabilidad(){
       const c=cuentas[key]||{};
       const centro=c.centro||"POR REVISAR";
       const grupo=c.grupo||"";
-      ws2.addRow([fecha,num,f.emisor||"",sede,it.insumo||"",it.cant||"",it.unidad||"",it.codigo||"",centro,grupo,""]);
+      ws2.addRow([marca,fecha,num,f.emisor||"",sede,it.insumo||"",it.cant||"",it.unidad||"",it.codigo||"",centro,grupo,""]);
     }
   }
   const enc2=ws2.getRow(1);enc2.font={bold:true,color:{argb:'FFFFFFFF'}};enc2.alignment={vertical:'middle',horizontal:'center'};
@@ -3116,7 +3119,7 @@ async function descargarContabilidad(){
   ws2.autoFilter={from:{row:1,column:1},to:{row:1,column:COLS2.length}};
   // ---- HOJA 3: Resumen por centro de costo ----
   const ws3=wb.addWorksheet('Resumen por centro',{views:[{state:'frozen',ySplit:1}]});
-  ws3.addRow(['Centro de Costo','Grupo Cuenta','Documentos','Base','IVA','Total']);
+  ws3.addRow(['Marca','Centro de Costo','Grupo Cuenta','Documentos','Base','IVA','Total']);
   const porCentro={};
   for(const f of l){
     const total=Number(f.total||0);
@@ -3125,16 +3128,18 @@ async function descargarContabilidad(){
     const ivaVal=Math.round((total-base)*100)/100;
     let centro=centroDeLineas(f.cufe);if(!centro)centro="POR REVISAR";
     const grupo=grupoDeCentro(centro);
-    if(!porCentro[centro])porCentro[centro]={grupo,docs:0,base:0,iva:0,total:0};
-    porCentro[centro].docs++;porCentro[centro].base+=base;porCentro[centro].iva+=ivaVal;porCentro[centro].total+=total;
+    const marca=marcaNombre(f.sede_id);
+    const clave=marca+"|"+centro;
+    if(!porCentro[clave])porCentro[clave]={marca,centro,grupo,docs:0,base:0,iva:0,total:0};
+    porCentro[clave].docs++;porCentro[clave].base+=base;porCentro[clave].iva+=ivaVal;porCentro[clave].total+=total;
   }
-  for(const [centro,v]of Object.entries(porCentro)){
-    ws3.addRow([centro,v.grupo,v.docs,Math.round(v.base),Math.round(v.iva),Math.round(v.total)]);
+  for(const [k,v]of Object.entries(porCentro)){
+    ws3.addRow([v.marca,v.centro,v.grupo,v.docs,Math.round(v.base),Math.round(v.iva),Math.round(v.total)]);
   }
   const enc3=ws3.getRow(1);enc3.font={bold:true,color:{argb:'FFFFFFFF'}};
   enc3.eachCell(c=>{c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF7C2D12'}}});
-  ws3.getColumn(1).width=28;ws3.getColumn(2).width=24;
-  ['Documentos','Base','IVA','Total'].forEach((c,i)=>{ws3.getColumn(i+3).numFmt='#,##0';ws3.getColumn(i+3).width=16;});
+  ws3.getColumn(1).width=16;ws3.getColumn(2).width=28;ws3.getColumn(3).width=24;
+  ['Documentos','Base','IVA','Total'].forEach((c,i)=>{ws3.getColumn(i+4).numFmt='#,##0';ws3.getColumn(i+4).width=16;});
   // Descargar
   const buf=await wb.xlsx.writeBuffer();
   const a=document.createElement('a');
