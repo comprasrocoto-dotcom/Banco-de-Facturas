@@ -24,7 +24,9 @@
   const REQUERIDAS = ['Fecha Doc', 'Su Doc', 'Contacto', 'Neto'];
   const LEYENDA_CC = 'CUENTA DE COBRO', LEYENDA_CM = 'PAGADO CAJA MENOR';
   // serie del ERP -> nombre del centro de costo (DETALLE), con los nombres que pidio el usuario (09/10/2026; los mismos de centro_costo_serie)
-  const DETALLE_SERIE = { 'FC.COCINA': 'COCINA', 'FC.BAR': 'BAR', 'FC.ASEO': 'MATERIAL DE ASEO', 'FC.EMPAQUES': 'MATERIAL DE EMPAQUE', 'FC.UTILESYPAPELERIA': 'UTENSILIOS Y PAPELERIA', 'FCRC.COCINA': 'COCINA', 'FCRC.BAR': 'BAR', 'FCRC.ASEO': 'MATERIAL DE ASEO', 'FCRC.EMPAQUE': 'MATERIAL DE EMPAQUE', 'FCRC.UTENSILIOS': 'UTENSILIOS Y PAPELERIA', 'FCAR.COCINA': 'COCINA', 'FCAR.BAR': 'BAR', 'FCAR.ASEO': 'MATERIAL DE ASEO', 'FCAR.EMPAQUE': 'MATERIAL DE EMPAQUE', 'FCAR.UTENSILIOS': 'UTENSILIOS Y PAPELERIA' };
+  // (10/10/2026) Rocoto y Arrebatao: el centro de costo NO viene de la serie del ERP (es FCRC/FCAR para todo).
+  // Se elige al amarrar y se guarda en pedidos.centro_costo; el organizador lo lee de ahi via completarDesdeWeb.
+  const DETALLE_SERIE = { 'FC.COCINA': 'COCINA', 'FC.BAR': 'BAR', 'FC.ASEO': 'MATERIAL DE ASEO', 'FC.EMPAQUES': 'MATERIAL DE EMPAQUE', 'FC.UTILESYPAPELERIA': 'UTENSILIOS Y PAPELERIA' };
 
   const plano = (t) => String(t == null ? '' : t).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   // encabezado del archivo -> columna destino
