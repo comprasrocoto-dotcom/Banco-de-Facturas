@@ -524,22 +524,29 @@
       const factura = v['Su Doc'] || '';
       const ingreso = v.INGRESO || '';
       const filaArchivo = x.fila;
-      // --- CRUCE: Hiopos Su Doc -> web: documento -> cufe -> pedido, o numero_factura -> pedido ---
+      // --- CRUCE: INGRESO del Hiopos (FCRC308/FCAR1173) -> pedido_erp en la web -> pedido -> lineas ---
       const docNorm = String(v['Su Doc'] || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      // El INGRESO viene como "FCRC / 308" -> normalizar a "FCRC308"
+      const ingresoNorm = String(v.INGRESO || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
       let pedido = null, lineas = [], obs = [];
-      // 1. Buscar por numero_factura del pedido (pedidos.numero_factura = Su Doc del Hiopos)
-      if (orgH && orgH.numeroFacturaToPedido && orgH.numeroFacturaToPedido[docNorm]) {
+      // 1. Buscar por pedido_erp (es el INGRESO del Hiopos: FCRC308, FCAR1173, etc.)
+      if (orgH && orgH.erpToPedido && orgH.erpToPedido[ingresoNorm]) {
+        pedido = orgH.erpToPedido[ingresoNorm];
+        lineas = lineasPed[pedido.id] || [];
+      }
+      // 2. Si no, buscar por numero_factura del pedido
+      if (!pedido && orgH && orgH.numeroFacturaToPedido && orgH.numeroFacturaToPedido[docNorm]) {
         pedido = orgH.numeroFacturaToPedido[docNorm];
         lineas = lineasPed[pedido.id] || [];
       }
-      // 2. Si no, buscar por cufe (factura.cufe -> pedido.factura_cufe)
+      // 3. Si no, buscar por cufe (factura.cufe -> pedido.factura_cufe)
       if (!pedido && orgH && orgH.docToCufe) {
         const cufe = orgH.docToCufe[docNorm] || null;
         if (cufe && pedsMap[cufe]) { pedido = pedsMap[cufe]; lineas = lineasPed[pedido.id] || []; }
       }
-      // 3. Si no encontro pedido, señalar
+      // 4. Si no encontro pedido, señalar
       if (!pedido) {
-        obs.push('Pedido no encontrado en la web');
+        obs.push('Pedido no encontrado en la web (ingreso ' + (v.INGRESO || '') + ')');
         revisar.push({ fila: filaArchivo, factura, ingreso, provedor, obs: obs.join('; ') });
         wsC.addRow(['', fecha, provedor, factura, ingreso, '', '', '', '', '', '', obs.join('; ')]);
         continue;
