@@ -583,7 +583,7 @@
     // ---- HOJA "Por revisar" ----
     if (revisar.length) {
       const T_R = ['Fila archivo', 'Factura', 'Ingreso', 'Proveedor', 'Articulo', 'Motivo'];
-      hojaTabla(wb, 'Por revisar', T_R, revisar.map(r => ({ celdas: [r.fila, r.factura, r.ingreso, r.provedor, r.articulo || '', r.obs] })), [12, 18, 18, 36, 36, 60]);
+      hojaTabla(wb, 'Revisar contable', T_R, revisar.map(r => ({ celdas: [r.fila, r.factura, r.ingreso, r.provedor, r.articulo || '', r.obs] })), [12, 18, 18, 36, 36, 60]);
     }
     return wb;
   }
