@@ -192,6 +192,7 @@ tr:hover td{background:#f1f5f9}
         <button class="chip"    id="ad-catcomp" onclick="setAdmin('catcomp')">📋 Catálogo completo</button>
         <button class="chip"    id="ad-agente" onclick="setAdmin('agente')">🤖 Agente</button>
         <button class="chip"    id="ad-import" onclick="setAdmin('import')">📥 Importar bases</button>
+        <button class="chip"    id="ad-hiopos" onclick="setAdmin('hiopos')">📊 Organizador Hiopos</button>
         <button class="chip"    id="ad-usuarios" style="display:none" onclick="setAdmin('usuarios')">👥 Usuarios y perfiles</button>
         <span class="sp"></span>
         <input id="qa" placeholder="🔎 buscar..." style="width:240px;margin:0" oninput="adminLimite=400;pintarAdmin()">
@@ -305,6 +306,8 @@ tr:hover td{background:#f1f5f9}
 <script src="js/desamarrar.js"></script>
 <script src="js/fecha-recibido.js"></script>
 <script src="js/select-buscable.js"></script>
+<script src="js/organizador-hiopos.js"></script>
+<script src="js/organizador-hiopos-ui.js"></script>
 <script src="js/conciliacion-ui.js"></script>
 <script src="js/cruce-dian-ui.js"></script>
 <script>
@@ -965,13 +968,13 @@ let adminMarcas=[], adminVinc=[], adminMarcaTocada=false;   // marcas y proveedo
 let adminLimite=400;   // cuántos artículos se pintan de una vez en Admin > Artículos (hay más de 700: "Ver 400 más")
 let adminEdit=null;   // {tipo:"prov"|"art", id, error} = la tarjeta que se está editando (ver js/admin-editar.js)
 function setAdmin(v){ adminVista=v; adminEdit=null; adminLimite=400;
-  ["prov","art","cat","catcomp","agente","import","usuarios"].forEach(x=>$("ad-"+x).classList.toggle("on", x==v));
+  ["prov","art","cat","catcomp","agente","import","hiopos","usuarios"].forEach(x=>$("ad-"+x).classList.toggle("on", x==v));
   $("filtroCat").style.display = (v=="cat")?"flex":"none";
   $("filtroMarcaAdm").style.display = (v=="prov")?"flex":"none";
   $("filtroCatalogoAdm").style.display = (v=="art"||v=="catcomp")?"flex":"none";
-  $("btnAdmNuevo").style.display = (v=="agente"||v=="import"||v=="usuarios"||v=="catcomp")?"none":"";
-  $("qa").style.display = (v=="import")?"none":"";
-  $("vistaAdmin").classList.toggle("adm-import", v=="import");
+  $("btnAdmNuevo").style.display = (v=="agente"||v=="import"||v=="usuarios"||v=="catcomp"||v=="hiopos")?"none":"";
+  $("qa").style.display = (v=="import"||v=="hiopos")?"none":"";
+  $("vistaAdmin").classList.toggle("adm-import", v=="import"||v=="hiopos");
   $("vistaAdmin").classList.toggle("adm-sinfecha", v=="catcomp");
   pintarAdmin();
 }
@@ -1050,6 +1053,8 @@ function pintarAdmin(){
     pintarUsuarios(c,q);
   } else if(adminVista==="import"){
     impPintar(c);
+  } else if(adminVista==="hiopos"){
+    pintarOrganizadorHiopos(c);   // (09/10/2026) Admin > Organizador Hiopos
   } else {
     const pid=Number($("catProv").value||0);
     if(!pid){ c.innerHTML='<div class="vacio">Elegí un proveedor para ver qué se le compra.</div>'; return; }
