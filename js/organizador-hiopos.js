@@ -524,18 +524,18 @@
       const factura = v['Su Doc'] || '';
       const ingreso = v.INGRESO || '';
       const filaArchivo = x.fila;
-      // --- CRUCE: Hiopos Su Doc -> web documento -> cufe -> pedido -> lineas ---
+      // --- CRUCE: Hiopos Su Doc -> web: documento -> cufe -> pedido, o numero_factura -> pedido ---
       const docNorm = String(v['Su Doc'] || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
       let pedido = null, lineas = [], obs = [];
-      // 1. Buscar por cufe (pedido.factura_cufe = factura.cufe, mapeado via docToCufe)
-      const cufe = docToCufe[docNorm] || null;
-      if (cufe && pedsMap[cufe]) { pedido = pedsMap[cufe]; lineas = lineasPed[pedido.id] || []; }
-      // 2. Si no encontro por cufe, buscar por numero_factura (pedidos.numero_factura = documento)
-      if (!pedido) {
-        for (const [k, p] of Object.entries(pedsMap)) {
-          const nf = String(p.numero_factura || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-          if (nf && nf === docNorm) { pedido = p; lineas = lineasPed[p.id] || []; break; }
-        }
+      // 1. Buscar por numero_factura del pedido (pedidos.numero_factura = Su Doc del Hiopos)
+      if (orgH && orgH.numeroFacturaToPedido && orgH.numeroFacturaToPedido[docNorm]) {
+        pedido = orgH.numeroFacturaToPedido[docNorm];
+        lineas = lineasPed[pedido.id] || [];
+      }
+      // 2. Si no, buscar por cufe (factura.cufe -> pedido.factura_cufe)
+      if (!pedido && orgH && orgH.docToCufe) {
+        const cufe = orgH.docToCufe[docNorm] || null;
+        if (cufe && pedsMap[cufe]) { pedido = pedsMap[cufe]; lineas = lineasPed[pedido.id] || []; }
       }
       // 3. Si no encontro pedido, señalar
       if (!pedido) {
