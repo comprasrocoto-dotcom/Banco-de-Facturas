@@ -19,7 +19,7 @@
   else root.OrganizadorHiopos = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
-  const COLUMNAS = ['Fecha Doc', 'Su Doc', 'Hora', 'Contacto', 'Estado', 'Almacén', 'Empleado', 'Base', 'Impuestos', 'Retenciones', 'Neto', 'Procesado', 'Pendiente', 'INGRESO', 'DETALLE', 'Nota'];
+  const COLUMNAS = ['Fecha Doc', 'Su Doc', 'Hora', 'Contacto', 'Estado', 'Almacén', 'Empleado', 'Base', 'Impuestos', 'Retenciones', 'Neto', 'Procesado', 'Pendiente', 'INGRESO', 'DETALLE', 'Marca', 'Nota'];
   const NUMERICAS = ['Base', 'Impuestos', 'Retenciones', 'Neto', 'Pendiente'];
   const REQUERIDAS = ['Fecha Doc', 'Su Doc', 'Contacto', 'Neto'];
   const LEYENDA_CC = 'CUENTA DE COBRO', LEYENDA_CM = 'PAGADO CAJA MENOR';
@@ -160,6 +160,7 @@
       if (!v['Su Doc'] && !v['Contacto'] && !v['Fecha Doc'] && !v.INGRESO && v.Neto != null) { totalArchivo = v.Neto; continue; }
       if (!v['Su Doc'] && !v['Contacto']) problemas.push('sin Su Doc ni Contacto');
       if (!v.DETALLE) v.DETALLE = detalleDeSerie(v.INGRESO);
+      if (!v.Marca) v.Marca = marcaDeSerie(v.INGRESO);
       const fila = { fila: i + 1, v };
       if (problemas.length) { errores.push({ fila: i + 1, motivo: problemas.join('; '), v }); continue; }
       const clave = v.INGRESO ? 'I:' + v.INGRESO.replace(/\s+/g, '').toUpperCase() : 'D:' + [plano(v['Su Doc']), contactoClave(v.Contacto), v.Neto, v['Fecha Doc']].join('|');
@@ -513,7 +514,7 @@
       const iva = v.Impuestos != null ? v.Impuestos : null;
       const total = v.Neto != null ? v.Neto : null;
       const centro = v.DETALLE || detalleDeSerie(v.INGRESO) || '';
-      const marca = marcaDeSerie(v.INGRESO) || '';
+      const marca = v.Marca || marcaDeSerie(v.INGRESO) || '';
       wsC.addRow([marca, v['Fecha Doc'] ? fechaExcel(v['Fecha Doc']) : null, v.INGRESO || '', v['Su Doc'] || '', v.Contacto || '', centro, '', base, iva, total, '']);
     }
     const encC = wsC.getRow(1);
