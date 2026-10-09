@@ -27,6 +27,9 @@
   // (10/10/2026) Rocoto y Arrebatao: el centro de costo NO viene de la serie del ERP (es FCRC/FCAR para todo).
   // Se elige al amarrar y se guarda en pedidos.centro_costo; el organizador lo lee de ahi via completarDesdeWeb.
   const DETALLE_SERIE = { 'FC.COCINA': 'COCINA', 'FC.BAR': 'BAR', 'FC.ASEO': 'MATERIAL DE ASEO', 'FC.EMPAQUES': 'MATERIAL DE EMPAQUE', 'FC.UTILESYPAPELERIA': 'UTENSILIOS Y PAPELERIA' };
+  // (10/10/2026) marca por serie del ERP: FCRC = Rocoto, FCAR = Arrebatao, FC.* = 123 Wok / Casa de Nadie / Sin Par
+  const MARCA_SERIE = { 'FCRC': 'Rocoto', 'FCAR': 'Arrebatao' };
+  const marcaDeSerie = (ingreso) => { const s = serieDe(ingreso); if (MARCA_SERIE[s]) return MARCA_SERIE[s]; const t = s.startsWith('FC.') ? '123 Wok' : ''; return t; };
 
   const plano = (t) => String(t == null ? '' : t).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   // encabezado del archivo -> columna destino
@@ -499,11 +502,10 @@
       lin('No están en el reporte de la DIAN', comparacion.sinFactura, null);
     }
     // ---- HOJA CONTABILIDAD (para SIIGO) ----
-    // Una fila por documento con: Fecha, Comprobante (INGRESO), Tercero (Contacto), NIT, Centro de Costo,
-    // Base, IVA, Total, Cuenta (grupo_cuenta), Detalle.  Si el DETALLE ya trae centro de costo (123 Wok)
-    // se usa; si no (Rocoto FCRC / Arrebatao FCAR), se deja en blanco para que contabilidad lo complete.
+    // Una fila por documento con: Marca, Fecha, Comprobante (INGRESO), Tercero (Contacto), Centro de Costo,
+    // Base, IVA, Total. La marca se identifica por la serie (FCRC=Rocoto, FCAR=Arrebatao, FC.*=123 Wok).
     const wsC = wb.addWorksheet('Contabilidad', { views: [{ state: 'frozen', ySplit: 1 }] });
-    const COL_C = ['Fecha', 'Comprobante (Ingreso ERP)', 'Su Doc (N. Factura)', 'Tercero (Proveedor)', 'Centro de Costo', 'Cuenta Contable', 'Base', 'IVA', 'Total', 'N. Pedido ERP'];
+    const COL_C = ['Marca', 'Fecha', 'Comprobante (Ingreso ERP)', 'Su Doc (N. Factura)', 'Tercero (Proveedor)', 'Centro de Costo', 'Cuenta Contable', 'Base', 'IVA', 'Total', 'N. Pedido ERP'];
     wsC.addRow(COL_C);
     for (const x of cl.documentos) {
       const v = x.v;
@@ -511,7 +513,8 @@
       const iva = v.Impuestos != null ? v.Impuestos : null;
       const total = v.Neto != null ? v.Neto : null;
       const centro = v.DETALLE || detalleDeSerie(v.INGRESO) || '';
-      wsC.addRow([v['Fecha Doc'] ? fechaExcel(v['Fecha Doc']) : null, v.INGRESO || '', v['Su Doc'] || '', v.Contacto || '', centro, '', base, iva, total, '']);
+      const marca = marcaDeSerie(v.INGRESO) || '';
+      wsC.addRow([marca, v['Fecha Doc'] ? fechaExcel(v['Fecha Doc']) : null, v.INGRESO || '', v['Su Doc'] || '', v.Contacto || '', centro, '', base, iva, total, '']);
     }
     const encC = wsC.getRow(1);
     encC.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -526,6 +529,6 @@
     return wb;
   }
 
-  return { COLUMNAS, NUMERICAS, REQUERIDAS, LEYENDA_CC, LEYENDA_CM, DETALLE_SERIE, COLOR, plano, columnaDe, contactoClave, serieDe, detalleDeSerie,
+  return { COLUMNAS, NUMERICAS, REQUERIDAS, LEYENDA_CC, LEYENDA_CM, DETALLE_SERIE, MARCA_SERIE, COLOR, plano, columnaDe, contactoClave, serieDe, detalleDeSerie, marcaDeSerie,
     aNumero, aFecha, aHora, aBooleano, agregarLeyenda, leerCsv, leerTabla, completarDesdeWeb, ingresoLegible, leerDian, compararConDian, textoDiferencia, IMPUESTOS_DIAN, TIPO, TIPO_TXT, claveProveedor, indicioCuentaCobro, mapaReglas, armarEvidencia, facturaElectronica, clasificar, resumen, contactos, filaExcel, armarLibro };
 });
