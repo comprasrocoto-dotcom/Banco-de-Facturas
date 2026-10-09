@@ -7,7 +7,7 @@
 // ============================================================
 // pinta el modulo en su contenedor (#hioposRaiz)
 function orgHPintar() { const c = document.getElementById('hioposRaiz'); if (c) pintarOrganizadorHiopos(c); }
-let orgH = { nombre: '', lectura: null, reglas: new Map(), cargadas: false, ver: 'documentos', q: '', error: '', procesando: false };
+let orgH = { nombre: '', lectura: null, reglas: new Map(), cargadas: false, ver: 'documentos', q: '', error: '', procesando: false, dian: null, dianNombre: '', dianError: '' };
 
 async function orgHCargarReglas() {
   try {
@@ -24,7 +24,9 @@ const orgHListas = () => ({
 function orgHCalcular() {
   if (!orgH.lectura) return null;
   const cl = OrganizadorHiopos.clasificar(orgH.lectura.filas, orgHListas());
-  return { cl, R: OrganizadorHiopos.resumen(orgH.lectura, cl) };
+  // (09/10/2026) base, impuesto y total contra la factura (reporte de la DIAN), si se cargo
+  const comparacion = orgH.dian ? OrganizadorHiopos.compararConDian(orgH.lectura.filas, orgH.dian) : null;
+  return { cl, R: OrganizadorHiopos.resumen(orgH.lectura, cl), comparacion };
 }
 
 async function orgHArchivo(input) {
@@ -56,6 +58,30 @@ async function orgHArchivo(input) {
       catch (e) { orgH.web = { error: e.message }; }
     }
   } catch (e) { orgH.error = e.message; }
+  input.value = '';
+  orgHPintar();
+}
+
+// (09/10/2026) reporte de la DIAN (Excel o CSV) -> orgH.dian (registros con total, impuestos y base de cada factura)
+async function orgHDian(input) {
+  const f = input.files && input.files[0]; if (!f) return;
+  orgH.dianError = ''; orgH.dian = null; orgH.dianNombre = f.name;
+  try {
+    const buf = await f.arrayBuffer();
+    let aoa;
+    if (/\.(csv|txt)$/i.test(f.name)) {
+      let texto = new TextDecoder('utf-8').decode(buf);
+      if (texto.includes('\uFFFD')) texto = new TextDecoder('windows-1252').decode(buf);
+      aoa = OrganizadorHiopos.leerCsv(texto);
+    } else {
+      const wb = XLSX.read(buf, { type: 'array' });
+      aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' });
+    }
+    const d = OrganizadorHiopos.leerDian(aoa);
+    if (d.error) throw new Error(d.error);
+    orgH.dian = d.registros;
+    if (orgH.ver !== 'dif') orgH.ver = 'dif';
+  } catch (e) { orgH.dianError = e.message; }
   input.value = '';
   orgHPintar();
 }
@@ -110,7 +136,7 @@ async function orgHDescargar() {
   try {
     const ExcelJS = await orgHCargarExcelJS();
     const ahora = new Date().toLocaleString('es-CO');
-    const wb = OrganizadorHiopos.armarLibro(ExcelJS, { lectura: orgH.lectura, clasificacion: x.cl, nombreArchivo: orgH.nombre, ahora });
+    const wb = OrganizadorHiopos.armarLibro(ExcelJS, { lectura: orgH.lectura, clasificacion: x.cl, nombreArchivo: orgH.nombre, ahora, comparacion: x.comparacion });
     const buf = await wb.xlsx.writeBuffer();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
@@ -138,6 +164,9 @@ function pintarOrganizadorHiopos(c) {
     <div class="mut" style="margin:4px 0 10px">Carga el Excel de <b>Facturas de compra</b> que bajas de Hiopos. Se ordena en las 16 columnas de las planillas (INGRESO = Serie / Número, DETALLE = centro de costo según la serie), las <b>cuentas de cobro</b> quedan marcadas en la Nota y los pagos de <b>caja menor</b> pasan a su propia hoja. Tu archivo no se modifica.</div>
     <label class="s" style="display:inline-block;cursor:pointer;padding:8px 14px;border-radius:8px;background:#0f766e;color:#fff;font-weight:700">📂 Cargar Excel o CSV de Hiopos<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="orgHArchivo(this)"></label>
     ${orgH.nombre ? `<span class="mut" style="margin-left:8px">${escAg(orgH.nombre)}</span>` : ''}
+    <div style="margin-top:8px"><label class="s" style="display:inline-block;cursor:pointer;padding:6px 12px;border-radius:8px;background:#1e3a8a;color:#fff;font-weight:700">📄 Cargar reporte de la DIAN<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="orgHDian(this)"></label>
+      <span class="mut" style="margin-left:8px">${orgH.dianNombre ? escAg(orgH.dianNombre) + (orgH.dian ? ' · ' + orgH.dian.length + ' facturas recibidas' : '') : 'Para comparar la base, el impuesto y el total de cada documento con su factura.'}</span>
+      ${orgH.dianError ? `<div class="err" style="margin-top:6px">${escAg(orgH.dianError)}</div>` : ''}</div>
     ${orgH.error ? `<div class="err" style="margin-top:8px">${escAg(orgH.error)}</div>` : ''}</div>`;
   const x = orgHCalcular();
   if (!x) { c.innerHTML = h; return; }
@@ -149,7 +178,17 @@ function pintarOrganizadorHiopos(c) {
     ${tarjeta('Cuentas de cobro', R.cuentasCobro, R.neto.cuentasCobro, '#fef3c7', 'cc')}
     ${tarjeta('Caja menor', R.cajaMenor, R.neto.cajaMenor, '#dbeafe', 'cm')}
     ${tarjeta('Para revisar', R.revision, null, R.revision ? '#ede9fe' : '', 'revision')}
-    ${tarjeta('Errores de lectura', R.errores, null, R.errores ? '#fee2e2' : '', 'errores')}</div>`;
+    ${tarjeta('Errores de lectura', R.errores, null, R.errores ? '#fee2e2' : '', 'errores')}
+    ${x.comparacion ? tarjeta('≠ Factura (modificar)', x.comparacion.porFila.size, null, x.comparacion.porFila.size ? '#fca5a5' : '#dcfce7', 'dif') : ''}</div>`;
+  if (x.comparacion) {
+    const C = x.comparacion, n = C.porFila.size;
+    const conDif = [...x.cl.documentos, ...x.cl.cajaMenor].filter((z) => C.porFila.has(z.fila));
+    h += n ? `<div class="err" style="padding:10px 12px;border:2px solid #b91c1c;border-radius:9px;background:#fef2f2"><b>⚠️ ${n} documento(s) con BASE, IMPUESTO o TOTAL distinto a la factura: modifícalos en Hiopos.</b>
+        <div style="margin-top:6px;font-weight:400">${conDif.slice(0, 15).map((z) => `• <b>${escAg(z.v.INGRESO || '')}</b> ${escAg(z.v['Su Doc'])} · ${escAg(z.v.Contacto)}: ${escAg(OrganizadorHiopos.textoDiferencia(C.porFila.get(z.fila)))}`).join('<br>')}${n > 15 ? `<br>… y ${n - 15} más (en la vista "≠ Factura" y en el Excel)` : ''}</div></div>`
+      : `<div class="mut" style="color:#166534">✅ Base, impuesto y total iguales a la factura en los ${C.comparadas} documento(s) que están en el reporte de la DIAN.</div>`;
+    if (C.sinFactura) h += `<div class="mut">${C.sinFactura} documento(s) no están en el reporte de la DIAN (no se pudieron comparar).</div>`;
+    if (C.ambiguas) h += `<div class="mut">${C.ambiguas} documento(s) con el mismo número en varias facturas de la DIAN: no se compararon.</div>`;
+  }
   if (L.faltan.length) h += `<div class="err">Faltan columnas en el archivo: <b>${escAg(L.faltan.join(', '))}</b>. Esas celdas quedan vacías (no se inventan).</div>`;
   // (09/10/2026) INGRESO (el FC de Hiopos) y DETALLE: de donde salieron y cuantos quedaron vacios
   const W = orgH.web || {};
@@ -169,10 +208,11 @@ function pintarOrganizadorHiopos(c) {
   if (ver === 'cm') { filas = x.cl.cajaMenor; titulo = 'Caja menor'; }
   else if (ver === 'cc') { filas = x.cl.documentos.filter((z) => z.cuentaCobro); titulo = 'Cuentas de cobro'; }
   else if (ver === 'revision') { filas = [...x.cl.revision.map((z) => Object.assign({ motivo: z.motivo }, x.cl.cajaMenor.find((y) => y.fila === z.fila) || { v: z.v })), ...L.repetidas.map((z) => ({ v: z.v, motivo: 'Repetido: igual a la fila ' + z.igualA })) ]; titulo = 'Para revisar'; }
+  else if (ver === 'dif' && x.comparacion) { filas = [...x.cl.documentos, ...x.cl.cajaMenor].filter((z) => x.comparacion.porFila.has(z.fila)).map((z) => Object.assign({ motivo: OrganizadorHiopos.textoDiferencia(x.comparacion.porFila.get(z.fila)) }, z)); titulo = '≠ Factura: modificar en Hiopos'; }
   else if (ver === 'errores') { filas = L.errores.map((z) => ({ v: z.v || {}, motivo: z.motivo, fila: z.fila })); titulo = 'Errores de lectura'; }
   else { filas = x.cl.documentos; titulo = 'Documentos'; }
   const cols = ['Fecha Doc', 'Su Doc', 'Contacto', 'Almacén', 'Neto', 'Pendiente', 'INGRESO', 'DETALLE', 'Nota'];
-  h += `<div style="font-weight:700;margin:6px 0">Vista previa · ${titulo} (${filas.length})</div><div style="overflow:auto;max-height:46vh"><table><thead><tr>${(ver === 'revision' || ver === 'errores') ? '<th>Motivo</th>' : ''}${cols.map((k) => `<th${['Neto', 'Pendiente'].includes(k) ? ' class="num"' : ''}>${k}</th>`).join('')}</tr></thead><tbody>` +
+  h += `<div style="font-weight:700;margin:6px 0">Vista previa · ${titulo} (${filas.length})</div><div style="overflow:auto;max-height:46vh"><table><thead><tr>${(ver === 'revision' || ver === 'errores' || ver === 'dif') ? '<th>Motivo</th>' : ''}${cols.map((k) => `<th${['Neto', 'Pendiente'].includes(k) ? ' class="num"' : ''}>${k}</th>`).join('')}</tr></thead><tbody>` +
     filas.slice(0, 300).map((z) => { const v = z.v || {}, bg = z.cuentaCobro && z.cajaMenor ? '#ede9fe' : (z.cajaMenor ? '#dbeafe' : (z.cuentaCobro ? '#fef3c7' : ''));
       return `<tr${bg ? ` style="background:${bg}"` : ''}>${z.motivo ? `<td>${escAg(z.motivo)}</td>` : ''}${cols.map((k) => `<td${['Neto', 'Pendiente'].includes(k) ? ' class="num"' : ''}>${['Neto', 'Pendiente'].includes(k) ? (v[k] == null ? '' : money(v[k])) : (k === 'Fecha Doc' && v[k] ? escAg(v[k].split('-').reverse().join('/')) : escAg(v[k] == null ? '' : v[k]))}</td>`).join('')}</tr>`; }).join('') +
     `</tbody></table></div>${filas.length > 300 ? `<div class="mut">… y ${filas.length - 300} más (todas van en el Excel)</div>` : ''}`;

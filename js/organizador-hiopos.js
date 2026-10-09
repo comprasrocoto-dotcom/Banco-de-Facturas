@@ -165,6 +165,77 @@
     return { filaEncabezado: fe + 1, columnas, faltan, noUsadas, filas, errores, repetidas, ingresoDe, totalArchivo };
   }
 
+  // ---- (09/10/2026) BASE, IMPUESTO Y TOTAL contra la FACTURA (reporte de la DIAN) ----
+  // El usuario pidio: si la base, el impuesto o el total de Hiopos no son los de la factura, alertar para modificarlos.
+  // Fuente: el Excel/CSV que se baja de la DIAN (Prefijo, Folio, Nombre Emisor, IVA, ICA, IC, INC, ..., Total, Grupo).
+  // Factura: impuestos = suma de TODAS las columnas de impuestos (no las retenciones); base = total - impuestos.
+  // Hiopos: total = Base + Impuestos (el Neto ya descuenta retenciones, que la factura no trae). Notas credito: en valor absoluto.
+  // Se tolera 1 peso (redondeos). Calibrado con datos reales (Rocoto, 01-05/10/2026): 28 de 34 iguales al peso.
+  const IMPUESTOS_DIAN = ['IVA', 'ICA', 'IC', 'INC', 'Timbre', 'INC Bolsas', 'IN Carbono', 'IN Combustibles', 'IC Datos', 'ICL', 'INPP', 'IBUA', 'ICUI'];
+  const TOLERANCIA = 1;
+  const PALABRAS_VACIAS = new Set(['s', 'a', 'sas', 'sa', 'ltda', 'y', 'cia', 'de', 'del', 'la', 'el', 'los', 'las', 'e', 'hijos', 'bic', 'en', 'c']);
+  const tokens = (s) => plano(s).split(' ').filter((t) => t && !PALABRAS_VACIAS.has(t));
+  function parecido(a, b) {
+    const ta = new Set(tokens(a)), tb = tokens(b);
+    if (!ta.size || !tb.length) return 0;
+    return tb.filter((t) => ta.has(t)).length / Math.max(ta.size, tb.length);
+  }
+  // aoa del reporte de la DIAN -> { registros: [{ doc, emisor, nit, total, impuestos, base, desglose }], error }
+  function leerDian(aoa) {
+    const datos = (aoa || []).map((r) => (Array.isArray(r) ? r : []));
+    let fe = -1;
+    for (let i = 0; i < Math.min(datos.length, 15); i++) {
+      const hs = datos[i].map(plano);
+      if (hs.includes('folio') && hs.includes('total') && (hs.includes('prefijo') || hs.some((h) => /cufe|cude/.test(h)))) { fe = i; break; }
+    }
+    if (fe < 0) return { registros: [], error: 'No encontré las columnas del reporte de la DIAN (Prefijo, Folio, Total, IVA...). Bájalo de la DIAN en Excel o CSV.' };
+    const H = datos[fe].map(plano), col = (n) => H.indexOf(plano(n));
+    const cPre = col('Prefijo'), cFol = col('Folio'), cTot = col('Total'), cEmi = col('Nombre Emisor'), cNit = col('NIT Emisor'), cGru = col('Grupo'), cTipo = col('Tipo de documento');
+    const cImp = IMPUESTOS_DIAN.map((n) => [n, col(n)]).filter(([, i]) => i >= 0);
+    const registros = [];
+    for (let i = fe + 1; i < datos.length; i++) {
+      const r = datos[i];
+      const doc = alnum((cPre >= 0 ? r[cPre] : '') + '' + (r[cFol] == null ? '' : r[cFol]));
+      if (!doc) continue;
+      if (cGru >= 0 && String(r[cGru] || '').trim() && !/^recib/.test(plano(r[cGru]))) continue;   // solo lo RECIBIDO (compras), no las ventas
+      const total = aNumero(r[cTot]); if (total == null) continue;
+      const desglose = {}; let impuestos = 0;
+      for (const [n, ix] of cImp) { const x = aNumero(r[ix]) || 0; if (x) { desglose[n] = x; impuestos += x; } }
+      impuestos = Math.round(impuestos * 100) / 100;
+      registros.push({ doc, emisor: String(cEmi >= 0 ? r[cEmi] || '' : '').trim(), nit: String(cNit >= 0 ? r[cNit] || '' : '').replace(/\D/g, ''),
+        tipo: String(cTipo >= 0 ? r[cTipo] || '' : '').trim(), total, impuestos, base: Math.round((total - impuestos) * 100) / 100, desglose });
+    }
+    return { registros, error: registros.length ? null : 'El reporte de la DIAN no trae facturas recibidas.' };
+  }
+  // filas del Organizador vs registros de la DIAN -> { porFila: Map(fila -> {campos, factura}), comparadas, sinFactura, ambiguas }
+  // Se empareja por Su Doc = Prefijo+Folio; si hay varias facturas con ese numero (otro proveedor), por el nombre del proveedor.
+  function compararConDian(filas, registros) {
+    const por = new Map();
+    for (const d of registros || []) (por.get(d.doc) || por.set(d.doc, []).get(d.doc)).push(d);
+    const porFila = new Map(); let comparadas = 0, sinFactura = 0, ambiguas = 0;
+    for (const x of filas || []) {
+      const v = x.v; let l = por.get(alnum(v['Su Doc'])) || [];
+      if (l.length > 1) { const p = l.filter((d) => parecido(d.emisor, v.Contacto) >= 0.5); l = p.length ? p : l; }
+      if (!l.length) { sinFactura++; continue; }
+      if (l.length > 1) { ambiguas++; continue; }
+      const f = l[0]; comparadas++;
+      const ab = (n) => Math.abs(Number(n) || 0);
+      const hB = ab(v.Base), hI = ab(v.Impuestos), hT = Math.round((hB + hI) * 100) / 100;
+      const campos = [];
+      if (Math.abs(hB - f.base) > TOLERANCIA) campos.push({ campo: 'Base', hiopos: hB, factura: f.base });
+      if (Math.abs(hI - f.impuestos) > TOLERANCIA) campos.push({ campo: 'Impuestos', hiopos: hI, factura: f.impuestos });
+      if (Math.abs(hT - f.total) > TOLERANCIA) campos.push({ campo: 'Total', hiopos: hT, factura: f.total });
+      if (campos.length) porFila.set(x.fila, { campos, factura: f });
+    }
+    return { porFila, comparadas, sinFactura, ambiguas };
+  }
+  const pesos = (n) => '$ ' + Math.round(Number(n) || 0).toLocaleString('es-CO');
+  // texto de la alerta: "Base: Hiopos $ 409.103 · factura $ 397.023 | Impuestos: ... (IVA $ 16.668 + IBUA $ 3.888)"
+  function textoDiferencia(d) {
+    const imp = Object.entries(d.factura.desglose || {}).map(([n, x]) => n + ' ' + pesos(x)).join(' + ');
+    return d.campos.map((c) => c.campo + ': Hiopos ' + pesos(c.hiopos) + ' · factura ' + pesos(c.factura) + (c.campo === 'Impuestos' && imp ? ' (' + imp + ')' : '')).join(' | ');
+  }
+
   // (09/10/2026) Lo que el archivo NO trae (INGRESO) se busca en la web: la factura con ese Su Doc que ya tiene N° de ingreso.
   // facturasWeb: [{ sudoc (Su Doc tal como lo guarda el agente: letras y numeros), num_ingreso, centro_costo }]
   // Solo si hay UNA factura con ese Su Doc (si hay dos, no se adivina). El DETALLE sale de la serie; si la serie no lo dice
@@ -232,10 +303,10 @@
   const filaExcel = (v) => COLUMNAS.map((c) => (v[c] == null ? '' : v[c]));
 
   // ---- Excel final (ExcelJS se pasa: en la web se carga del CDN; en las pruebas, el de node) ----
-  const COLOR = { encabezado: 'FF0F766E', cuentaCobro: 'FFFEF3C7', cajaMenor: 'FFDBEAFE', ambos: 'FFEDE9FE' };
+  const COLOR = { encabezado: 'FF0F766E', cuentaCobro: 'FFFEF3C7', cajaMenor: 'FFDBEAFE', ambos: 'FFEDE9FE', distinto: 'FFFCA5A5' };
   const fechaExcel = (iso) => { const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) : null; };
   const horaExcel = (h) => { const m = String(h || '').match(/^(\d{2}):(\d{2}):(\d{2})$/); return m ? (+m[1] * 3600 + +m[2] * 60 + +m[3]) / 86400 : null; };
-  function hojaDocumentos(wb, nombre, lista) {
+  function hojaDocumentos(wb, nombre, lista, dif) {
     const ws = wb.addWorksheet(nombre, { views: [{ state: 'frozen', ySplit: 1 }] });
     ws.addRow(COLUMNAS);
     for (const x of lista) {
@@ -250,6 +321,9 @@
       const r = ws.addRow(fila);
       const color = x.cuentaCobro && x.cajaMenor ? COLOR.ambos : (x.cajaMenor ? COLOR.cajaMenor : (x.cuentaCobro ? COLOR.cuentaCobro : null));
       if (color) r.eachCell({ includeEmpty: true }, (cel, n) => { if (n <= COLUMNAS.length) cel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: color } }; });
+      // (09/10/2026) lo que no es igual a la factura de la DIAN, en rojo (Total -> Neto, que es lo que Hiopos muestra)
+      const d = dif && dif.get(x.fila);
+      if (d) for (const c of d.campos) { const col = COLUMNAS.indexOf(c.campo === 'Total' ? 'Neto' : c.campo) + 1; const cel = r.getCell(col); cel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.distinto } }; cel.font = { bold: true, color: { argb: 'FF7F1D1D' } }; cel.note = c.campo + ' de la factura: ' + pesos(c.factura); }
     }
     const enc = ws.getRow(1);
     enc.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -269,11 +343,12 @@
     return ws;
   }
   // -> el libro (ExcelJS.Workbook) con Documentos, Caja menor y Resumen
-  function armarLibro(ExcelJS, { lectura, clasificacion, nombreArchivo, ahora }) {
+  function armarLibro(ExcelJS, { lectura, clasificacion, nombreArchivo, ahora, comparacion }) {
+    const dif = comparacion && comparacion.porFila;
     const wb = new ExcelJS.Workbook();
     wb.creator = 'Banco de Facturas - Organizador Hiopos';
-    hojaDocumentos(wb, 'Documentos', clasificacion.documentos);
-    hojaDocumentos(wb, 'Caja menor', clasificacion.cajaMenor);
+    hojaDocumentos(wb, 'Documentos', clasificacion.documentos, dif);
+    hojaDocumentos(wb, 'Caja menor', clasificacion.cajaMenor, dif);
     const R = resumen(lectura, clasificacion);
     const ws = wb.addWorksheet('Resumen');
     ws.columns = [{ width: 46 }, { width: 18 }, { width: 22 }, { width: 46 }];
@@ -296,9 +371,15 @@
     lin('INGRESO tomado de la web (el archivo no lo traia)', R.ingresoWeb, null);
     lin('Sin INGRESO (ni en el archivo ni en la web)', R.sinIngreso, null);
     lin('Sin DETALLE (la serie no dice el centro de costo)', R.sinDetalle, null);
+    if (comparacion) {
+      lin('Comparados con la factura (reporte DIAN)', comparacion.comparadas, null);
+      lin('CON VALORES DISTINTOS A LA FACTURA (modificar en Hiopos)', dif.size, null).font = { bold: true, color: { argb: dif.size ? 'FFB91C1C' : 'FF166534' } };
+      lin('No están en el reporte de la DIAN', comparacion.sinFactura, null);
+    }
     const det = [
       ...clasificacion.revision.map((x) => ['Revisión', x.fila, x.v['Su Doc'] + ' · ' + x.v.Contacto, x.motivo]),
       ...lectura.repetidas.map((x) => ['Repetido', x.fila, (x.v['Su Doc'] || '') + ' · ' + (x.v.Contacto || ''), 'igual a la fila ' + x.igualA + ' del archivo']),
+      ...[...clasificacion.documentos, ...clasificacion.cajaMenor].filter((x) => dif && dif.has(x.fila)).map((x) => ['MODIFICAR EN HIOPOS', x.fila, (x.v.INGRESO ? x.v.INGRESO + ' · ' : '') + x.v['Su Doc'] + ' · ' + x.v.Contacto, textoDiferencia(dif.get(x.fila))]),
       ...lectura.errores.map((x) => ['Error de lectura', x.fila, ((x.v && x.v['Su Doc']) || '') + ' · ' + ((x.v && x.v.Contacto) || ''), x.motivo]),
     ];
     if (lectura.faltan.length) det.unshift(['Columna faltante', '', lectura.faltan.join(', '), 'no viene en el archivo: esas celdas quedan vacías']);
@@ -312,5 +393,5 @@
   }
 
   return { COLUMNAS, NUMERICAS, REQUERIDAS, LEYENDA_CC, LEYENDA_CM, DETALLE_SERIE, COLOR, plano, columnaDe, contactoClave, serieDe, detalleDeSerie,
-    aNumero, aFecha, aHora, aBooleano, agregarLeyenda, leerCsv, leerTabla, completarDesdeWeb, ingresoLegible, clasificar, resumen, contactos, filaExcel, armarLibro };
+    aNumero, aFecha, aHora, aBooleano, agregarLeyenda, leerCsv, leerTabla, completarDesdeWeb, ingresoLegible, leerDian, compararConDian, textoDiferencia, IMPUESTOS_DIAN, clasificar, resumen, contactos, filaExcel, armarLibro };
 });
