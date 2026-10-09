@@ -31,13 +31,22 @@ async function orgHArchivo(input) {
   const f = input.files && input.files[0]; if (!f) return;
   orgH.error = ''; orgH.lectura = null; orgH.nombre = f.name; orgH.ver = 'documentos';
   try {
-    const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
-    // la hoja con el encabezado de Hiopos (normalmente "Documentos")
+    const buf = await f.arrayBuffer();
     let mejor = null;
-    for (const n of wb.SheetNames) {
-      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: '' });
-      const l = OrganizadorHiopos.leerTabla(aoa);
-      if (l.filaEncabezado > 0 && (!mejor || l.filas.length > mejor.filas.length)) mejor = l;
+    if (/\.(csv|txt)$/i.test(f.name)) {
+      // (09/10/2026) CSV de Hiopos: lector propio (todo como texto; ";" y miles con punto). UTF-8, o Windows-1252 si trae tildes rotas
+      let texto = new TextDecoder('utf-8').decode(buf);
+      if (texto.includes('�')) texto = new TextDecoder('windows-1252').decode(buf);
+      const l = OrganizadorHiopos.leerTabla(OrganizadorHiopos.leerCsv(texto));
+      if (l.filaEncabezado > 0) mejor = l;
+    } else {
+      const wb = XLSX.read(buf, { type: 'array' });
+      // la hoja con el encabezado de Hiopos (normalmente "Documentos")
+      for (const n of wb.SheetNames) {
+        const aoa = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: '' });
+        const l = OrganizadorHiopos.leerTabla(aoa);
+        if (l.filaEncabezado > 0 && (!mejor || l.filas.length > mejor.filas.length)) mejor = l;
+      }
     }
     if (!mejor) throw new Error('No encontré el encabezado de Hiopos (Fecha Doc, Su Doc, Contacto, Neto...) en ninguna hoja. ¿Es el Excel de Facturas de compra?');
     orgH.lectura = mejor; orgH.web = null;
@@ -127,7 +136,7 @@ function pintarOrganizadorHiopos(c) {
   if (!orgH.cargadas) { c.innerHTML = '<div class="vacio">⏳ Cargando...</div>'; orgHCargarReglas().then(() => orgHPintar()); return; }
   let h = `<div class="card" style="margin:6px 0"><div class="emisor">📊 Organizador Hiopos</div>
     <div class="mut" style="margin:4px 0 10px">Carga el Excel de <b>Facturas de compra</b> que bajas de Hiopos. Se ordena en las 16 columnas de las planillas (INGRESO = Serie / Número, DETALLE = centro de costo según la serie), las <b>cuentas de cobro</b> quedan marcadas en la Nota y los pagos de <b>caja menor</b> pasan a su propia hoja. Tu archivo no se modifica.</div>
-    <label class="s" style="display:inline-block;cursor:pointer;padding:8px 14px;border-radius:8px;background:#0f766e;color:#fff;font-weight:700">📂 Cargar Excel de Hiopos<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="orgHArchivo(this)"></label>
+    <label class="s" style="display:inline-block;cursor:pointer;padding:8px 14px;border-radius:8px;background:#0f766e;color:#fff;font-weight:700">📂 Cargar Excel o CSV de Hiopos<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="orgHArchivo(this)"></label>
     ${orgH.nombre ? `<span class="mut" style="margin-left:8px">${escAg(orgH.nombre)}</span>` : ''}
     ${orgH.error ? `<div class="err" style="margin-top:8px">${escAg(orgH.error)}</div>` : ''}</div>`;
   const x = orgHCalcular();
@@ -147,6 +156,9 @@ function pintarOrganizadorHiopos(c) {
   if (!L.ingresoDe) h += `<div class="err">Tu Excel no trae la columna <b>Serie / Número</b> (el FC de Hiopos, ej. FC.BAR / 1890). En Hiopos, en la lista de Facturas de compra, muestra esa columna antes de exportar.${W.ingresos ? ` Mientras tanto se tomaron <b>${W.ingresos}</b> de la web (facturas que ya tienen N° de ingreso).` : ''}</div>`;
   else if (W.ingresos) h += `<div class="mut">INGRESO tomado de la web en ${W.ingresos} documento(s) que venían sin él.</div>`;
   if (W.error) h += `<div class="err">No pude buscar en la web los INGRESOS que faltan: ${escAg(W.error)}</div>`;
+  if (L.totalArchivo != null) { const d = Math.round((R.neto.total - L.totalArchivo) * 100) / 100;
+    h += d === 0 ? `<div class="mut" style="color:#166534">✅ El total organizado (${money(R.neto.total)}) cuadra con el total del archivo de Hiopos.</div>`
+      : `<div class="err">El total organizado (${money(R.neto.total)}) NO cuadra con el del archivo de Hiopos (${money(L.totalArchivo)}): diferencia ${money(d)}. Revisa errores de lectura y repetidos.</div>`; }
   if (R.sinIngreso) h += `<div class="mut">⚠️ ${R.sinIngreso} documento(s) quedan <b>sin INGRESO</b> (ni en el archivo ni en la web).</div>`;
   if (R.sinDetalle) h += `<div class="mut">⚠️ ${R.sinDetalle} documento(s) quedan <b>sin DETALLE</b>: su serie no dice el centro de costo (FCRC/FCAR) o no tienen INGRESO.</div>`;
   if (L.noUsadas.length) h += `<div class="mut">Columnas del archivo que no van en la planilla: ${escAg(L.noUsadas.join(', '))}</div>`;

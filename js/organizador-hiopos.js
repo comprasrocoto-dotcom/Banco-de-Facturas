@@ -86,6 +86,29 @@
     return n ? n + ' | ' + leyenda : leyenda;
   }
 
+  // (09/10/2026) CSV que exporta Hiopos ("Documentos (4).csv"): separado por ";", primera columna = n° de fila sin titulo,
+  // miles con punto (488.180), fechas dd/mm/aaaa y una fila final de TOTALES. Se lee TODO como texto (sin que una libreria
+  // de Excel adivine: "488.180" no es 488,18 ni "07/10/2026" es 10 de julio) y aNumero/aFecha lo convierten. -> aoa
+  function leerCsv(texto) {
+    const t = String(texto || '').replace(/^﻿/, '');
+    const primera = t.split(/\r?\n/, 1)[0] || '';
+    const cuenta = (c) => primera.split(c).length - 1;
+    const sep = [';', '\t', ','].sort((a, b) => cuenta(b) - cuenta(a))[0];
+    const filas = []; let fila = [], campo = '', comillas = false;
+    for (let i = 0; i < t.length; i++) {
+      const ch = t[i];
+      if (comillas) {
+        if (ch === '"') { if (t[i + 1] === '"') { campo += '"'; i++; } else comillas = false; }
+        else campo += ch;
+      } else if (ch === '"' && campo === '') comillas = true;
+      else if (ch === sep) { fila.push(campo); campo = ''; }
+      else if (ch === '\n' || ch === '\r') { if (ch === '\r' && t[i + 1] === '\n') i++; fila.push(campo); filas.push(fila); fila = []; campo = ''; }
+      else campo += ch;
+    }
+    if (campo !== '' || fila.length) { fila.push(campo); filas.push(fila); }
+    return filas.filter((f) => f.some((x) => String(x).trim() !== ''));
+  }
+
   // aoa = filas del Excel (arreglo de arreglos, como XLSX.utils.sheet_to_json(..., {header:1, raw:true}))
   // -> { filaEncabezado, columnas: {COLUMNA: indice}, faltan: [requeridas que no vienen], noUsadas: [titulos], filas, errores, repetidas }
   function leerTabla(aoa) {
@@ -110,6 +133,7 @@
     if (ingresoDe !== 'serie+numero' && colNumero != null) noUsadas.push(String(datos[fe][colNumero]).trim());
     const faltan = REQUERIDAS.filter((c) => columnas[c] == null);
     const filas = [], errores = [], repetidas = [], vistos = new Map();
+    let totalArchivo = null;
     for (let i = fe + 1; i < datos.length; i++) {
       const r = datos[i];
       if (!r.some((v) => String(v == null ? '' : v).trim() !== '')) continue;   // fila vacia
@@ -127,6 +151,8 @@
         const se = String(r[colSerie] == null ? '' : r[colSerie]).trim(), nu = colNumero != null ? String(r[colNumero] == null ? '' : r[colNumero]).trim() : '';
         v.INGRESO = se ? (nu ? se + ' / ' + nu : se) : '';
       }
+      // (09/10/2026) fila de TOTALES del final (Hiopos la pone en el CSV): sin fecha, Su Doc ni contacto, pero con Neto. No es un documento.
+      if (!v['Su Doc'] && !v['Contacto'] && !v['Fecha Doc'] && !v.INGRESO && v.Neto != null) { totalArchivo = v.Neto; continue; }
       if (!v['Su Doc'] && !v['Contacto']) problemas.push('sin Su Doc ni Contacto');
       if (!v.DETALLE) v.DETALLE = detalleDeSerie(v.INGRESO);
       const fila = { fila: i + 1, v };
@@ -136,7 +162,7 @@
       vistos.set(clave, i + 1);
       filas.push(fila);
     }
-    return { filaEncabezado: fe + 1, columnas, faltan, noUsadas, filas, errores, repetidas, ingresoDe };
+    return { filaEncabezado: fe + 1, columnas, faltan, noUsadas, filas, errores, repetidas, ingresoDe, totalArchivo };
   }
 
   // (09/10/2026) Lo que el archivo NO trae (INGRESO) se busca en la web: la factura con ese Su Doc que ya tiene N° de ingreso.
@@ -266,6 +292,7 @@
     lin('Requieren revisión', R.revision, null);
     lin('Errores de lectura (no se incluyeron)', R.errores, null);
     lin('Repetidos en el archivo (se incluyeron una sola vez)', R.repetidas, null);
+    if (lectura.totalArchivo != null) { const d = Math.round((R.neto.total - lectura.totalArchivo) * 100) / 100; lin('Total que trae el archivo de Hiopos (su fila de totales)', null, lectura.totalArchivo); lin(d === 0 ? 'Cuadra con el total organizado' : 'DIFERENCIA con el total organizado (revisar errores y repetidos)', null, d).font = { bold: true, color: { argb: d === 0 ? 'FF166534' : 'FFB91C1C' } }; }
     lin('INGRESO tomado de la web (el archivo no lo traia)', R.ingresoWeb, null);
     lin('Sin INGRESO (ni en el archivo ni en la web)', R.sinIngreso, null);
     lin('Sin DETALLE (la serie no dice el centro de costo)', R.sinDetalle, null);
@@ -285,5 +312,5 @@
   }
 
   return { COLUMNAS, NUMERICAS, REQUERIDAS, LEYENDA_CC, LEYENDA_CM, DETALLE_SERIE, COLOR, plano, columnaDe, contactoClave, serieDe, detalleDeSerie,
-    aNumero, aFecha, aHora, aBooleano, agregarLeyenda, leerTabla, completarDesdeWeb, ingresoLegible, clasificar, resumen, contactos, filaExcel, armarLibro };
+    aNumero, aFecha, aHora, aBooleano, agregarLeyenda, leerCsv, leerTabla, completarDesdeWeb, ingresoLegible, clasificar, resumen, contactos, filaExcel, armarLibro };
 });
