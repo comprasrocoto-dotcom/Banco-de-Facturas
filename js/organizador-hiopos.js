@@ -519,15 +519,15 @@
       const provedor = v.Contacto || '';
       const factura = v['Su Doc'] || '';
       const ingreso = v.INGRESO || '';
-      // Buscar las lineas del pedido amarrado a este documento (por Su Doc -> factura en la web -> cufe -> pedido)
-      // Intentar cruzar por el numero de factura (Su Doc)
+      // Buscar las lineas del pedido amarrado: Su Doc (Hiopos) -> documento en la web -> cufe -> pedido -> lineas
       const docNorm = String(v['Su Doc'] || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
       let lineas = [];
-      // buscar en pedsMap por numero o por cufe
-      for (const [cufe, p] of Object.entries(pedsMap)) {
-        const pedDoc = String(p.numero || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-        if (pedDoc === docNorm) { lineas = lineasPed[p.id] || []; break; }
-      }
+      const cufe = pedsMap ? (function() {
+        // Buscar por docToCufe (mapeo documento -> cufe cargado en orgHCargarBanco)
+        if (orgH && orgH.docToCufe && orgH.docToCufe[docNorm]) return orgH.docToCufe[docNorm];
+        return null;
+      })() : null;
+      if (cufe && pedsMap[cufe]) { lineas = lineasPed[pedsMap[cufe].id] || []; }
       if (!lineas.length) {
         // Sin lineas: una fila con los datos del documento y el articulo vacio
         wsC.addRow(['', fecha, provedor, factura, ingreso, '', '', '', '', '', '', '']);
