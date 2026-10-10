@@ -34,6 +34,7 @@ join (values
   ('Casa de Nadie', 'COCINA', 'FC.COCINA', 1), ('Casa de Nadie', 'BAR', 'FC.BAR', 2), ('Casa de Nadie', 'ELEMENTOS DE ASEO Y CAFETERIA', 'FC. ASEO', 3),
   ('Casa de Nadie', 'EMPAQUES', 'FC.EMPAQUES', 4),
   ('Sin Par', 'COCINA', 'FC.COCINA', 1), ('Sin Par', 'BAR', 'FC.BAR', 2)
+  -- (10/10/2026) Rocoto y Arrebatao NO usan centro de costo: siempre usan FCRC/FCAR. No se agregan aqui.
 ) as v(marca, centro, serie, orden) on m.nombre = v.marca
 on conflict (marca_id, serie_erp) do nothing;
 
