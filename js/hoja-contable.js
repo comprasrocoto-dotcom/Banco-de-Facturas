@@ -50,12 +50,22 @@
     const b = Math.abs(Number(base) || 0), r = Math.abs(Number(retencion) || 0);
     if (!r) return { pct: 0, opciones: [], texto: '', unica: null };
     if (!b) return { pct: null, opciones: [], texto: 'Retención sin base para calcular el %', unica: null };
-    const pct = Math.round((r / b) * 1000) / 10;
-    const ops = RETENCIONES.filter((t) => t.pct != null && Math.abs(t.pct - pct) <= 0.05);
-    const fmt = (t) => t.nombre + ' ' + String(t.pct).replace('.', ',') + '% · cuenta ' + t.cuenta;
+    // (10/10/2026) % con 2 decimales (4.275 / 150.000 = 2,85%, no "2,9%")
+    const pct = Math.round((r / b) * 10000) / 100;
+    const coma = (n) => String(n).replace('.', ',');
+    const pesos = (n) => '$ ' + Math.round(n).toLocaleString('es-CO');
+    const ops = RETENCIONES.filter((t) => t.pct != null && Math.abs(t.pct - pct) <= 0.02);
+    const fmt = (t) => t.nombre + ' ' + coma(t.pct) + '% · cuenta ' + t.cuenta;
     if (ops.length === 1) return { pct, opciones: ops, texto: fmt(ops[0]), unica: ops[0] };
-    if (ops.length > 1) return { pct, opciones: ops, texto: String(pct).replace('.', ',') + '%: elegir entre ' + ops.map(fmt).join(' / '), unica: null };
-    return { pct, opciones: [], texto: String(pct).replace('.', ',') + '% no está en la tabla de retenciones (¿ReteICA?)', unica: null };
+    if (ops.length > 1) return { pct, opciones: ops, texto: coma(pct) + '%: elegir entre ' + ops.map(fmt).join(' / '), unica: null };
+    // (10/10/2026) retencion de la tabla + ReteICA en la misma cifra (caso real: 4.275 sobre 150.000 = Compras 2,5% $ 3.750 +
+    // ReteICA 3,5 por mil $ 525). La tarifa de ReteICA depende del municipio y no esta en la tabla: solo se PROPONE (por revisar).
+    const combos = RETENCIONES.filter((t) => t.pct != null && t.pct < pct).map((t) => ({ t, ica: Math.round((pct - t.pct) * 100) / 10 }))
+      .filter((x) => x.ica >= 1 && x.ica <= 14 && Math.abs(x.ica * 2 - Math.round(x.ica * 2)) < 0.011)   // tarifas de ICA en por mil, de a medio punto
+      .sort((a, b) => b.t.pct - a.t.pct).slice(0, 3);
+    if (combos.length) return { pct, opciones: combos.map((x) => x.t), unica: null,
+      texto: coma(pct) + '%: posible ' + combos.map((x) => x.t.nombre + ' ' + coma(x.t.pct) + '% (' + pesos(b * x.t.pct / 100) + ', cuenta ' + x.t.cuenta + ') + ReteICA ' + coma(x.ica) + ' por mil (' + pesos(b * x.ica / 1000) + ')').join(' o ') + ' — confirmar' };
+    return { pct, opciones: [], texto: coma(pct) + '% no está en la tabla de retenciones (¿ReteICA?)', unica: null };
   }
 
   const norm = (s) => String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
@@ -161,6 +171,7 @@
   // -> { filas: [{ celdas (12), soporte (12), obs, ok }], revisar: [...], sinHomologar: [...], resumen }
   function armar({ documentos, informe, web, catalogo, reglas, dian }) {
     const cat = indexarCatalogo(catalogo), R = indexarReglas(reglas), W = web || {};
+    const informeCargado = !!(informe && informe.length);
     const porIngreso = new Map(); for (const l of informe || []) (porIngreso.get(l.clave) || porIngreso.set(l.clave, []).get(l.clave)).push(l);
     const cufePorIngreso = new Map(), cufesPorDoc = new Map();
     for (const f of W.facturas || []) {
@@ -236,7 +247,7 @@
           if (/^FC\s*\./i.test(ingreso) && (!centro || /VARIOS/.test(centro))) obsDoc.push(centro ? 'Centro de costos VARIOS (factura mixta): revisar' : 'Centro de costos faltante en el pedido');
           for (const p of peds) for (const l of lineasPorPedido.get(p.id) || []) lineas.push({ articulo: l.insumo, familia: famCod.get(norm(l.codigo)) || l.subfamilia || '', cantidad: l.cantidad, total: null, almacen: base.almacen, pedido: p.numero });
           if (!lineas.length) obsDoc.push('Pedido sin artículos');
-        } else obsDoc.push('Pedido no encontrado (sin pedido en la web ni informe de artículos de Hiopos para este ingreso)');
+        } else obsDoc.push(informeCargado ? 'Pedido no encontrado: no hay pedido en la web y el ingreso no está en el informe de artículos de Hiopos que se cargó' : 'Pedido no encontrado en la web: carga el informe de artículos de Hiopos ("FACTURAS DE COMPRA") para traer sus artículos');
       }
       if (!ingreso) obsDoc.push('Ingreso de Hiopos vacío');
       if (lineas.length) docsConArticulos++; else docsSinArticulos++;
