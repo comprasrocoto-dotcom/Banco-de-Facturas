@@ -21,12 +21,12 @@
   // PRIMERA linea de cada factura (la DIAN no los trae por articulo; repetirlos en cada linea duplicaria los totales al sumar)
   // (10/10/2026) el usuario pidio Base, Impuestos, Neto y Retención DESPUES de ARTICULO. Las filas se arman por NOMBRE de columna
   // (celdasDe), asi un cambio de orden solo se hace aqui.
-  const COLUMNAS = ['Familia', 'Fecha', 'Proveedor', 'Factura', 'Ingreso', 'ARTICULO', 'Base', 'Impuestos', 'Neto', 'Retención', 'REFERENCIA', 'SUBFAMILIA', 'CUENTA CONTAB', 'DEVOLUCION', 'GRUPO CUENTA', 'Observacion'];
+  const COLUMNAS = ['Familia', 'Fecha', 'Proveedor', 'Factura', 'Ingreso', 'ARTICULO', 'Base', 'Impuestos', 'Neto', 'REFERENCIA', 'SUBFAMILIA', 'CUENTA CONTAB', 'DEVOLUCION', 'GRUPO CUENTA', 'Observacion'];
   const IX = Object.fromEntries(COLUMNAS.map((c, i) => [c, i]));
-  const CAMPO = { Familia: 'familia', Fecha: 'fecha', Proveedor: 'proveedor', Factura: 'factura', Ingreso: 'ingreso', ARTICULO: 'articulo', Base: 'base', Impuestos: 'impuestos', Neto: 'neto', 'Retención': 'retencion',
+  const CAMPO = { Familia: 'familia', Fecha: 'fecha', Proveedor: 'proveedor', Factura: 'factura', Ingreso: 'ingreso', ARTICULO: 'articulo', Base: 'base', Impuestos: 'impuestos', Neto: 'neto',
     REFERENCIA: 'referencia', SUBFAMILIA: 'subfamilia', 'CUENTA CONTAB': 'cuenta', DEVOLUCION: 'devolucion', 'GRUPO CUENTA': 'grupo', Observacion: 'obs' };
-  const celdasDe = (o) => COLUMNAS.map((c) => { const v = o[CAMPO[c]]; return v === undefined ? (['Base', 'Impuestos', 'Neto', 'Retención'].includes(c) ? null : '') : v; });
-  const SOPORTE = ['Ingreso', 'Factura', 'Proveedor', 'Almacén', 'ARTICULO', 'Cantidad', 'Valor total', 'Fuente de los artículos', 'Pedido web', 'Centro de costos', 'Regla de clasificación', 'Factura DIAN', 'Valores tomados de', 'Retención (tipo y cuenta)'];
+  const celdasDe = (o) => COLUMNAS.map((c) => { const v = o[CAMPO[c]]; return v === undefined ? (['Base', 'Impuestos', 'Neto'].includes(c) ? null : '') : v; });
+  const SOPORTE = ['Ingreso', 'Factura', 'Proveedor', 'Almacén', 'ARTICULO', 'Cantidad', 'Neto del artículo', 'Fuente de los artículos', 'Pedido web', 'Centro de costos', 'Regla de clasificación', 'Factura DIAN', 'De dónde salen los valores'];
   // Tabla de retenciones de Contabilidad (hoja "Retenciones"; todas son de COMPRAS / pagos a proveedores, confirmado 10/10/2026)
   const RETENCIONES = [
     { nombre: 'Compras', pct: 2.5, cuenta: '236540030000', devolucion: '236540030000', tipo: 'Compras' },
@@ -191,23 +191,34 @@
     const toks = (s) => norm(s).replace(/[^A-Z0-9 ]/g, ' ').split(' ').filter((t) => t && !vacias.has(t));
     const parecido = (a, b) => { const ta = new Set(toks(a)), tb = toks(b); return ta.size && tb.length ? tb.filter((t) => ta.has(t)).length / Math.max(ta.size, tb.length) : 0; };
     const facturaDian = (suDoc, proveedor) => { let l = dianPorDoc.get(alnum(suDoc)) || []; if (l.length > 1) l = l.filter((d) => parecido(d.emisor, proveedor) >= 0.5); return l.length === 1 ? l[0] : null; };
-    // Base, Impuestos, Neto y Retencion del documento: de la DIAN; si la DIAN no trae retencion (casi siempre: la aplica la empresa
-    // al pagar), la de Hiopos. Si la factura no esta en la DIAN, los de Hiopos. Notas credito (negativas en Hiopos): con su signo.
-    function valores(v, fd) {
-      const signo = (Number(v.Neto) || 0) < 0 ? -1 : 1, r2 = (n) => Math.round(n * 100) / 100;
-      const retHiopos = Math.abs(Number(v.Retenciones) || 0);
-      if (fd) {
-        const ret = fd.retenciones || retHiopos;
-        return { base: signo * fd.base, impuestos: signo * fd.impuestos, retencion: ret ? signo * ret : 0, neto: signo * r2(fd.total - ret),
-          fuente: 'DIAN' + (!fd.retenciones && retHiopos ? ' (la retención, de Hiopos: la factura no la trae)' : '') };
-      }
-      const b = Number(v.Base), i = Number(v.Impuestos), n = Number(v.Neto);
-      if (![b, i, n].some((x) => isFinite(x) && x)) return { base: null, impuestos: null, retencion: null, neto: null, fuente: '' };
-      return { base: b || 0, impuestos: i || 0, retencion: retHiopos ? signo * retHiopos : 0, neto: n || 0, fuente: 'Hiopos (la factura no está en el reporte de la DIAN)' };
+    // (10/10/2026) VALORES POR ARTICULO (pedido del usuario: "a cada articulo"; la retencion se deja a un lado).
+    //  - Base de cada articulo = cantidad x precio de SU linea en la factura (precio_historial, que el agente guarda al ingresar:
+    //    precio ANTES de impuestos; verificado: la suma da la base de la factura). Se une al pedido por el codigo del articulo.
+    //  - Impuestos de cada articulo: la factura solo trae el total de impuestos. Si la factura tiene UNA sola tarifa (0%, 19%, 5% u
+    //    8%: impuestos / base), impuesto = base x tarifa. Si mezcla tarifas no se adivina cual lleva IVA: queda pendiente.
+    //  - Con el informe de articulos de Hiopos (trae el total CON impuesto de cada linea): base = total / (1 + tarifa unica).
+    //  - Neto = base + impuestos. Totales de la factura: los de la DIAN; si no esta en la DIAN, los de Hiopos.
+    const preciosPorCufe = new Map(); for (const p of W.precios || []) if (p.factura_cufe) (preciosPorCufe.get(p.factura_cufe) || preciosPorCufe.set(p.factura_cufe, []).get(p.factura_cufe)).push(p);
+    const TARIFAS = [0.19, 0.05, 0.08];
+    const r0 = (n) => Math.round(n);
+    function totalesFactura(v, fd) {
+      const signo = (Number(v.Neto) || 0) < 0 ? -1 : 1;
+      if (fd) return { base: Math.abs(fd.base), impuestos: Math.abs(fd.impuestos), signo, fuente: 'DIAN' };
+      const b = Math.abs(Number(v.Base) || 0), i = Math.abs(Number(v.Impuestos) || 0);
+      return b || i ? { base: b, impuestos: i, signo, fuente: 'Hiopos' } : null;
+    }
+    // tarifa unica de la factura (0 si no tiene impuestos), o null si mezcla tarifas
+    function tarifaUnica(t) {
+      if (!t) return null;
+      if (!t.impuestos) return 0;
+      if (!t.base) return null;
+      // tiene que calzar al peso (redondeos: hasta $2 o 0,05% de la base), no "mas o menos": 4,75% NO es 5% (es IVA mezclado)
+      const s = TARIFAS.find((x) => Math.abs(t.impuestos - t.base * x) <= Math.max(2, t.base * 0.0005));
+      return s == null ? null : s;
     }
 
     const filas = [], revisar = [], sinHomologar = [];
-    let docsConArticulos = 0, docsSinArticulos = 0;
+    let docsConArticulos = 0, docsSinArticulos = 0, lineasConValor = 0;
     // (10/10/2026) SOLO ROCOTO Y ARREBATAO (pedido del usuario): 123 Wok, Casa de Nadie y Sin Par siguen como estaban (no entran a
     // la hoja contable). Se reconocen por su serie de centro de costo (FC.COCINA, FC.BAR...) o por su almacen.
     const docsAlcance = (documentos || []).filter((x) => esRocotoArrebatao(x.v));
@@ -218,13 +229,13 @@
       const fd = dianDocs ? facturaDian(suDoc, base.proveedor) : null;
       const enDian = dianDocs ? !!fd : null;
       if (dianDocs && !enDian) obsDoc.push('Factura de la DIAN no encontrada');
-      const val = valores(v, fd), ret = tipoRetencion(val.base, val.retencion);
-      const cols4 = { base: val.base, impuestos: val.impuestos, neto: val.neto, retencion: val.retencion };
-      if (ret.texto && !ret.unica) obsDoc.push('Retención ' + ret.texto);
+      const tot = totalesFactura(v, fd), tarifa = tarifaUnica(tot), signo = tot ? tot.signo : 1;
+      // la factura de la web de este ingreso (por el N° de ingreso; si no, por el numero de factura si es UNA sola)
+      let cufe = clave ? cufePorIngreso.get(clave) : null, variasWeb = false;
+      if (!cufe) { const s = cufesPorDoc.get(alnum(suDoc)); if (s && s.size === 1) cufe = [...s][0]; else if (s && s.size > 1) variasWeb = true; }
       // 1) informe de articulos de Hiopos (lo que realmente entro al ERP en ese ingreso)
       let lineas = [], fuente = '', pedidoTxt = '', centro = '';
-      // 123 wok y Sin Par usan las MISMAS series (FC.BAR / 58 existe en las dos empresas): ademas del ingreso tiene que coincidir
-      // el almacen; si el documento no trae almacen y hay lineas de varios almacenes, no se elige (queda por revisar)
+      // el mismo numero de ingreso en dos almacenes: tiene que coincidir el almacen (si no, no se elige)
       let delInforme = clave ? (porIngreso.get(clave) || []) : [];
       const almacenes = [...new Set(delInforme.map((l) => norm(l.almacen)))];
       if (almacenes.length > 1 || (almacenes.length === 1 && base.almacen && almacenes[0] && almacenes[0] !== norm(base.almacen))) {
@@ -235,54 +246,83 @@
       if (delInforme.length) {
         fuente = 'Informe de artículos de Hiopos';
         centro = [...new Set(delInforme.map((l) => l.centroCostos).filter(Boolean))].join(', ');
-        lineas = delInforme.map((l) => ({ articulo: l.articulo, familia: l.familia, cantidad: l.cantidad, total: l.total, almacen: l.almacen || base.almacen, devolucion: /ABONO|DEVOL/i.test(l.tipoDoc) }));
-        const suma = Math.round(delInforme.reduce((s, l) => s + (Number(l.total) || 0), 0));
-        const esperado = Math.round(Math.abs(Number(v.Base) || 0) + Math.abs(Number(v.Impuestos) || 0));
-        if (esperado && Math.abs(Math.abs(suma) - esperado) > 1) obsDoc.push('Diferencia: los artículos suman $ ' + Math.abs(suma).toLocaleString('es-CO') + ' y el ingreso (base + impuestos) $ ' + esperado.toLocaleString('es-CO'));
+        lineas = delInforme.map((l) => {
+          const neto = Math.abs(Number(l.total));   // el signo (nota credito) se pone al final, igual para todas las fuentes
+          const b = isFinite(neto) && tarifa != null ? r0(neto / (1 + tarifa)) : null;
+          return { articulo: l.articulo, familia: l.familia, cantidad: l.cantidad, almacen: l.almacen || base.almacen, devolucion: /ABONO|DEVOL/i.test(l.tipoDoc),
+            base: b, impuestos: b != null ? r0(neto) - b : null, neto: isFinite(neto) ? r0(neto) : null, fuenteVal: 'informe de Hiopos (total con impuesto de la línea)' };
+        });
       } else {
-        // 2) pedido de la web amarrado a la factura: por el N° de ingreso; si no, por el numero de factura (solo si es UNA factura)
-        let cufe = clave ? cufePorIngreso.get(clave) : null;
-        if (!cufe) { const s = cufesPorDoc.get(alnum(suDoc)); if (s && s.size === 1) cufe = [...s][0]; else if (s && s.size > 1) obsDoc.push('Varias facturas de la web con ese número: no se eligió ninguna'); }
+        // 2) pedido de la web amarrado a la factura
+        if (variasWeb) obsDoc.push('Varias facturas de la web con ese número: no se eligió ninguna');
         const peds = cufe ? (pedidosPorCufe.get(cufe) || []) : [];
         if (peds.length) {
           fuente = 'Pedido de la web';
           pedidoTxt = peds.map((p) => p.numero).join(', ');
           centro = [...new Set(peds.map((p) => p.centro_costo).filter(Boolean))].join(', ');
           if (peds.length > 1) obsDoc.push('Factura con ' + peds.length + ' pedidos amarrados (' + pedidoTxt + ')');
-          // marcas con centro de costo obligatorio (serie FC.COCINA, FC.BAR...): el pedido tiene que traerlo
-          if (/^FC\s*\./i.test(ingreso) && (!centro || /VARIOS/.test(centro))) obsDoc.push(centro ? 'Centro de costos VARIOS (factura mixta): revisar' : 'Centro de costos faltante en el pedido');
-          for (const p of peds) for (const l of lineasPorPedido.get(p.id) || []) lineas.push({ articulo: l.insumo, familia: famCod.get(norm(l.codigo)) || l.subfamilia || '', cantidad: l.cantidad, total: null, almacen: base.almacen, pedido: p.numero });
+          // lineas de la factura (precio antes de impuestos) por codigo de articulo
+          const precs = preciosPorCufe.get(cufe) || [], porCodigo = new Map(), usadas = new Set();
+          precs.forEach((p, k) => { const c = norm(p.codigo); if (c) (porCodigo.get(c) || porCodigo.set(c, []).get(c)).push(k); });
+          for (const p of peds) for (const l of lineasPorPedido.get(p.id) || []) {
+            const ks = (porCodigo.get(norm(l.codigo)) || []).filter((k) => !usadas.has(k));
+            ks.forEach((k) => usadas.add(k));
+            const b = ks.length ? r0(ks.reduce((s, k) => s + (Number(precs[k].cantidad) || 0) * (Number(precs[k].precio) || 0), 0)) : null;
+            lineas.push({ articulo: l.insumo, familia: famCod.get(norm(l.codigo)) || l.subfamilia || '', cantidad: ks.length ? ks.reduce((s, k) => s + (Number(precs[k].cantidad) || 0), 0) : l.cantidad,
+              almacen: base.almacen, pedido: p.numero, base: b, fuenteVal: ks.length ? 'línea de la factura (precio antes de impuestos)' : '',
+              faltaEnFactura: precs.length > 0 && !ks.length });
+          }
+          // lineas de la factura que no estan en el pedido: van como filas aparte (asi la suma cuadra con la factura)
+          precs.forEach((p, k) => {
+            if (usadas.has(k)) return;
+            lineas.push({ articulo: p.articulo_texto || '(sin descripción)', familia: famCod.get(norm(p.codigo)) || '', cantidad: Number(p.cantidad) || null, almacen: base.almacen,
+              pedido: '', base: r0((Number(p.cantidad) || 0) * (Number(p.precio) || 0)), fuenteVal: 'línea de la factura (precio antes de impuestos)', extraFactura: true });
+          });
           if (!lineas.length) obsDoc.push('Pedido sin artículos');
+          if (lineas.length && !precs.length) obsDoc.push('La factura no tiene el detalle de precios en la web: valores por artículo pendientes (carga el informe de artículos de Hiopos)');
+          lineas.forEach((l) => { if (l.base != null) { l.impuestos = tarifa != null ? r0(l.base * tarifa) : null; l.neto = l.impuestos != null ? l.base + l.impuestos : null; } });
         } else obsDoc.push(informeCargado ? 'Pedido no encontrado: no hay pedido en la web y el ingreso no está en el informe de artículos de Hiopos que se cargó' : 'Pedido no encontrado en la web: carga el informe de artículos de Hiopos ("FACTURAS DE COMPRA") para traer sus artículos');
       }
       if (!ingreso) obsDoc.push('Ingreso de Hiopos vacío');
+      // cuadre con la factura (sin repartir diferencias: solo se avisa)
+      const conValor = lineas.filter((l) => l.base != null);
+      if (tot && conValor.length) {
+        const sb = conValor.reduce((s, l) => s + l.base, 0);
+        if (Math.abs(sb - tot.base) > 1 && conValor.length === lineas.length) obsDoc.push('Los artículos suman base $ ' + sb.toLocaleString('es-CO') + ' y la factura $ ' + r0(tot.base).toLocaleString('es-CO') + ' (' + tot.fuente + ')');
+        if (tarifa == null && tot.impuestos) obsDoc.push('La factura mezcla tarifas de impuesto (impuestos $ ' + r0(tot.impuestos).toLocaleString('es-CO') + '): impuestos por artículo pendientes');
+      }
       if (lineas.length) docsConArticulos++; else docsSinArticulos++;
       const enDianTxt = dianDocs ? (enDian ? 'Sí (sin detalle de artículos)' : 'No encontrada') : 'No se cargó el reporte';
       if (!lineas.length) {
         const obs = obsDoc.join('; ');
-        filas.push({ ok: false, obs, celdas: celdasDe(Object.assign({ fecha: base.fecha, proveedor: base.proveedor, factura: base.factura, ingreso, obs }, cols4)),
-          soporte: [ingreso, base.factura, base.proveedor, base.almacen, '', null, null, fuente || '—', pedidoTxt, centro, '', enDianTxt, val.fuente, ret.texto] });
+        filas.push({ ok: false, obs, celdas: celdasDe({ fecha: base.fecha, proveedor: base.proveedor, factura: base.factura, ingreso, obs }),
+          soporte: [ingreso, base.factura, base.proveedor, base.almacen, '', null, null, fuente || '—', pedidoTxt, centro, '', enDianTxt, ''] });
         revisar.push({ fila: x.fila, ingreso, factura: base.factura, proveedor: base.proveedor, articulo: '', motivo: obs });
         continue;
       }
       lineas.forEach((l, i) => {
         const h = homologar(l.articulo, l.familia, l.almacen, cat, R);
-        const obs = [...(i === 0 ? obsDoc : obsDoc.filter((o) => !/^(Diferencia|Retención)/.test(o)))];
+        const obs = [...(i === 0 ? obsDoc : obsDoc.filter((o) => !/^(Los artículos suman|La factura mezcla)/.test(o)))];
         if (!h.ok && h.obs) obs.push(h.obs);
         if (l.devolucion) obs.push('Devolución (abono factura compra)');
+        if (l.extraFactura) obs.push('Línea de la factura que no está en el pedido');
+        if (l.faltaEnFactura) obs.push('No está en la factura (no llegó o se facturó con otro código)');
         const c = h.c || {};
         const familia = c.familia || '';
         if (!h.ok) sinHomologar.push({ articulo: l.articulo, familia: l.familia, ingreso });
+        if (l.base != null) lineasConValor++;
+        const sg = (n) => (n == null ? null : (n ? signo * n : 0));
         filas.push({ ok: h.ok && !obsDoc.length, obs: obs.join('; '),
-          celdas: celdasDe(Object.assign({ familia, fecha: base.fecha, proveedor: base.proveedor, factura: base.factura, ingreso, articulo: l.articulo,
-            referencia: c.referencia || '', subfamilia: c.subfamilia || '', cuenta: c.cuenta || '', devolucion: c.devolucion || '', grupo: c.grupo || '', obs: obs.join('; ') },
-            i === 0 ? cols4 : {})),   // valores de la factura solo en su primera linea
-          soporte: [ingreso, base.factura, base.proveedor, l.almacen, l.articulo, l.cantidad, l.total, fuente, l.pedido || pedidoTxt, centro, h.regla || '—', enDianTxt, i === 0 ? val.fuente : '', i === 0 ? ret.texto : ''] });
+          celdas: celdasDe({ familia, fecha: base.fecha, proveedor: base.proveedor, factura: base.factura, ingreso, articulo: l.articulo,
+            base: sg(l.base), impuestos: sg(l.impuestos), neto: sg(l.neto),
+            referencia: c.referencia || '', subfamilia: c.subfamilia || '', cuenta: c.cuenta || '', devolucion: c.devolucion || '', grupo: c.grupo || '', obs: obs.join('; ') }),
+          soporte: [ingreso, base.factura, base.proveedor, l.almacen, l.articulo, l.cantidad, sg(l.neto), fuente, l.pedido || pedidoTxt, centro, h.regla || '—', enDianTxt,
+            l.base != null ? l.fuenteVal + (l.impuestos != null ? '; impuesto ' + (tarifa ? Math.round(tarifa * 100) + '%' : '0%') + ' (tarifa única de la factura, ' + (tot ? tot.fuente : '') + ')' : '') : ''] });
         if (obs.length) revisar.push({ fila: x.fila, ingreso, factura: base.factura, proveedor: base.proveedor, articulo: l.articulo, motivo: obs.join('; ') });
       });
     }
     const conCuenta = filas.filter((f) => f.celdas[IX['CUENTA CONTAB']]).length;
-    return { filas, revisar, sinHomologar, resumen: { documentos: docsAlcance.length, otrasMarcas: (documentos || []).length - docsAlcance.length, docsConArticulos, docsSinArticulos, lineas: filas.length, conCuenta, sinCuenta: filas.length - conCuenta, listas: filas.filter((f) => f.ok && !f.obs).length } };
+    return { filas, revisar, sinHomologar, resumen: { lineasConValor, documentos: docsAlcance.length, otrasMarcas: (documentos || []).length - docsAlcance.length, docsConArticulos, docsSinArticulos, lineas: filas.length, conCuenta, sinCuenta: filas.length - conCuenta, listas: filas.filter((f) => f.ok && !f.obs).length } };
   }
 
   // ---- hojas del Excel (ExcelJS) ----
@@ -293,20 +333,20 @@
     const enc = ws.getRow(1); enc.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     enc.eachCell((cel) => { cel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: color || 'FF1E3A8A' } }; });
     for (const f of filas) ws.addRow(f);
-    titulos.forEach((t, i) => { const col = ws.getColumn(i + 1); col.width = anchos[i] || 14; if (/^Fecha$/.test(t)) col.numFmt = 'dd/mm/yyyy'; if (/^(Valor total|Cantidad)$/.test(t)) col.numFmt = '#,##0.##'; });
+    titulos.forEach((t, i) => { const col = ws.getColumn(i + 1); col.width = anchos[i] || 14; if (/^Fecha$/.test(t)) col.numFmt = 'dd/mm/yyyy'; if (/^(Valor total|Cantidad|Neto del artículo)$/.test(t)) col.numFmt = '#,##0.##'; });
     ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: titulos.length } };
     return ws;
   }
   // agrega "Contabilidad" (la plantilla, 12 columnas), "Soporte contable" (trazabilidad) y "Por revisar contable"
   function agregarHojas(wb, r) {
     const conFecha = (c) => c.map((x, i) => (i === IX.Fecha ? fechaExcel(x) : x));
-    const ANCHO = { Familia: 22, Fecha: 12, Proveedor: 36, Factura: 16, Ingreso: 18, ARTICULO: 42, Base: 14, Impuestos: 13, Neto: 14, 'Retención': 13, REFERENCIA: 13, SUBFAMILIA: 22, 'CUENTA CONTAB': 14, DEVOLUCION: 14, 'GRUPO CUENTA': 26, Observacion: 50 };
+    const ANCHO = { Familia: 22, Fecha: 12, Proveedor: 36, Factura: 16, Ingreso: 18, ARTICULO: 42, Base: 14, Impuestos: 13, Neto: 14, REFERENCIA: 13, SUBFAMILIA: 22, 'CUENTA CONTAB': 14, DEVOLUCION: 14, 'GRUPO CUENTA': 26, Observacion: 50 };
     const ws = hoja(wb, 'Contabilidad', COLUMNAS, r.filas.map((f) => conFecha(f.celdas)), COLUMNAS.map((c) => ANCHO[c]), 'FF1E3A8A');
     // texto en las celdas de codigos (no numeros): las cuentas y referencias se conservan tal cual
     ['REFERENCIA', 'CUENTA CONTAB', 'DEVOLUCION', 'Factura', 'Ingreso'].forEach((t) => { ws.getColumn(COLUMNAS.indexOf(t) + 1).numFmt = '@'; });
-    ['Base', 'Impuestos', 'Neto', 'Retención'].forEach((t) => { ws.getColumn(COLUMNAS.indexOf(t) + 1).numFmt = '#,##0'; });
+    ['Base', 'Impuestos', 'Neto'].forEach((t) => { ws.getColumn(COLUMNAS.indexOf(t) + 1).numFmt = '#,##0'; });
     r.filas.forEach((f, i) => { if (f.obs) ws.getRow(i + 2).getCell(IX.Observacion + 1).font = { color: { argb: 'FFB91C1C' } }; });
-    hoja(wb, 'Soporte contable', SOPORTE, r.filas.map((f) => f.soporte), [18, 16, 34, 18, 40, 10, 14, 28, 16, 18, 44, 24, 30, 60], 'FF0F766E');
+    hoja(wb, 'Soporte contable', SOPORTE, r.filas.map((f) => f.soporte), [18, 16, 34, 18, 40, 10, 14, 28, 16, 18, 44, 24, 70], 'FF0F766E');
     hoja(wb, 'Por revisar contable', ['Fila del archivo', 'Ingreso', 'Factura', 'Proveedor', 'ARTICULO', 'Motivo'],
       r.revisar.map((x) => [x.fila, x.ingreso, x.factura, x.proveedor, x.articulo, x.motivo]), [10, 18, 16, 34, 40, 70], 'FFB45309');
   }

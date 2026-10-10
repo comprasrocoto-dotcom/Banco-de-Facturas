@@ -23,16 +23,17 @@ async function orgHCargarContable(forzar) {
   if (orgC.cargando || (orgC.datos && !forzar)) return;
   orgC.cargando = true; orgC.error = '';
   try {
-    const [catalogo, reglas, facturas, pedidos, articulos] = await Promise.all([
+    const [catalogo, reglas, facturas, pedidos, articulos, precios] = await Promise.all([
       orgCTodo('cuentas_contables', 'id,clasificacion,articulo,familia,subfamilia,grupo_cuenta,referencia,cuenta_contable,cuenta_devolucion'),
       orgCTodo('contable_regla_familia', '*'),
       orgCTodo('facturas', 'cufe,num_ingreso,documento,prefijo,folio'),
       orgCTodo('pedidos', 'id,numero,factura_cufe,centro_costo', (q) => q.not('factura_cufe', 'is', null)),
       orgCTodo('articulos', 'codigo_barras,subfamilia'),
+      orgCTodo('precio_historial', 'factura_cufe,codigo,articulo_texto,cantidad,precio', (q) => q.not('factura_cufe', 'is', null)),   // (10/10/2026) lineas de cada factura: valores por articulo
     ]);
     const lineas = [], ids = pedidos.map((p) => p.id);
     for (let i = 0; i < ids.length; i += 150) lineas.push(...await orgCTodo('pedido_lineas', 'pedido_id,codigo,insumo,cantidad,unidad,subfamilia', (q) => q.in('pedido_id', ids.slice(i, i + 150))));
-    orgC.datos = { catalogo, reglas, web: { facturas, pedidos, lineas, familiaPorCodigo: new Map(articulos.map((a) => [HojaContable.norm(a.codigo_barras), a.subfamilia])) } };
+    orgC.datos = { catalogo, reglas, web: { facturas, pedidos, lineas, precios, familiaPorCodigo: new Map(articulos.map((a) => [HojaContable.norm(a.codigo_barras), a.subfamilia])) } };
   } catch (e) { orgC.error = 'No pude cargar los datos contables: ' + e.message; }
   orgC.cargando = false;
   orgHPintar();
@@ -104,7 +105,7 @@ const orgCHayRocotoArrebatao = () => !!(orgH.lectura && orgH.lectura.filas.some(
 function orgHContablePanel(x) {
   if (!orgCHayRocotoArrebatao()) return '';
   let h = `<div class="card" style="margin:8px 0;border-color:#1e3a8a"><div style="font-weight:700;color:#1e3a8a">📒 Hoja contable · Rocoto y Arrebatao</div>
-    <div class="mut" style="margin:4px 0 8px">Una fila por artículo de cada ingreso de <b>Rocoto y Arrebatao</b> de tu archivo, con base, impuestos, neto, retención, referencia, subfamilia, cuenta contable, devolución y grupo de cuenta. Los artículos salen del <b>pedido de la web</b>; los ingresos sin pedido en la web los trae el <b>informe de artículos</b> de Hiopos ("FACTURAS DE COMPRA"). 123 Wok, Casa de Nadie y Sin Par no entran en esta hoja.</div>
+    <div class="mut" style="margin:4px 0 8px">Una fila por artículo de cada ingreso de <b>Rocoto y Arrebatao</b> de tu archivo, con su base, impuestos y neto, referencia, subfamilia, cuenta contable, devolución y grupo de cuenta. Los artículos salen del <b>pedido de la web</b>; los ingresos sin pedido en la web los trae el <b>informe de artículos</b> de Hiopos ("FACTURAS DE COMPRA"). 123 Wok, Casa de Nadie y Sin Par no entran en esta hoja.</div>
     <label class="s" style="display:inline-block;cursor:pointer;padding:6px 12px;border-radius:8px;background:#1e3a8a;color:#fff;font-weight:700">📦 Cargar informe de artículos de Hiopos<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="orgHInforme(this)"></label>
     <span class="mut" style="margin-left:8px">${orgC.informeNombre ? escAg(orgC.informeNombre) + (orgC.informe ? ' · ' + orgC.informe.length + ' líneas' : '') : 'opcional'}</span>
     ${orgC.informeError ? `<div class="err" style="margin-top:6px">${escAg(orgC.informeError)}</div>` : ''}
@@ -130,8 +131,8 @@ function orgHContableVista(x) {
   if (!x.contable) return '<div class="vacio">⏳ Cargando la hoja contable...</div>';
   const filas = x.contable.filas;
   return `<div style="font-weight:700;margin:6px 0">Vista previa · Contabilidad (${filas.length} líneas)</div><div style="overflow:auto;max-height:56vh"><table><thead><tr>${HojaContable.COLUMNAS.map((c) => `<th>${c}</th>`).join('')}</tr></thead><tbody>` +
-    filas.slice(0, 400).map((f) => `<tr${f.obs ? ' style="background:#fff7ed"' : ''}>${f.celdas.map((c, i) => ['Base', 'Impuestos', 'Neto', 'Retención'].includes(HojaContable.COLUMNAS[i])
-      ? `<td class="num">${c == null ? '' : money(c)}</td>`   // Base, Impuestos, Neto, Retención
+    filas.slice(0, 400).map((f) => `<tr${f.obs ? ' style="background:#fff7ed"' : ''}>${f.celdas.map((c, i) => ['Base', 'Impuestos', 'Neto'].includes(HojaContable.COLUMNAS[i])
+      ? `<td class="num">${c == null ? '' : money(c)}</td>`   // Base, Impuestos, Neto (de cada artículo)
       : `<td${i === HojaContable.IX.Observacion ? ' style="color:#b91c1c;font-size:12px"' : ''}>${escAg(i === HojaContable.IX.Fecha && c ? String(c).split('-').reverse().join('/') : (c == null ? '' : c))}</td>`).join('')}</tr>`).join('') +
     `</tbody></table></div>${filas.length > 400 ? `<div class="mut">… y ${filas.length - 400} más (todas van en el Excel)</div>` : ''}`;
 }
