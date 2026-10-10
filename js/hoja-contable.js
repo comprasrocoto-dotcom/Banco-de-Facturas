@@ -17,8 +17,40 @@
   else root.HojaContable = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
-  const COLUMNAS = ['Familia', 'Fecha', 'Proveedor', 'Factura', 'Ingreso', 'ARTICULO', 'REFERENCIA', 'SUBFAMILIA', 'CUENTA CONTAB', 'DEVOLUCION', 'GRUPO CUENTA', 'Observacion'];
-  const SOPORTE = ['Ingreso', 'Factura', 'Proveedor', 'Almacén', 'ARTICULO', 'Cantidad', 'Valor total', 'Fuente de los artículos', 'Pedido web', 'Centro de costos', 'Regla de clasificación', 'Factura DIAN'];
+  // (10/10/2026) + Base, Impuestos, Neto y Retención al final (pedido del usuario): valores de la FACTURA (reporte de la DIAN), en la
+  // PRIMERA linea de cada factura (la DIAN no los trae por articulo; repetirlos en cada linea duplicaria los totales al sumar)
+  const COLUMNAS = ['Familia', 'Fecha', 'Proveedor', 'Factura', 'Ingreso', 'ARTICULO', 'REFERENCIA', 'SUBFAMILIA', 'CUENTA CONTAB', 'DEVOLUCION', 'GRUPO CUENTA', 'Observacion', 'Base', 'Impuestos', 'Neto', 'Retención'];
+  const SOPORTE = ['Ingreso', 'Factura', 'Proveedor', 'Almacén', 'ARTICULO', 'Cantidad', 'Valor total', 'Fuente de los artículos', 'Pedido web', 'Centro de costos', 'Regla de clasificación', 'Factura DIAN', 'Valores tomados de', 'Retención (tipo y cuenta)'];
+  // Tabla de retenciones de Contabilidad (hoja "Retenciones"; todas son de COMPRAS / pagos a proveedores, confirmado 10/10/2026)
+  const RETENCIONES = [
+    { nombre: 'Compras', pct: 2.5, cuenta: '236540030000', devolucion: '236540030000', tipo: 'Compras' },
+    { nombre: 'Compras', pct: 3.5, cuenta: '236540010000', devolucion: '236540010000', tipo: 'Compras' },
+    { nombre: 'Servicios Generales', pct: 4, cuenta: '236525020000', devolucion: '236525020000', tipo: 'Servicios' },
+    { nombre: 'Servicios restaurante/catering', pct: 3.5, cuenta: '236525040000', devolucion: '236525040000', tipo: 'Servicios' },
+    { nombre: 'Servicios Aseo y Vigilancia', pct: 2, cuenta: '236525050000', devolucion: '236525050000', tipo: 'Servicios' },
+    { nombre: 'Servicios R.S', pct: 6, cuenta: '236525030000', devolucion: '236525030000', tipo: 'Servicios' },
+    { nombre: 'Honorarios Persona Natural', pct: 11, cuenta: '236515010000', devolucion: '236515010000', tipo: 'Servicios' },
+    { nombre: 'Honorarios persona Juridica', pct: 10, cuenta: '236515020000', devolucion: '236515020000', tipo: 'Servicios' },
+    { nombre: 'Comisiones Plataformas (RAPPI UBER)', pct: 10, cuenta: '236520020000', devolucion: '236520020000', tipo: 'Comisiones' },
+    { nombre: 'Comisiones Plataformas P.J', pct: 11, cuenta: '236520010000', devolucion: '236520010000', tipo: 'Comisiones' },
+    { nombre: 'Arrendamiento local comercial', pct: 3.5, cuenta: '236530010000', devolucion: '236530010000', tipo: 'Arrendamiento' },
+    { nombre: 'IVA retenido R.C', pct: 15, cuenta: '236705010000', devolucion: '236705010000', tipo: 'IVA' },
+    { nombre: 'Reteica servicios', pct: null, cuenta: '236805010000', devolucion: '236805010000', tipo: 'Depende del municipio' },
+    { nombre: 'Reteica Industria y Comercio', pct: null, cuenta: '236805020000', devolucion: '236805020000', tipo: '' },
+  ];
+  // retencion / base -> porcentaje y su(s) linea(s) de la tabla. Si el % calza con varias (ej. 3,5%: Compras, Servicios
+  // restaurante, Arrendamiento) NO se elige: se dicen las opciones. -> { pct, opciones, texto, unica }
+  function tipoRetencion(base, retencion) {
+    const b = Math.abs(Number(base) || 0), r = Math.abs(Number(retencion) || 0);
+    if (!r) return { pct: 0, opciones: [], texto: '', unica: null };
+    if (!b) return { pct: null, opciones: [], texto: 'Retención sin base para calcular el %', unica: null };
+    const pct = Math.round((r / b) * 1000) / 10;
+    const ops = RETENCIONES.filter((t) => t.pct != null && Math.abs(t.pct - pct) <= 0.05);
+    const fmt = (t) => t.nombre + ' ' + String(t.pct).replace('.', ',') + '% · cuenta ' + t.cuenta;
+    if (ops.length === 1) return { pct, opciones: ops, texto: fmt(ops[0]), unica: ops[0] };
+    if (ops.length > 1) return { pct, opciones: ops, texto: String(pct).replace('.', ',') + '%: elegir entre ' + ops.map(fmt).join(' / '), unica: null };
+    return { pct, opciones: [], texto: String(pct).replace('.', ',') + '% no está en la tabla de retenciones (¿ReteICA?)', unica: null };
+  }
 
   const norm = (s) => String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
   const alnum = (s) => norm(s).replace(/[^A-Z0-9]/g, '');
@@ -133,6 +165,26 @@
     const lineasPorPedido = new Map(); for (const l of W.lineas || []) (lineasPorPedido.get(l.pedido_id) || lineasPorPedido.set(l.pedido_id, []).get(l.pedido_id)).push(l);
     const famCod = W.familiaPorCodigo || new Map();
     const dianDocs = dian ? new Set(dian.map((d) => d.doc)) : null;
+    const dianPorDoc = new Map(); for (const d of dian || []) (dianPorDoc.get(d.doc) || dianPorDoc.set(d.doc, []).get(d.doc)).push(d);
+    // la factura de la DIAN de este documento: por numero; si hay varias con ese numero, la del proveedor de nombre parecido
+    const vacias = new Set(['S', 'A', 'SAS', 'SA', 'LTDA', 'Y', 'CIA', 'DE', 'DEL', 'LA', 'EL', 'LOS', 'LAS', 'E', 'BIC', 'EN', 'C']);
+    const toks = (s) => norm(s).replace(/[^A-Z0-9 ]/g, ' ').split(' ').filter((t) => t && !vacias.has(t));
+    const parecido = (a, b) => { const ta = new Set(toks(a)), tb = toks(b); return ta.size && tb.length ? tb.filter((t) => ta.has(t)).length / Math.max(ta.size, tb.length) : 0; };
+    const facturaDian = (suDoc, proveedor) => { let l = dianPorDoc.get(alnum(suDoc)) || []; if (l.length > 1) l = l.filter((d) => parecido(d.emisor, proveedor) >= 0.5); return l.length === 1 ? l[0] : null; };
+    // Base, Impuestos, Neto y Retencion del documento: de la DIAN; si la DIAN no trae retencion (casi siempre: la aplica la empresa
+    // al pagar), la de Hiopos. Si la factura no esta en la DIAN, los de Hiopos. Notas credito (negativas en Hiopos): con su signo.
+    function valores(v, fd) {
+      const signo = (Number(v.Neto) || 0) < 0 ? -1 : 1, r2 = (n) => Math.round(n * 100) / 100;
+      const retHiopos = Math.abs(Number(v.Retenciones) || 0);
+      if (fd) {
+        const ret = fd.retenciones || retHiopos;
+        return { base: signo * fd.base, impuestos: signo * fd.impuestos, retencion: ret ? signo * ret : 0, neto: signo * r2(fd.total - ret),
+          fuente: 'DIAN' + (!fd.retenciones && retHiopos ? ' (la retención, de Hiopos: la factura no la trae)' : '') };
+      }
+      const b = Number(v.Base), i = Number(v.Impuestos), n = Number(v.Neto);
+      if (![b, i, n].some((x) => isFinite(x) && x)) return { base: null, impuestos: null, retencion: null, neto: null, fuente: '' };
+      return { base: b || 0, impuestos: i || 0, retencion: retHiopos ? signo * retHiopos : 0, neto: n || 0, fuente: 'Hiopos (la factura no está en el reporte de la DIAN)' };
+    }
 
     const filas = [], revisar = [], sinHomologar = [];
     let docsConArticulos = 0, docsSinArticulos = 0;
@@ -140,8 +192,12 @@
       const v = x.v, ingreso = v.INGRESO || '', clave = claveIngreso(ingreso), suDoc = String(v['Su Doc'] || '');
       const base = { fecha: v['Fecha Doc'] || null, proveedor: v.Contacto || '', factura: suDoc, ingreso, almacen: v['Almacén'] || '' };
       const obsDoc = [];
-      const enDian = dianDocs ? dianDocs.has(alnum(suDoc)) : null;
+      const fd = dianDocs ? facturaDian(suDoc, base.proveedor) : null;
+      const enDian = dianDocs ? !!fd : null;
       if (dianDocs && !enDian) obsDoc.push('Factura de la DIAN no encontrada');
+      const val = valores(v, fd), ret = tipoRetencion(val.base, val.retencion);
+      const cols4 = [val.base, val.impuestos, val.neto, val.retencion];
+      if (ret.texto && !ret.unica) obsDoc.push('Retención ' + ret.texto);
       // 1) informe de articulos de Hiopos (lo que realmente entro al ERP en ese ingreso)
       let lineas = [], fuente = '', pedidoTxt = '', centro = '';
       // 123 wok y Sin Par usan las MISMAS series (FC.BAR / 58 existe en las dos empresas): ademas del ingreso tiene que coincidir
@@ -181,22 +237,23 @@
       const enDianTxt = dianDocs ? (enDian ? 'Sí (sin detalle de artículos)' : 'No encontrada') : 'No se cargó el reporte';
       if (!lineas.length) {
         const obs = obsDoc.join('; ');
-        filas.push({ ok: false, obs, celdas: ['', base.fecha, base.proveedor, base.factura, ingreso, '', '', '', '', '', '', obs],
-          soporte: [ingreso, base.factura, base.proveedor, base.almacen, '', null, null, fuente || '—', pedidoTxt, centro, '', enDianTxt] });
+        filas.push({ ok: false, obs, celdas: ['', base.fecha, base.proveedor, base.factura, ingreso, '', '', '', '', '', '', obs, ...cols4],
+          soporte: [ingreso, base.factura, base.proveedor, base.almacen, '', null, null, fuente || '—', pedidoTxt, centro, '', enDianTxt, val.fuente, ret.texto] });
         revisar.push({ fila: x.fila, ingreso, factura: base.factura, proveedor: base.proveedor, articulo: '', motivo: obs });
         continue;
       }
       lineas.forEach((l, i) => {
         const h = homologar(l.articulo, l.familia, l.almacen, cat, R);
-        const obs = [...(i === 0 ? obsDoc : obsDoc.filter((o) => !/^Diferencia/.test(o)))];
+        const obs = [...(i === 0 ? obsDoc : obsDoc.filter((o) => !/^(Diferencia|Retención)/.test(o)))];
         if (!h.ok && h.obs) obs.push(h.obs);
         if (l.devolucion) obs.push('Devolución (abono factura compra)');
         const c = h.c || {};
         const familia = c.familia || '';
         if (!h.ok) sinHomologar.push({ articulo: l.articulo, familia: l.familia, ingreso });
         filas.push({ ok: h.ok && !obsDoc.length, obs: obs.join('; '),
-          celdas: [familia, base.fecha, base.proveedor, base.factura, ingreso, l.articulo, c.referencia || '', c.subfamilia || '', c.cuenta || '', c.devolucion || '', c.grupo || '', obs.join('; ')],
-          soporte: [ingreso, base.factura, base.proveedor, l.almacen, l.articulo, l.cantidad, l.total, fuente, l.pedido || pedidoTxt, centro, h.regla || '—', enDianTxt] });
+          celdas: [familia, base.fecha, base.proveedor, base.factura, ingreso, l.articulo, c.referencia || '', c.subfamilia || '', c.cuenta || '', c.devolucion || '', c.grupo || '', obs.join('; '),
+            ...(i === 0 ? cols4 : [null, null, null, null])],   // valores de la factura solo en su primera linea
+          soporte: [ingreso, base.factura, base.proveedor, l.almacen, l.articulo, l.cantidad, l.total, fuente, l.pedido || pedidoTxt, centro, h.regla || '—', enDianTxt, i === 0 ? val.fuente : '', i === 0 ? ret.texto : ''] });
         if (obs.length) revisar.push({ fila: x.fila, ingreso, factura: base.factura, proveedor: base.proveedor, articulo: l.articulo, motivo: obs.join('; ') });
       });
     }
@@ -219,14 +276,15 @@
   // agrega "Contabilidad" (la plantilla, 12 columnas), "Soporte contable" (trazabilidad) y "Por revisar contable"
   function agregarHojas(wb, r) {
     const conFecha = (c) => c.map((x, i) => (i === 1 ? fechaExcel(x) : x));
-    const ws = hoja(wb, 'Contabilidad', COLUMNAS, r.filas.map((f) => conFecha(f.celdas)), [22, 12, 36, 16, 18, 42, 13, 22, 14, 14, 26, 50], 'FF1E3A8A');
+    const ws = hoja(wb, 'Contabilidad', COLUMNAS, r.filas.map((f) => conFecha(f.celdas)), [22, 12, 36, 16, 18, 42, 13, 22, 14, 14, 26, 50, 14, 13, 14, 13], 'FF1E3A8A');
     // texto en las celdas de codigos (no numeros): las cuentas y referencias se conservan tal cual
     ['REFERENCIA', 'CUENTA CONTAB', 'DEVOLUCION', 'Factura', 'Ingreso'].forEach((t) => { ws.getColumn(COLUMNAS.indexOf(t) + 1).numFmt = '@'; });
+    ['Base', 'Impuestos', 'Neto', 'Retención'].forEach((t) => { ws.getColumn(COLUMNAS.indexOf(t) + 1).numFmt = '#,##0'; });
     r.filas.forEach((f, i) => { if (f.obs) ws.getRow(i + 2).getCell(12).font = { color: { argb: 'FFB91C1C' } }; });
-    hoja(wb, 'Soporte contable', SOPORTE, r.filas.map((f) => f.soporte), [18, 16, 34, 18, 40, 10, 14, 28, 16, 18, 44, 24], 'FF0F766E');
+    hoja(wb, 'Soporte contable', SOPORTE, r.filas.map((f) => f.soporte), [18, 16, 34, 18, 40, 10, 14, 28, 16, 18, 44, 24, 30, 60], 'FF0F766E');
     hoja(wb, 'Por revisar contable', ['Fila del archivo', 'Ingreso', 'Factura', 'Proveedor', 'ARTICULO', 'Motivo'],
       r.revisar.map((x) => [x.fila, x.ingreso, x.factura, x.proveedor, x.articulo, x.motivo]), [10, 18, 16, 34, 40, 70], 'FFB45309');
   }
 
-  return { COLUMNAS, SOPORTE, SEDES, norm, alnum, claveIngreso, esSede, leerInformeArticulos, indexarCatalogo, indexarReglas, homologar, proponerReglas, armar, agregarHojas };
+  return { COLUMNAS, SOPORTE, SEDES, RETENCIONES, tipoRetencion, norm, alnum, claveIngreso, esSede, leerInformeArticulos, indexarCatalogo, indexarReglas, homologar, proponerReglas, armar, agregarHojas };
 });
