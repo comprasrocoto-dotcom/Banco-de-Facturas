@@ -216,6 +216,24 @@
       const s = TARIFAS.find((x) => Math.abs(t.impuestos - t.base * x) <= Math.max(2, t.base * 0.0005));
       return s == null ? null : s;
     }
+    // (10/10/2026) factura que MEZCLA tarifas (ej. FE38865: salmon 0% + queso y ensalada 19%): se prueban todas las formas de repartir
+    // DOS tarifas entre sus articulos; si exactamente UNA da los impuestos de la factura al peso, esa es (si hay varias, no se adivina).
+    // valores = base de cada articulo (modo 'base') o su total CON impuesto (modo 'neto', informe de Hiopos). Hasta 16 articulos.
+    function tarifasMezcladas(valores, impuestos, modo) {
+      const n = valores.length;
+      if (n < 2 || n > 16 || !impuestos || valores.some((x) => !isFinite(x))) return null;
+      const T = [0].concat(TARIFAS).sort((a, b) => a - b), tol = Math.max(2, n), aporte = (x, t) => (modo === 'neto' ? x * t / (1 + t) : x * t);
+      const sol = new Map();
+      for (let a = 0; a < T.length; a++) for (let b = a + 1; b < T.length; b++) {
+        for (let m = 1; m < (1 << n) - 1; m++) {
+          let s = 0; const ts = [];
+          for (let i = 0; i < n; i++) { const t = (m >> i) & 1 ? T[b] : T[a]; ts.push(t); s += aporte(valores[i], t); }
+          if (Math.abs(s - impuestos) <= tol) sol.set(ts.join(','), ts);
+          if (sol.size > 1) return null;
+        }
+      }
+      return sol.size === 1 ? [...sol.values()][0] : null;
+    }
 
     const filas = [], revisar = [], sinHomologar = [];
     let docsConArticulos = 0, docsSinArticulos = 0, lineasConValor = 0;
@@ -230,6 +248,7 @@
       const enDian = dianDocs ? !!fd : null;
       if (dianDocs && !enDian) obsDoc.push('Factura de la DIAN no encontrada');
       const tot = totalesFactura(v, fd), tarifa = tarifaUnica(tot), signo = tot ? tot.signo : 1;
+      let mezclaResuelta = false;
       // la factura de la web de este ingreso (por el N° de ingreso; si no, por el numero de factura si es UNA sola)
       let cufe = clave ? cufePorIngreso.get(clave) : null, variasWeb = false;
       if (!cufe) { const s = cufesPorDoc.get(alnum(suDoc)); if (s && s.size === 1) cufe = [...s][0]; else if (s && s.size > 1) variasWeb = true; }
@@ -250,7 +269,7 @@
           const neto = Math.abs(Number(l.total));   // el signo (nota credito) se pone al final, igual para todas las fuentes
           const b = isFinite(neto) && tarifa != null ? r0(neto / (1 + tarifa)) : null;
           return { articulo: l.articulo, familia: l.familia, cantidad: l.cantidad, almacen: l.almacen || base.almacen, devolucion: /ABONO|DEVOL/i.test(l.tipoDoc),
-            base: b, impuestos: b != null ? r0(neto) - b : null, neto: isFinite(neto) ? r0(neto) : null, fuenteVal: 'informe de Hiopos (total con impuesto de la línea)' };
+            base: b, impuestos: b != null ? r0(neto) - b : null, neto: isFinite(neto) ? r0(neto) : null, netoBruto: neto, fuenteVal: 'informe de Hiopos (total con impuesto de la línea)' };
         });
       } else {
         // 2) pedido de la web amarrado a la factura
@@ -284,12 +303,29 @@
         } else obsDoc.push(informeCargado ? 'Pedido no encontrado: no hay pedido en la web y el ingreso no está en el informe de artículos de Hiopos que se cargó' : 'Pedido no encontrado en la web: carga el informe de artículos de Hiopos ("FACTURAS DE COMPRA") para traer sus artículos');
       }
       if (!ingreso) obsDoc.push('Ingreso de Hiopos vacío');
+      // factura que mezcla tarifas: la tarifa de cada articulo, si UNA sola combinacion da los impuestos de la factura (si no, pendiente)
+      if (tarifa == null && tot && tot.impuestos && lineas.length) {
+        const deInforme = fuente === 'Informe de artículos de Hiopos';
+        // solo las lineas que estan EN la factura (las del pedido que no llegaron no tienen valor y no cuentan)
+        const enFactura = deInforme ? lineas : lineas.filter((l) => l.base != null);
+        const vals = enFactura.map((l) => (deInforme ? l.netoBruto : l.base));
+        const suma = vals.reduce((a, x) => a + x, 0), debe = deInforme ? tot.base + tot.impuestos : tot.base;
+        const ts = Math.abs(suma - debe) <= Math.max(2, vals.length) ? tarifasMezcladas(vals, tot.impuestos, deInforme ? 'neto' : 'base') : null;
+        if (ts) {
+          mezclaResuelta = true;
+          enFactura.forEach((l, i) => {
+            l.tarifa = ts[i];
+            if (deInforme) { l.neto = r0(vals[i]); l.base = r0(vals[i] / (1 + ts[i])); l.impuestos = l.neto - l.base; }
+            else { l.impuestos = r0(l.base * ts[i]); l.neto = l.base + l.impuestos; }
+          });
+        }
+      }
       // cuadre con la factura (sin repartir diferencias: solo se avisa)
       const conValor = lineas.filter((l) => l.base != null);
       if (tot && conValor.length) {
         const sb = conValor.reduce((s, l) => s + l.base, 0);
         if (Math.abs(sb - tot.base) > 1 && conValor.length === lineas.length) obsDoc.push('Los artículos suman base $ ' + sb.toLocaleString('es-CO') + ' y la factura $ ' + r0(tot.base).toLocaleString('es-CO') + ' (' + tot.fuente + ')');
-        if (tarifa == null && tot.impuestos) obsDoc.push('La factura mezcla tarifas de impuesto (impuestos $ ' + r0(tot.impuestos).toLocaleString('es-CO') + '): impuestos por artículo pendientes');
+        if (tarifa == null && tot.impuestos && !mezclaResuelta) obsDoc.push('La factura mezcla tarifas de impuesto (impuestos $ ' + r0(tot.impuestos).toLocaleString('es-CO') + '): impuestos por artículo pendientes');
       }
       if (lineas.length) docsConArticulos++; else docsSinArticulos++;
       const enDianTxt = dianDocs ? (enDian ? 'Sí (sin detalle de artículos)' : 'No encontrada') : 'No se cargó el reporte';
@@ -317,7 +353,8 @@
             base: sg(l.base), impuestos: sg(l.impuestos), neto: sg(l.neto),
             referencia: c.referencia || '', subfamilia: c.subfamilia || '', cuenta: c.cuenta || '', devolucion: c.devolucion || '', grupo: c.grupo || '', obs: obs.join('; ') }),
           soporte: [ingreso, base.factura, base.proveedor, l.almacen, l.articulo, l.cantidad, sg(l.neto), fuente, l.pedido || pedidoTxt, centro, h.regla || '—', enDianTxt,
-            l.base != null ? l.fuenteVal + (l.impuestos != null ? '; impuesto ' + (tarifa ? Math.round(tarifa * 100) + '%' : '0%') + ' (tarifa única de la factura, ' + (tot ? tot.fuente : '') + ')' : '') : ''] });
+            l.base != null ? l.fuenteVal + (l.impuestos == null ? '' : l.tarifa != null ? '; impuesto ' + Math.round(l.tarifa * 100) + '% (la factura mezcla tarifas: es la única combinación que da sus impuestos, ' + tot.fuente + ')'
+            : '; impuesto ' + (tarifa ? Math.round(tarifa * 100) + '%' : '0%') + ' (tarifa única de la factura, ' + (tot ? tot.fuente : '') + ')') : ''] });
         if (obs.length) revisar.push({ fila: x.fila, ingreso, factura: base.factura, proveedor: base.proveedor, articulo: l.articulo, motivo: obs.join('; ') });
       });
     }
