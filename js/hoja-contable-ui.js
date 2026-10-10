@@ -125,8 +125,8 @@ function orgHContableVista(x) {
   if (!x.contable) return '<div class="vacio">⏳ Cargando la hoja contable...</div>';
   const filas = x.contable.filas;
   return `<div style="font-weight:700;margin:6px 0">Vista previa · Contabilidad (${filas.length} líneas)</div><div style="overflow:auto;max-height:56vh"><table><thead><tr>${HojaContable.COLUMNAS.map((c) => `<th>${c}</th>`).join('')}</tr></thead><tbody>` +
-    filas.slice(0, 400).map((f) => `<tr${f.obs ? ' style="background:#fff7ed"' : ''}>${f.celdas.map((c, i) => i >= 12
+    filas.slice(0, 400).map((f) => `<tr${f.obs ? ' style="background:#fff7ed"' : ''}>${f.celdas.map((c, i) => ['Base', 'Impuestos', 'Neto', 'Retención'].includes(HojaContable.COLUMNAS[i])
       ? `<td class="num">${c == null ? '' : money(c)}</td>`   // Base, Impuestos, Neto, Retención
-      : `<td${i === 11 ? ' style="color:#b91c1c;font-size:12px"' : ''}>${escAg(i === 1 && c ? String(c).split('-').reverse().join('/') : (c == null ? '' : c))}</td>`).join('')}</tr>`).join('') +
+      : `<td${i === HojaContable.IX.Observacion ? ' style="color:#b91c1c;font-size:12px"' : ''}>${escAg(i === HojaContable.IX.Fecha && c ? String(c).split('-').reverse().join('/') : (c == null ? '' : c))}</td>`).join('')}</tr>`).join('') +
     `</tbody></table></div>${filas.length > 400 ? `<div class="mut">… y ${filas.length - 400} más (todas van en el Excel)</div>` : ''}`;
 }

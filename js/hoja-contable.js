@@ -19,7 +19,13 @@
   'use strict';
   // (10/10/2026) + Base, Impuestos, Neto y Retención al final (pedido del usuario): valores de la FACTURA (reporte de la DIAN), en la
   // PRIMERA linea de cada factura (la DIAN no los trae por articulo; repetirlos en cada linea duplicaria los totales al sumar)
-  const COLUMNAS = ['Familia', 'Fecha', 'Proveedor', 'Factura', 'Ingreso', 'ARTICULO', 'REFERENCIA', 'SUBFAMILIA', 'CUENTA CONTAB', 'DEVOLUCION', 'GRUPO CUENTA', 'Observacion', 'Base', 'Impuestos', 'Neto', 'Retención'];
+  // (10/10/2026) el usuario pidio Base, Impuestos, Neto y Retención DESPUES de ARTICULO. Las filas se arman por NOMBRE de columna
+  // (celdasDe), asi un cambio de orden solo se hace aqui.
+  const COLUMNAS = ['Familia', 'Fecha', 'Proveedor', 'Factura', 'Ingreso', 'ARTICULO', 'Base', 'Impuestos', 'Neto', 'Retención', 'REFERENCIA', 'SUBFAMILIA', 'CUENTA CONTAB', 'DEVOLUCION', 'GRUPO CUENTA', 'Observacion'];
+  const IX = Object.fromEntries(COLUMNAS.map((c, i) => [c, i]));
+  const CAMPO = { Familia: 'familia', Fecha: 'fecha', Proveedor: 'proveedor', Factura: 'factura', Ingreso: 'ingreso', ARTICULO: 'articulo', Base: 'base', Impuestos: 'impuestos', Neto: 'neto', 'Retención': 'retencion',
+    REFERENCIA: 'referencia', SUBFAMILIA: 'subfamilia', 'CUENTA CONTAB': 'cuenta', DEVOLUCION: 'devolucion', 'GRUPO CUENTA': 'grupo', Observacion: 'obs' };
+  const celdasDe = (o) => COLUMNAS.map((c) => { const v = o[CAMPO[c]]; return v === undefined ? (['Base', 'Impuestos', 'Neto', 'Retención'].includes(c) ? null : '') : v; });
   const SOPORTE = ['Ingreso', 'Factura', 'Proveedor', 'Almacén', 'ARTICULO', 'Cantidad', 'Valor total', 'Fuente de los artículos', 'Pedido web', 'Centro de costos', 'Regla de clasificación', 'Factura DIAN', 'Valores tomados de', 'Retención (tipo y cuenta)'];
   // Tabla de retenciones de Contabilidad (hoja "Retenciones"; todas son de COMPRAS / pagos a proveedores, confirmado 10/10/2026)
   const RETENCIONES = [
@@ -196,7 +202,7 @@
       const enDian = dianDocs ? !!fd : null;
       if (dianDocs && !enDian) obsDoc.push('Factura de la DIAN no encontrada');
       const val = valores(v, fd), ret = tipoRetencion(val.base, val.retencion);
-      const cols4 = [val.base, val.impuestos, val.neto, val.retencion];
+      const cols4 = { base: val.base, impuestos: val.impuestos, neto: val.neto, retencion: val.retencion };
       if (ret.texto && !ret.unica) obsDoc.push('Retención ' + ret.texto);
       // 1) informe de articulos de Hiopos (lo que realmente entro al ERP en ese ingreso)
       let lineas = [], fuente = '', pedidoTxt = '', centro = '';
@@ -237,7 +243,7 @@
       const enDianTxt = dianDocs ? (enDian ? 'Sí (sin detalle de artículos)' : 'No encontrada') : 'No se cargó el reporte';
       if (!lineas.length) {
         const obs = obsDoc.join('; ');
-        filas.push({ ok: false, obs, celdas: ['', base.fecha, base.proveedor, base.factura, ingreso, '', '', '', '', '', '', obs, ...cols4],
+        filas.push({ ok: false, obs, celdas: celdasDe(Object.assign({ fecha: base.fecha, proveedor: base.proveedor, factura: base.factura, ingreso, obs }, cols4)),
           soporte: [ingreso, base.factura, base.proveedor, base.almacen, '', null, null, fuente || '—', pedidoTxt, centro, '', enDianTxt, val.fuente, ret.texto] });
         revisar.push({ fila: x.fila, ingreso, factura: base.factura, proveedor: base.proveedor, articulo: '', motivo: obs });
         continue;
@@ -251,13 +257,14 @@
         const familia = c.familia || '';
         if (!h.ok) sinHomologar.push({ articulo: l.articulo, familia: l.familia, ingreso });
         filas.push({ ok: h.ok && !obsDoc.length, obs: obs.join('; '),
-          celdas: [familia, base.fecha, base.proveedor, base.factura, ingreso, l.articulo, c.referencia || '', c.subfamilia || '', c.cuenta || '', c.devolucion || '', c.grupo || '', obs.join('; '),
-            ...(i === 0 ? cols4 : [null, null, null, null])],   // valores de la factura solo en su primera linea
+          celdas: celdasDe(Object.assign({ familia, fecha: base.fecha, proveedor: base.proveedor, factura: base.factura, ingreso, articulo: l.articulo,
+            referencia: c.referencia || '', subfamilia: c.subfamilia || '', cuenta: c.cuenta || '', devolucion: c.devolucion || '', grupo: c.grupo || '', obs: obs.join('; ') },
+            i === 0 ? cols4 : {})),   // valores de la factura solo en su primera linea
           soporte: [ingreso, base.factura, base.proveedor, l.almacen, l.articulo, l.cantidad, l.total, fuente, l.pedido || pedidoTxt, centro, h.regla || '—', enDianTxt, i === 0 ? val.fuente : '', i === 0 ? ret.texto : ''] });
         if (obs.length) revisar.push({ fila: x.fila, ingreso, factura: base.factura, proveedor: base.proveedor, articulo: l.articulo, motivo: obs.join('; ') });
       });
     }
-    const conCuenta = filas.filter((f) => f.celdas[8]).length;
+    const conCuenta = filas.filter((f) => f.celdas[IX['CUENTA CONTAB']]).length;
     return { filas, revisar, sinHomologar, resumen: { documentos: (documentos || []).length, docsConArticulos, docsSinArticulos, lineas: filas.length, conCuenta, sinCuenta: filas.length - conCuenta, listas: filas.filter((f) => f.ok && !f.obs).length } };
   }
 
@@ -275,16 +282,17 @@
   }
   // agrega "Contabilidad" (la plantilla, 12 columnas), "Soporte contable" (trazabilidad) y "Por revisar contable"
   function agregarHojas(wb, r) {
-    const conFecha = (c) => c.map((x, i) => (i === 1 ? fechaExcel(x) : x));
-    const ws = hoja(wb, 'Contabilidad', COLUMNAS, r.filas.map((f) => conFecha(f.celdas)), [22, 12, 36, 16, 18, 42, 13, 22, 14, 14, 26, 50, 14, 13, 14, 13], 'FF1E3A8A');
+    const conFecha = (c) => c.map((x, i) => (i === IX.Fecha ? fechaExcel(x) : x));
+    const ANCHO = { Familia: 22, Fecha: 12, Proveedor: 36, Factura: 16, Ingreso: 18, ARTICULO: 42, Base: 14, Impuestos: 13, Neto: 14, 'Retención': 13, REFERENCIA: 13, SUBFAMILIA: 22, 'CUENTA CONTAB': 14, DEVOLUCION: 14, 'GRUPO CUENTA': 26, Observacion: 50 };
+    const ws = hoja(wb, 'Contabilidad', COLUMNAS, r.filas.map((f) => conFecha(f.celdas)), COLUMNAS.map((c) => ANCHO[c]), 'FF1E3A8A');
     // texto en las celdas de codigos (no numeros): las cuentas y referencias se conservan tal cual
     ['REFERENCIA', 'CUENTA CONTAB', 'DEVOLUCION', 'Factura', 'Ingreso'].forEach((t) => { ws.getColumn(COLUMNAS.indexOf(t) + 1).numFmt = '@'; });
     ['Base', 'Impuestos', 'Neto', 'Retención'].forEach((t) => { ws.getColumn(COLUMNAS.indexOf(t) + 1).numFmt = '#,##0'; });
-    r.filas.forEach((f, i) => { if (f.obs) ws.getRow(i + 2).getCell(12).font = { color: { argb: 'FFB91C1C' } }; });
+    r.filas.forEach((f, i) => { if (f.obs) ws.getRow(i + 2).getCell(IX.Observacion + 1).font = { color: { argb: 'FFB91C1C' } }; });
     hoja(wb, 'Soporte contable', SOPORTE, r.filas.map((f) => f.soporte), [18, 16, 34, 18, 40, 10, 14, 28, 16, 18, 44, 24, 30, 60], 'FF0F766E');
     hoja(wb, 'Por revisar contable', ['Fila del archivo', 'Ingreso', 'Factura', 'Proveedor', 'ARTICULO', 'Motivo'],
       r.revisar.map((x) => [x.fila, x.ingreso, x.factura, x.proveedor, x.articulo, x.motivo]), [10, 18, 16, 34, 40, 70], 'FFB45309');
   }
 
-  return { COLUMNAS, SOPORTE, SEDES, RETENCIONES, tipoRetencion, norm, alnum, claveIngreso, esSede, leerInformeArticulos, indexarCatalogo, indexarReglas, homologar, proponerReglas, armar, agregarHojas };
+  return { COLUMNAS, IX, SOPORTE, SEDES, RETENCIONES, tipoRetencion, norm, alnum, claveIngreso, esSede, leerInformeArticulos, indexarCatalogo, indexarReglas, homologar, proponerReglas, armar, agregarHojas };
 });
