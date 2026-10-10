@@ -113,6 +113,9 @@
   const SEDES = ['OVIEDO', 'LAURELES', 'INTERPLAZA', 'TESORO', 'CENTRO DE PRODUCCION', 'CASA DE NADIE', 'SINPAR', 'SIN PAR', 'ROCOTO LAURELES', 'ROCOTO AMSTERDAM',
     'ROCOTO PROVENZA', 'ROCOTO', 'PLANTA PRODUCCION ROCOTO', 'PLANTA DE PRODUCCION', 'MALANGA', 'MALANGA DISTRITO VERA', 'MALANGA LAURELES', 'AMSTERDAM', 'PROVENZA'];
   const esSede = (almacen) => SEDES.includes(norm(almacen));
+  // almacenes de 123 Wok, Casa de Nadie y Sin Par (los de Rocoto/Arrebatao se llaman ROCOTO..., MALANGA..., PLANTA PRODUCCION ROCOTO)
+  const ALMACENES_OTRAS = ['OVIEDO', 'LAURELES', 'INTERPLAZA', 'TESORO', 'CENTRO DE PRODUCCION', 'CASA DE NADIE', 'SINPAR', 'SIN PAR'];
+  const esRocotoArrebatao = (v) => !/^FC\s*\./i.test(String((v && v.INGRESO) || '').trim()) && !ALMACENES_OTRAS.includes(norm(v && v['Almacén']));
 
   // catalogo contable (cuentas_contables) -> Map(nombre normalizado -> [filas])
   function indexarCatalogo(filas) {
@@ -205,7 +208,10 @@
 
     const filas = [], revisar = [], sinHomologar = [];
     let docsConArticulos = 0, docsSinArticulos = 0;
-    for (const x of documentos || []) {
+    // (10/10/2026) SOLO ROCOTO Y ARREBATAO (pedido del usuario): 123 Wok, Casa de Nadie y Sin Par siguen como estaban (no entran a
+    // la hoja contable). Se reconocen por su serie de centro de costo (FC.COCINA, FC.BAR...) o por su almacen.
+    const docsAlcance = (documentos || []).filter((x) => esRocotoArrebatao(x.v));
+    for (const x of docsAlcance) {
       const v = x.v, ingreso = v.INGRESO || '', clave = claveIngreso(ingreso), suDoc = String(v['Su Doc'] || '');
       const base = { fecha: v['Fecha Doc'] || null, proveedor: v.Contacto || '', factura: suDoc, ingreso, almacen: v['Almacén'] || '' };
       const obsDoc = [];
@@ -276,7 +282,7 @@
       });
     }
     const conCuenta = filas.filter((f) => f.celdas[IX['CUENTA CONTAB']]).length;
-    return { filas, revisar, sinHomologar, resumen: { documentos: (documentos || []).length, docsConArticulos, docsSinArticulos, lineas: filas.length, conCuenta, sinCuenta: filas.length - conCuenta, listas: filas.filter((f) => f.ok && !f.obs).length } };
+    return { filas, revisar, sinHomologar, resumen: { documentos: docsAlcance.length, otrasMarcas: (documentos || []).length - docsAlcance.length, docsConArticulos, docsSinArticulos, lineas: filas.length, conCuenta, sinCuenta: filas.length - conCuenta, listas: filas.filter((f) => f.ok && !f.obs).length } };
   }
 
   // ---- hojas del Excel (ExcelJS) ----
@@ -305,5 +311,5 @@
       r.revisar.map((x) => [x.fila, x.ingreso, x.factura, x.proveedor, x.articulo, x.motivo]), [10, 18, 16, 34, 40, 70], 'FFB45309');
   }
 
-  return { COLUMNAS, IX, SOPORTE, SEDES, RETENCIONES, tipoRetencion, norm, alnum, claveIngreso, esSede, leerInformeArticulos, indexarCatalogo, indexarReglas, homologar, proponerReglas, armar, agregarHojas };
+  return { COLUMNAS, IX, SOPORTE, SEDES, ALMACENES_OTRAS, esRocotoArrebatao, RETENCIONES, tipoRetencion, norm, alnum, claveIngreso, esSede, leerInformeArticulos, indexarCatalogo, indexarReglas, homologar, proponerReglas, armar, agregarHojas };
 });

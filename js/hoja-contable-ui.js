@@ -98,9 +98,13 @@ async function orgCActivar(familiaNorm, activo) {
 }
 
 // panel bajo el boton de descarga
+// (10/10/2026) SOLO Rocoto y Arrebatao: si el archivo no tiene documentos de esas marcas (123 Wok, Casa de Nadie, Sin Par), el
+// Organizador queda como estaba (sin hoja contable)
+const orgCHayRocotoArrebatao = () => !!(orgH.lectura && orgH.lectura.filas.some((z) => HojaContable.esRocotoArrebatao(z.v)));
 function orgHContablePanel(x) {
-  let h = `<div class="card" style="margin:8px 0;border-color:#1e3a8a"><div style="font-weight:700;color:#1e3a8a">📒 Hoja contable (plantilla de Contabilidad)</div>
-    <div class="mut" style="margin:4px 0 8px">Una fila por artículo de cada ingreso de tu archivo, con familia, referencia, subfamilia, cuenta contable, devolución y grupo de cuenta. Los artículos salen del <b>pedido de la web</b>; para 123 Wok, Casa de Nadie y Sin Par (sin pedidos en la web) carga el <b>informe de artículos</b> de Hiopos ("FACTURAS DE COMPRA").</div>
+  if (!orgCHayRocotoArrebatao()) return '';
+  let h = `<div class="card" style="margin:8px 0;border-color:#1e3a8a"><div style="font-weight:700;color:#1e3a8a">📒 Hoja contable · Rocoto y Arrebatao</div>
+    <div class="mut" style="margin:4px 0 8px">Una fila por artículo de cada ingreso de <b>Rocoto y Arrebatao</b> de tu archivo, con base, impuestos, neto, retención, referencia, subfamilia, cuenta contable, devolución y grupo de cuenta. Los artículos salen del <b>pedido de la web</b>; los ingresos sin pedido en la web los trae el <b>informe de artículos</b> de Hiopos ("FACTURAS DE COMPRA"). 123 Wok, Casa de Nadie y Sin Par no entran en esta hoja.</div>
     <label class="s" style="display:inline-block;cursor:pointer;padding:6px 12px;border-radius:8px;background:#1e3a8a;color:#fff;font-weight:700">📦 Cargar informe de artículos de Hiopos<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="orgHInforme(this)"></label>
     <span class="mut" style="margin-left:8px">${orgC.informeNombre ? escAg(orgC.informeNombre) + (orgC.informe ? ' · ' + orgC.informe.length + ' líneas' : '') : 'opcional'}</span>
     ${orgC.informeError ? `<div class="err" style="margin-top:6px">${escAg(orgC.informeError)}</div>` : ''}
@@ -122,6 +126,7 @@ function orgHContablePanel(x) {
 }
 // vista previa de la hoja contable (12 columnas)
 function orgHContableVista(x) {
+  if (!orgCHayRocotoArrebatao()) return '<div class="vacio">La hoja contable es solo para Rocoto y Arrebatao: este archivo no tiene documentos de esas marcas.</div>';
   if (!x.contable) return '<div class="vacio">⏳ Cargando la hoja contable...</div>';
   const filas = x.contable.filas;
   return `<div style="font-weight:700;margin:6px 0">Vista previa · Contabilidad (${filas.length} líneas)</div><div style="overflow:auto;max-height:56vh"><table><thead><tr>${HojaContable.COLUMNAS.map((c) => `<th>${c}</th>`).join('')}</tr></thead><tbody>` +

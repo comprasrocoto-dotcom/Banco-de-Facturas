@@ -213,7 +213,7 @@ async function orgHDescargar() {
     const ExcelJS = await orgHCargarExcelJS();
     const ahora = new Date().toLocaleString('es-CO');
     const wb = OrganizadorHiopos.armarLibro(ExcelJS, { lectura: orgH.lectura, clasificacion: x.cl, nombreArchivo: orgH.nombre, ahora, comparacion: x.comparacion });
-    if (x.contable && typeof HojaContable !== 'undefined') HojaContable.agregarHojas(wb, x.contable);   // (10/10/2026) Contabilidad, Soporte contable, Por revisar contable
+    if (x.contable && x.contable.resumen.documentos && typeof HojaContable !== 'undefined') HojaContable.agregarHojas(wb, x.contable);   // (10/10/2026) Contabilidad, Soporte contable, Por revisar contable
     const buf = await wb.xlsx.writeBuffer();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
@@ -290,7 +290,7 @@ function pintarOrganizadorHiopos(c) {
     ${tarjeta('Por revisar', R.revision, null, R.revision ? '#ede9fe' : '', 'revision')}
     ${tarjeta('Errores de lectura', R.errores, null, R.errores ? '#fee2e2' : '', 'errores')}
     ${x.comparacion ? tarjeta('≠ Factura (modificar)', x.comparacion.porFila.size, null, x.comparacion.porFila.size ? '#fca5a5' : '#dcfce7', 'dif') : ''}
-    ${x.contable ? tarjeta('Contabilidad (líneas sin cuenta)', x.contable.resumen.lineas + ' (' + x.contable.resumen.sinCuenta + ')', null, x.contable.resumen.sinCuenta ? '#e0e7ff' : '#dcfce7', 'contable') : ''}</div>`;
+    ${x.contable && x.contable.resumen.documentos ? tarjeta('Contabilidad (líneas sin cuenta)', x.contable.resumen.lineas + ' (' + x.contable.resumen.sinCuenta + ')', null, x.contable.resumen.sinCuenta ? '#e0e7ff' : '#dcfce7', 'contable') : ''}</div>`;
   const T = OrganizadorHiopos.TIPO, TT = OrganizadorHiopos.TIPO_TXT;
   h += `<div class="mut" style="margin:-2px 0 8px">Tipo de documento: ${Object.values(T).map((t) => `${TT[t]}: <b>${R.porTipo[t]}</b>`).join(' · ')}${!orgH.dian && (R.porTipo[T.CONOCIDO] + R.porTipo[T.SIN]) ? ' — <b>carga el reporte de la DIAN</b> para identificar las facturas electrónicas' : ''}</div>`;
   if (orgH.bancoError) h += `<div class="err">${escAg(orgH.bancoError)}</div>`;
@@ -315,7 +315,7 @@ function pintarOrganizadorHiopos(c) {
   if (R.sinIngreso) h += `<div class="mut">⚠️ ${R.sinIngreso} documento(s) quedan <b>sin INGRESO</b> (ni en el archivo ni en la web).</div>`;
   if (R.sinDetalle) h += `<div class="mut">⚠️ ${R.sinDetalle} documento(s) quedan <b>sin DETALLE</b>: su serie no dice el centro de costo (FCRC/FCAR) o no tienen INGRESO.</div>`;
   if (L.noUsadas.length) h += `<div class="mut">Columnas del archivo que no van en la planilla: ${escAg(L.noUsadas.join(', '))}</div>`;
-  h += `<div class="row" style="margin:10px 0"><button class="p" id="orgHBajar" onclick="orgHDescargar()">⬇ Descargar Excel organizado</button><span class="mut">Hojas: Documentos · Caja menor · Por revisar · Clasificación · Resumen${x.contable ? ' · Contabilidad · Soporte contable · Por revisar contable' : ''}</span></div>`;
+  h += `<div class="row" style="margin:10px 0"><button class="p" id="orgHBajar" onclick="orgHDescargar()">⬇ Descargar Excel organizado</button><span class="mut">Hojas: Documentos · Caja menor · Por revisar · Clasificación · Resumen${x.contable && x.contable.resumen.documentos ? ' · Contabilidad · Soporte contable · Por revisar contable' : ''}</span></div>`;
   if (typeof orgHContablePanel === 'function') h += orgHContablePanel(x);   // (10/10/2026) hoja contable
   if (orgH.ver === 'contable' && typeof orgHContableVista === 'function') { c.innerHTML = h + orgHContableVista(x); return; }
   // vista previa
