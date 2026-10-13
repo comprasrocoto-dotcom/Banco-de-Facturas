@@ -314,6 +314,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/cuenta-cobro-ui.js"></script>
 <script src="js/copiar-articulo.js"></script>
 <script src="js/editar-pedido-lista.js"></script>
+<script src="js/pedido-erp.js"></script>
 <script src="js/organizador-hiopos.js"></script>
 <script src="js/hoja-contable.js"></script>
 <script src="js/hoja-contable-ui.js"></script>
@@ -1843,6 +1844,7 @@ async function ponerErp(id){
   const p=pedidos.find(x=>x.id===id)||{};
   const v=prompt("Nº del pedido en el ERP (ej: FCRC3193)\nPedido "+(p.numero||"")+" · "+(p.proveedor_texto||""), p.pedido_erp||"");
   if(v===null) return;
+  if(!PedidoErp.vacio(v)&&!PedidoErp.valido(v)){ alert(PedidoErp.AYUDA); return; }   // (13/10/2026) incidente PED-0493
   const {error}=await SB.from("pedidos").update({pedido_erp:v.trim()||null}).eq("id",id);
   if(error){alert("No se pudo guardar: "+error.message);return;}
   await SB.from("historial").insert({accion:"Nº pedido ERP",detalle:v.trim(),usuario:usuario.id}).then(()=>{},()=>{});
@@ -2627,6 +2629,8 @@ async function guardarEdicion(){
   if(!vn.ok){ alert(vn.errores.join("\n")); return; }
   const campos=["responsable","forma_pago","numero_factura","pedido_erp","numero_nota_credito","observacion_factura"];
   const upd={}; campos.forEach(k=>upd[k]=$("ed_"+k).value.trim()||null);
+  // (13/10/2026) en "N° pedido en el ERP" solo el numero (incidente PED-0493: una nota ahi hizo que el agente buscara un pedido que no existe)
+  if(!PedidoErp.vacio(upd.pedido_erp)&&!PedidoErp.valido(upd.pedido_erp)){ alert(PedidoErp.AYUDA); $("ed_pedido_erp").focus(); return; }
   const {error}=await SB.from("pedidos").update(upd).eq("id",editActual);
   if(error){alert("No se pudo guardar: "+error.message);return;}
   // lineas: actualizar, anexar y borrar las quitadas
