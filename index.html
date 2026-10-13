@@ -311,6 +311,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/centro-costo.js"></script>
 <script src="js/cuenta-cobro.js"></script>
 <script src="js/cuenta-cobro-ui.js"></script>
+<script src="js/copiar-articulo.js"></script>
 <script src="js/organizador-hiopos.js"></script>
 <script src="js/hoja-contable.js"></script>
 <script src="js/hoja-contable-ui.js"></script>
@@ -1041,7 +1042,7 @@ function pintarAdmin(){
     EXPORTAR.catalogoArt = mSel ? ((adminMarcas.find(m=>m.id===mSel)||{}).nombre||"")+" (catálogo propio)" : "Rocoto y Arrebatao (general)";
     EXPORTAR.actual.admin_art = ()=>l.map(x=>{ const del=mSel?adminMarcaCat.filter(k=>k.marca_id===mSel&&k.codigo_barras===x.codigo_barras):adminCat.filter(k=>k.codigo_barras===x.codigo_barras); const pr=del.filter(k=>k.precio_negociado!=null).map(k=>Number(k.precio_negociado)); return {...x,_prov:del.length,_pmin:pr.length?Math.min(...pr):null,_pmax:pr.length?Math.max(...pr):null}; });
     c.innerHTML = (l.slice(0,adminLimite).map(x=>{
-      if(adminEdit&&adminEdit.tipo==="art"&&adminEdit.id===x.id) return AdminEditar.editorArticulo(x,conocidas,{error:adminEdit.error});
+      if(adminEdit&&adminEdit.tipo==="art"&&adminEdit.id===x.id) return AdminEditar.editorArticulo(x,conocidas,{error:adminEdit.error, copiarHtml:htmlCopiarArticulo(x,mSel)});
       const delArt=mSel?adminMarcaCat.filter(k=>k.marca_id===mSel&&k.codigo_barras===x.codigo_barras):adminCat.filter(k=>k.codigo_barras===x.codigo_barras);
       const precios=delArt.filter(k=>k.precio_negociado!=null).map(k=>Number(k.precio_negociado));
       const info = delArt.length
@@ -1426,6 +1427,38 @@ function agregarAlCatalogo(pid){
 }
 // (26/09/2026) EDITAR desde Admin: unidad de compra de un artículo y datos de un proveedor. Solo se envía lo que cambió; las políticas de la base ya limitan esto a admin/pagos.
 function editarArticuloAdmin(id){ adminEdit={tipo:"art",id}; pintarAdmin(); }
+// (13/10/2026) Copiar una referencia ya creada a la lista de OTRA marca (js/copiar-articulo.js). Ej. Portobello del general -> Sin Par,
+// con el codigo que tiene en el ERP de esa marca. Solo agrega (no borra ni cambia el original).
+function htmlCopiarArticulo(x, origen){
+  if(typeof CopiarArticulo==="undefined") return "";
+  const ds=CopiarArticulo.destinos(adminMarcas,adminMarcaArts,origen); if(!ds.length) return "";
+  const ya=CopiarArticulo.dondeEsta(x,origen,adminArt,adminMarcaArts);
+  const nombreLista=id=>id===0?"Rocoto y Arrebatao (general)":((adminMarcas.find(m=>m.id===id)||{}).nombre||"marca "+id);
+  const id="ca_"+Number(x.id);
+  return `<div style="margin-top:10px;padding:8px 10px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:9px">
+    <div style="font-weight:700;color:#075985">📋 Usar esta referencia en otra marca</div>
+    ${ya.length?`<div class="mut" style="margin:2px 0">Ya está en: ${ya.map(y=>escAg(nombreLista(y.id))+" (código "+escAg(y.codigo)+")").join(" · ")}</div>`:""}
+    <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:4px">
+      <label><span class="mut">Copiar a</span><select id="${id}_dest" style="width:auto;margin:2px 0 0">${ds.map(d=>`<option value="${d.id}">${escAg(d.nombre)}${d.nueva?" (aún sin lista propia)":""}</option>`).join("")}</select></label>
+      <label><span class="mut">Código en el ERP de esa marca</span><input id="${id}_cod" value="${escAg(x.codigo_barras||"")}" style="margin:2px 0 0;width:160px;text-transform:uppercase" autocomplete="off"></label>
+      <button class="s" onclick="copiarArticuloAMarca(${Number(x.id)},${Number(origen)||0})">📋 Copiar</button></div>
+    <div class="mut" style="font-size:12px;margin-top:4px">Se copia el nombre, la unidad y la subfamilia. Los proveedores y precios se amarran después en esa marca.</div></div>`;
+}
+async function copiarArticuloAMarca(id, origen){
+  const fuente=origen?MarcaProv.articulosAdmin(adminMarcaArts,origen):adminArt;
+  const x=fuente.find(a=>a.id===id); if(!x) return;
+  const base="ca_"+id, destino=Number($(base+"_dest").value)||0;
+  const v=CopiarArticulo.validar($(base+"_cod").value,destino,adminArt,adminMarcaArts);
+  const fallo=m=>{ adminEdit={tipo:"art",id,error:m}; pintarAdmin(); };
+  if(!v.ok) return fallo(v.error);
+  const d=CopiarArticulo.destinos(adminMarcas,adminMarcaArts,origen).find(z=>z.id===destino);
+  if(d&&d.nueva&&!confirm(d.nombre+" todavía no tiene lista propia de artículos.\n\nAl copiarle este primer artículo, en Nuevo pedido dejará de ver la lista general y solo verá sus artículos propios. ¿Continuar?")) return;
+  const f=CopiarArticulo.fila(x,destino,v.codigo);
+  const r=await SB.from(f.tabla).insert(f.datos);
+  if(r.error) return fallo("No se pudo copiar: "+(/duplicate|unique/i.test(r.error.message)?"ese código ya existe en esa lista.":r.error.message));
+  alert("✅ "+(x.articulo_comercial||x.articulo_hiopos)+" quedó en "+(d?d.nombre:"la otra lista")+" con el código "+v.codigo+".\nAhora puedes amarrarle proveedor y precio en esa marca.");
+  marcaArts=[]; marcaCat=[]; provs=[]; adminEdit=null; adminCargado=false; await cargarAdmin(); pintarAdmin();
+}
 function editarProveedorAdmin(id){ adminEdit={tipo:"prov",id}; pintarAdmin(); }
 function cancelarEdicionAdmin(){ adminEdit=null; pintarAdmin(); }
 async function guardarArticuloAdmin(id){
