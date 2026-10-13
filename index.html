@@ -312,6 +312,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/cuenta-cobro.js"></script>
 <script src="js/cuenta-cobro-ui.js"></script>
 <script src="js/copiar-articulo.js"></script>
+<script src="js/editar-pedido-lista.js"></script>
 <script src="js/organizador-hiopos.js"></script>
 <script src="js/hoja-contable.js"></script>
 <script src="js/hoja-contable-ui.js"></script>
@@ -2571,17 +2572,26 @@ function csvPedido(id){
     a.download="Orden_"+(p.numero||"")+".csv"; document.body.appendChild(a); a.click(); a.remove();
   });
 }
-let editActual=null, editLineas=[];
-function insertarLinea(){ $("editLineas").insertAdjacentHTML("beforeend", lineaEdit("","",1,"")); }
+let editActual=null, editLineas=[], edLista=[];   // edLista: articulos para anexar (js/editar-pedido-lista.js)
+function insertarLinea(){ $("editLineas").insertAdjacentHTML("beforeend", lineaEdit("","",1,"")); const r=$("editLineas").lastElementChild; const i=r&&r.querySelector("input[list]"); if(i) i.focus(); }
 function lineaEdit(id, insumo, cant, codigo){
-  const L=listaArticulos();
+  const L=edLista.length?edLista:listaArticulos();
   const uid="el"+Math.random().toString(36).slice(2,7);
   return `<div class="row" data-id="${id||""}" data-cod="${(codigo||"").replace(/"/g,"&quot;")}" style="margin-top:6px">
     <input list="dll_${uid}" value="${(insumo||"").replace(/"/g,"&quot;")}" placeholder="🔎 artículo" style="flex:3;margin:0">
     <datalist id="dll_${uid}">${L.map(a=>`<option value="${a.nombre.replace(/"/g,"&quot;")}">`).join("")}</datalist>
     <input type="text" inputmode="decimal" value="${cant!=null?cant:1}" style="flex:1;margin:0" placeholder="cant.">
-    <span class="mut" style="min-width:80px">${unidadDe(insumo)||""}</span>
+    <span class="mut" style="min-width:80px">${(codigo&&(L.find(a=>a.codigo===codigo)||{}).unidad)||unidadDe(insumo)||""}</span>
     <button class="d" onclick="this.parentNode.remove()">✕</button></div>`;
+}
+// (13/10/2026) articulos de la MARCA del pedido (lista propia si la tiene, si no la general) para anexar en Editar pedido
+async function articulosMarcaPedido(p){
+  try{
+    const propios=await traerTodo("marca_articulo","marca_id,codigo_barras,articulo,unidad_compra,subfamilia",["id"]);
+    if(p.marca_id && MarcaProv.tieneCatalogoPropio(propios,p.marca_id)) return MarcaProv.articulosDeMarca(propios,p.marca_id);
+  }catch(e){}
+  if(artsGlobal&&artsGlobal.length) return artsGlobal;
+  return await traerTodo("articulos","id,codigo_barras,articulo_hiopos,articulo_comercial,unimedida_compra,subfamilia",["articulo_comercial","id"]);
 }
 async function editarPedido(id){
   const p=pedidos.find(x=>x.id===id)||{};
@@ -2592,24 +2602,28 @@ async function editarPedido(id){
   for(const [k,lab,v] of campos) html+=`<label class="mut">${lab}</label><input id="ed_${k}" value="${(v||"").toString().replace(/"/g,"&quot;")}">`;
   html+='<label class="mut" style="margin-top:10px">Artículos del pedido <span id="edProv"></span></label><div id="editLineas"></div>';
   html+=`<button style="margin-top:8px" onclick="insertarLinea()">＋ Anexar artículo</button>`;
-  $("editForm").innerHTML=html; editActual=id;
+  $("editForm").innerHTML=html; editActual=id; edLista=[];
   $("modalEditar").classList.add("on");
-  // lo que se le compra a ESE proveedor, para el buscador
+  // lo que se le compra a ESE proveedor (primero) + todos los articulos de la marca del pedido, para el buscador
   provArts=[];
+  $("edProv").textContent="(cargando artículos...)";
   if(p.proveedor_id){
-    $("edProv").textContent="(cargando artículos del proveedor...)";
     const pa=await SB.from("proveedor_articulos").select("codigo,insumo,veces")
         .eq("proveedor_id",p.proveedor_id).order("veces",{ascending:false}).limit(500);
     provArts=pa.data||[];
-    $("edProv").textContent = provArts.length
-      ? "— "+provArts.length+" artículos que le comprás a "+(p.proveedor_texto||"este proveedor")+" (tocá el campo para ver la lista)"
-      : "— este proveedor no tiene historial";
   }
+  edLista=EditarPedidoLista.armar(provArts, await articulosMarcaPedido(p));
+  provArts=[];   // la lista de Nuevo pedido no debe quedar con los de este proveedor
+  $("edProv").textContent = "— "+edLista.length+" artículos"+(edLista.some(a=>a.delProveedor)?" (primero los "+edLista.filter(a=>a.delProveedor).length+" que le comprás a "+(p.proveedor_texto||"este proveedor")+")":"")+": escribe para buscar y elígelo de la lista";
   const l=await SB.from("pedido_lineas").select("id,codigo,insumo,cantidad").eq("pedido_id",id);
   editLineas=l.data||[];
   $("editLineas").innerHTML=editLineas.map(x=>lineaEdit(x.id,x.insumo,x.cantidad,x.codigo)).join("");
 }
 async function guardarEdicion(){
+  // (13/10/2026) una linea NUEVA tiene que ser un articulo de la lista (antes lo escrito a mano se guardaba como codigo)
+  const filasForm=[...$("editLineas").querySelectorAll("div.row")].map(r=>{ const ins=r.querySelectorAll("input"); return {id:r.dataset.id, cod:r.dataset.cod, texto:ins[0]?ins[0].value:"", cantidad:ins[1]?numEs(ins[1].value):0}; });
+  const vn=EditarPedidoLista.validarNuevas(filasForm.filter(f=>f.cantidad>0), edLista);
+  if(!vn.ok){ alert(vn.errores.join("\n")); return; }
   const campos=["responsable","forma_pago","numero_factura","pedido_erp","numero_nota_credito","observacion_factura"];
   const upd={}; campos.forEach(k=>upd[k]=$("ed_"+k).value.trim()||null);
   const {error}=await SB.from("pedidos").update(upd).eq("id",editActual);
@@ -2626,7 +2640,8 @@ async function guardarEdicion(){
       await SB.from("pedido_lineas").update({cantidad:cant, insumo:a.value, codigo:cod, unidad:unidadDe(a.value)||null}).eq("id",Number(r.dataset.id));
       vivos.push(Number(r.dataset.id));
     }else if(a.value.trim()){
-      const ins=await SB.from("pedido_lineas").insert({pedido_id:editActual, codigo:cod, insumo:a.value.trim(), cantidad:cant, unidad:unidadDe(a.value)||null}).select("id").single();
+      const art=EditarPedidoLista.buscar(edLista,a.value); if(!art) continue;   // ya validado arriba
+      const ins=await SB.from("pedido_lineas").insert({pedido_id:editActual, codigo:art.codigo, insumo:art.nombre.replace(/ \([^()]*\)$/,""), cantidad:cant, unidad:art.unidad||null}).select("id").single();
       if(ins.data) vivos.push(ins.data.id);
     }
   }
