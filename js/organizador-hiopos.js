@@ -296,9 +296,17 @@
   // Evidencia del Banco de Facturas y de la DIAN para clasificar. Todo opcional.
   //  facturas: [{ doc|documento|prefijo+folio, emisor, nit }] (Banco: tabla facturas; DIAN: registros de leerDian)
   //  proveedores: [{ nombre, nit }] (proveedores.razon_social/nombre_comercial, proveedor_nombre_pos.nombre_pos, facturas.emisor)
+  // (13/10/2026) las CUENTAS DE COBRO subidas con foto al Banco (facturas.tipo = 'cuenta_cobro') NO son factura electronica: van
+  // aparte (ccIngreso: por su N° de ingreso del ERP; ccDoc: por su numero) y marcan el documento de Hiopos como cuenta de cobro.
   function armarEvidencia({ facturas, proveedores } = {}) {
-    const porDoc = new Map(), conocidos = new Map();
+    const porDoc = new Map(), conocidos = new Map(), ccIngreso = new Map(), ccDoc = new Map();
     for (const f of facturas || []) {
+      if (f.tipo === 'cuenta_cobro') {
+        const reg = { emisor: f.emisor || '', nit: String(f.nit || f.nit_emisor || '').replace(/\D/g, ''), documento: f.documento || '' };
+        if (alnum(f.num_ingreso)) ccIngreso.set(alnum(f.num_ingreso), reg);
+        if (alnum(f.documento)) (ccDoc.get(alnum(f.documento)) || ccDoc.set(alnum(f.documento), []).get(alnum(f.documento))).push(reg);
+        continue;
+      }
       const docs = new Set([alnum(f.doc), alnum(f.documento), alnum((f.prefijo || '') + (f.folio || ''))].filter(Boolean));
       for (const d of docs) (porDoc.get(d) || porDoc.set(d, []).get(d)).push({ emisor: f.emisor || '', nit: String(f.nit || f.nit_emisor || '').replace(/\D/g, ''), fuente: f.fuente || 'Banco' });
     }
@@ -308,7 +316,19 @@
       const prev = conocidos.get(k);
       conocidos.set(k, prev && prev !== nit ? '' : nit);   // dos NIT con el mismo nombre: se conoce el nombre, no el NIT
     }
-    return { porDoc, conocidos };
+    return { porDoc, conocidos, ccIngreso, ccDoc };
+  }
+  // ¿este documento de Hiopos es una cuenta de cobro subida al Banco? -> texto de la evidencia | null
+  //  1) por el INGRESO (FCAR / 2944 = num_ingreso FCAR2944): es exactamente ese documento del ERP
+  //  2) por el Su Doc + el mismo proveedor (NIT o nombre parecido): la cuenta aun sin N° de ingreso guardado
+  function cuentaCobroWeb(ev, v) {
+    const porIng = ev && ev.ccIngreso && ev.ccIngreso.get(alnum(v.INGRESO));
+    if (porIng) return 'subida como cuenta de cobro (con foto) en el Banco de Facturas: N° ' + porIng.documento + ', mismo ingreso';
+    const l = (ev && ev.ccDoc && ev.ccDoc.get(alnum(v['Su Doc']))) || [];
+    if (!l.length) return null;
+    const nit = ev.conocidos && ev.conocidos.get(claveProveedor(v.Contacto));
+    const f = l.find((x) => nit && x.nit && x.nit === nit) || l.find((x) => x.emisor && parecido(x.emisor, v.Contacto) >= 0.5);
+    return f ? 'subida como cuenta de cobro (con foto) en el Banco de Facturas: N° ' + f.documento + ', mismo proveedor' : null;
   }
   // ¿este documento es una factura electronica (de ESTE proveedor)? -> { fuente } | null
   function facturaElectronica(ev, v) {
@@ -329,10 +349,14 @@
       const k = contactoClave(f.v.Contacto), r = R.get(k) || {}, c = cor.get(f.fila) || {};
       const nota = plano(f.v.Nota), suDoc = f.v['Su Doc'];
       const ccNota = nota.includes('cuenta de cobro'), cmNota = nota.includes('caja menor') || /\bcontado\b/.test(nota);
-      const fe = facturaElectronica(ev, f.v);
+      const fe = facturaElectronica(ev, f.v), ccWeb = cuentaCobroWeb(ev, f.v);
       let tipo, evid = '', motivo = '', falta = '';
       if (c.cuenta_cobro === true) { tipo = TIPO.CC; evid = 'corrección manual en este archivo'; }
       else if (c.cuenta_cobro === false) { tipo = TIPO.ORD; evid = 'corrección manual en este archivo'; }
+      else if (ccWeb) {
+        if (fe) { tipo = TIPO.REVISAR; motivo = 'Está ' + ccWeb + ', pero el número también aparece como factura electrónica en ' + fe.fuente; falta = 'Confirmar el tipo de este documento'; }
+        else { tipo = TIPO.CC; evid = ccWeb; }
+      }
       else if (r.cuenta_cobro || ccNota) {
         const fuente = ccNota ? 'la nota del documento dice cuenta de cobro' : 'regla confirmada del proveedor';
         if (fe) { tipo = TIPO.REVISAR; motivo = 'Según ' + fuente + ', pero el documento aparece como factura electrónica en ' + fe.fuente; falta = 'Confirmar el tipo de este documento (y revisar la regla del proveedor)'; }
@@ -502,5 +526,5 @@
   }
 
   return { COLUMNAS, NUMERICAS, REQUERIDAS, LEYENDA_CC, LEYENDA_CM, DETALLE_SERIE, COLOR, plano, columnaDe, contactoClave, serieDe, detalleDeSerie,
-    aNumero, aFecha, aHora, aBooleano, agregarLeyenda, leerCsv, leerTabla, completarDesdeWeb, ingresoLegible, leerDian, compararConDian, textoDiferencia, IMPUESTOS_DIAN, TIPO, TIPO_TXT, claveProveedor, indicioCuentaCobro, mapaReglas, armarEvidencia, facturaElectronica, clasificar, resumen, contactos, filaExcel, armarLibro };
+    aNumero, aFecha, aHora, aBooleano, agregarLeyenda, cuentaCobroWeb, leerCsv, leerTabla, completarDesdeWeb, ingresoLegible, leerDian, compararConDian, textoDiferencia, IMPUESTOS_DIAN, TIPO, TIPO_TXT, claveProveedor, indicioCuentaCobro, mapaReglas, armarEvidencia, facturaElectronica, clasificar, resumen, contactos, filaExcel, armarLibro };
 });

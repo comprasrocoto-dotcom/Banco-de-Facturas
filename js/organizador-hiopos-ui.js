@@ -32,9 +32,10 @@ async function orgHCargarBanco() {
   const facturas = [], proveedores = [];
   try {
     for (let d = 0; ; d += 1000) {
-      const { data, error } = await SB.from('facturas').select('documento,prefijo,folio,emisor,nit_emisor').range(d, d + 999);
+      // (13/10/2026) con tipo y N° de ingreso: las cuentas de cobro subidas con foto se reconocen solas (no son factura electronica)
+      const { data, error } = await SB.from('facturas').select('documento,prefijo,folio,emisor,nit_emisor,tipo,num_ingreso').order('cufe').range(d, d + 999);
       if (error) throw new Error(error.message);
-      (data || []).forEach((f) => { facturas.push({ documento: f.documento, prefijo: f.prefijo, folio: f.folio, emisor: f.emisor, nit: f.nit_emisor, fuente: 'el Banco de Facturas' }); proveedores.push({ nombre: f.emisor, nit: f.nit_emisor }); });
+      (data || []).forEach((f) => { facturas.push({ documento: f.documento, prefijo: f.prefijo, folio: f.folio, emisor: f.emisor, nit: f.nit_emisor, tipo: f.tipo, num_ingreso: f.num_ingreso, fuente: 'el Banco de Facturas' }); proveedores.push({ nombre: f.emisor, nit: f.nit_emisor }); });
       if (!data || data.length < 1000) break;
     }
     const { data: pv } = await SB.from('proveedores').select('nit,razon_social,nombre_comercial').limit(5000);
