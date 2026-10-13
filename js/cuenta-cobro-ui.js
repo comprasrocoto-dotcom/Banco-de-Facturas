@@ -1,7 +1,7 @@
 // ============================================================
 //  cuenta-cobro-ui.js  -  ventana "📷 Cuenta de cobro" del pedido (13/10/2026)
 // ============================================================
-// Foto (camara del celular) + N° + Fecha Recibido + centro de costo (si la marca lo usa) + cantidad y precio de cada
+// Foto (camara del celular) + N° + Fecha Recibido + centro de costo (si la marca lo usa) + cantidad y TOTAL de cada
 // articulo del pedido. Valida con CuentaCobro.validar, sube la foto (comprimida) y llama a cuenta_cobro_amarrar
 // (crea la cuenta y la amarra al pedido, todo o nada). Despues el agente la ingresa al ERP como cualquier factura.
 const CC = { pedido: null, lineas: [], foto: null, fotoUrl: null, guardando: false };
@@ -20,11 +20,10 @@ function ccModal() {
     <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap">
       <div><label style="font-weight:700">2. N° de la cuenta <span style="color:#b91c1c">*</span></label><input id="ccNumero" placeholder="Ej. 0457" style="width:140px;margin:4px 0" autocomplete="off"></div>
       <div><label style="font-weight:700">3. Fecha Recibido <span style="color:#b91c1c">*</span></label><input type="date" id="ccFecha" style="width:auto;margin:4px 0"></div>
-      <div><label style="font-weight:700">4. Total de la cuenta <span style="color:#b91c1c">*</span></label><input id="ccTotal" inputmode="numeric" placeholder="$" style="width:150px;margin:4px 0" oninput="ccSuma()" autocomplete="off"></div>
     </div>
     <div id="ccCentroBox" style="display:none;margin:4px 0"><label style="font-weight:700">Centro de costo <span style="color:#b91c1c">*</span></label><div id="ccCentroSel"></div></div>
-    <div style="font-weight:700;margin-top:8px">5. Lo que llegó, según el papel</div>
-    <div class="mut" style="font-size:12px">Cantidad y precio unitario de cada artículo. Si un artículo no llegó, deja la cantidad en 0.</div>
+    <div style="font-weight:700;margin-top:8px">4. Lo que llegó, según el papel</div>
+    <div class="mut" style="font-size:12px">Cantidad y TOTAL de cada artículo (como viene en el papel): el precio unitario y el total de la cuenta se calculan solos. Si un artículo no llegó, deja la cantidad en 0.</div>
     <div id="ccLineas" style="max-height:40vh;overflow:auto;margin-top:6px"></div>
     <div id="ccSuma" style="margin-top:6px;font-weight:700"></div>
     <div class="err" id="ccErr"></div>
@@ -44,7 +43,7 @@ async function abrirCuentaCobro(pedidoId) {
   CC.pedido = p; CC.foto = null; CC.guardando = false;
   if (CC.fotoUrl) { try { URL.revokeObjectURL(CC.fotoUrl); } catch (e) {} CC.fotoUrl = null; }
   $('ccTitulo').textContent = '📷 Cuenta de cobro — pedido ' + (p.numero || '') + ' · ' + (p.proveedor_texto || p.proveedor || '');
-  $('ccFoto').value = ''; $('ccFotoVista').innerHTML = ''; $('ccNumero').value = ''; $('ccTotal').value = ''; $('ccErr').textContent = '';
+  $('ccFoto').value = ''; $('ccFotoVista').innerHTML = ''; $('ccNumero').value = ''; $('ccErr').textContent = '';
   const hoy = FechaRecibido.hoyCO();
   $('ccFecha').value = hoy; $('ccFecha').max = hoy; if (p.fecha) $('ccFecha').min = String(p.fecha).slice(0, 10);
   // centro de costo (solo si la marca lo usa), igual que en "Amarrar"
@@ -55,33 +54,32 @@ async function abrirCuentaCobro(pedidoId) {
   m.classList.add('on');
   const r = await SB.from('pedido_lineas').select('id,codigo,insumo,cantidad,unidad').eq('pedido_id', p.id).order('id');
   if (r.error) { $('ccLineas').innerHTML = '<div class="err">No pude cargar los artículos: ' + escAg(r.error.message) + '</div>'; CC.lineas = []; return; }
-  CC.lineas = (r.data || []).map((l) => ({ codigo: l.codigo, articulo: l.insumo, unidad: l.unidad, cantidad: l.cantidad == null ? '' : String(l.cantidad), precio: '' }));
+  CC.lineas = (r.data || []).map((l) => ({ codigo: l.codigo, articulo: l.insumo, unidad: l.unidad, cantidad: l.cantidad == null ? '' : String(l.cantidad), total: '' }));
   ccPintarLineas();
 }
 
 function ccPintarLineas() {
   if (!CC.lineas.length) { $('ccLineas').innerHTML = '<div class="err">El pedido no tiene artículos.</div>'; ccSuma(); return; }
-  // sin columna de subtotal (cabe en el celular): va debajo del precio
-  $('ccLineas').innerHTML = `<table style="font-size:13px"><thead><tr><th style="padding:4px">Artículo</th><th style="padding:4px">Cant.</th><th style="padding:4px">Precio unit.</th></tr></thead><tbody>${
+  // el precio unitario (total / cantidad) va debajo del total (cabe en el celular)
+  $('ccLineas').innerHTML = `<table style="font-size:13px"><thead><tr><th style="padding:4px">Artículo</th><th style="padding:4px">Cant.</th><th style="padding:4px">Total artículo</th></tr></thead><tbody>${
     CC.lineas.map((l, i) => `<tr><td style="padding:4px">${escAg(l.articulo)}${l.unidad ? ' <span class="mut">(' + escAg(l.unidad) + ')</span>' : ''}</td>
       <td style="padding:4px"><input inputmode="decimal" value="${escAg(l.cantidad)}" style="width:58px;margin:0;padding:6px" oninput="CC.lineas[${i}].cantidad=this.value;ccSuma()"></td>
-      <td style="padding:4px"><input inputmode="numeric" value="${escAg(l.precio)}" placeholder="$" style="width:84px;margin:0;padding:6px" oninput="CC.lineas[${i}].precio=this.value;ccSuma()">
+      <td style="padding:4px"><input inputmode="numeric" value="${escAg(l.total)}" placeholder="$" style="width:92px;margin:0;padding:6px" oninput="CC.lineas[${i}].total=this.value;ccSuma()">
         <div class="mut" style="font-size:11px" id="ccSub${i}"></div></td></tr>`).join('')}</tbody></table>`;
   ccSuma();
 }
 
-// suma en vivo: subtotal de cada linea y diferencia con el total escrito
+// en vivo: precio unitario de cada articulo (total / cantidad) y el total de la cuenta (suma de los articulos)
 function ccSuma() {
   CC.lineas.forEach((l, i) => {
-    const c = CuentaCobro.cantidad(l.cantidad), pr = CuentaCobro.num(l.precio), el = $('ccSub' + i);
-    if (el) el.textContent = c != null && pr != null ? money(Math.round(c * pr)) : '';
+    const c = CuentaCobro.cantidad(l.cantidad), t = CuentaCobro.num(l.total), el = $('ccSub' + i);
+    if (el) el.textContent = c && t != null && t >= 0 ? 'unit. ' + money(CuentaCobro.unitario(t, c)) + (Math.round(t / c) !== CuentaCobro.unitario(t, c) ? ' (' + CuentaCobro.unitario(t, c).toLocaleString('es-CO') + ')' : '') : '';
   });
-  const v = CuentaCobro.validar({ foto: true, numero: 'x', total: $('ccTotal') ? $('ccTotal').value : '', lineas: CC.lineas });
+  const v = CuentaCobro.validar({ foto: true, numero: 'x', lineas: CC.lineas });
   const s = $('ccSuma'); if (!s) return;
   if (!v.lineas.length) { s.textContent = ''; return; }
-  const cuadra = v.total != null && v.total > 0 && Math.abs(v.diferencia) <= Math.max(1, v.lineas.length);
-  s.innerHTML = 'Suma de los artículos: ' + money(v.suma) + (v.total ? (cuadra ? ' <span style="color:#15803d">✓ cuadra con el total</span>'
-    : ' <span style="color:#b91c1c">· diferencia ' + money(v.diferencia) + ' con el total</span>') : '');
+  s.innerHTML = '<div style="background:#f0fdf4;border:1px solid #86efac;color:#166534;border-radius:8px;padding:8px 12px;font-size:16px">Total de la cuenta: ' + money(v.total) +
+    (v.lineas.length > 1 ? ' <span style="font-weight:400;font-size:13px">(suma de ' + v.lineas.length + ' artículos)</span>' : '') + '</div>';
 }
 
 // foto: se reduce (lado mayor 1600 px, JPG) para que suba rapido desde el celular
@@ -116,7 +114,7 @@ function ccCerrar() { const m = $('modalCC'); if (m) m.classList.remove('on'); }
 async function ccGuardar() {
   if (CC.guardando || !CC.pedido) return;
   const p = CC.pedido, err = $('ccErr'); err.textContent = '';
-  const v = CuentaCobro.validar({ foto: !!CC.foto, numero: $('ccNumero').value, total: $('ccTotal').value, lineas: CC.lineas });
+  const v = CuentaCobro.validar({ foto: !!CC.foto, numero: $('ccNumero').value, lineas: CC.lineas });
   const vf = FechaRecibido.validar($('ccFecha').value, p.fecha, FechaRecibido.hoyCO());
   const errores = v.errores.slice(); if (!vf.ok) errores.push(vf.error);
   let cc = null;

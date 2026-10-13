@@ -26,35 +26,35 @@
   }
   const numeroLimpio = (t) => String(t == null ? '' : t).toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-  // datos = { numero, fecha (validada aparte con FechaRecibido), total, foto: boolean, lineas: [{codigo, articulo, cantidad, precio}] }
-  // -> { ok, errores[], lineas (solo las que llegaron: cantidad > 0), suma, diferencia }
+  // precio unitario = total del articulo / cantidad, con 2 decimales (el ERP recibe el precio unitario)
+  const unitario = (total, cant) => Math.round((total / cant) * 100) / 100;
+
+  // (13/10/2026, pedido del usuario) en cada articulo se escribe la CANTIDAD y el TOTAL DE ESE ARTICULO (como viene en el papel):
+  // el precio unitario sale solo (total / cantidad) y el total de la cuenta es la suma de los articulos (ya no se digita).
+  // datos = { numero, foto: boolean, lineas: [{codigo, articulo, cantidad, total}] } (la fecha se valida aparte con FechaRecibido)
+  // -> { ok, errores[], lineas (solo las que llegaron: cantidad > 0, con su precio_unitario), total }
   function validar(datos) {
     const d = datos || {}, errores = [];
     if (!d.foto) errores.push('Toma o elige la foto de la cuenta de cobro.');
     if (!numeroLimpio(d.numero)) errores.push('Escribe el número de la cuenta de cobro (el que trae el papel).');
-    const total = num(d.total);
-    if (total == null || total <= 0) errores.push('Escribe el total de la cuenta de cobro.');
-    const lineas = [], sinPrecio = [], malas = [];
+    const lineas = [], sinTotal = [], malas = [];
     for (const l of d.lineas || []) {
       const nombre = String(l.articulo || '').trim();
       const vacia = String(l.cantidad == null ? '' : l.cantidad).trim() === '';
       const cant = cantidad(l.cantidad);
       if (vacia || cant === 0) continue;   // no llego: no va en la cuenta
       if (cant == null || cant < 0) { malas.push(nombre); continue; }
-      const precio = num(l.precio);
-      if (String(l.precio == null ? '' : l.precio).trim() === '') { sinPrecio.push(nombre); continue; }
-      if (precio == null || precio < 0) { malas.push(nombre); continue; }
-      lineas.push({ codigo: l.codigo || null, articulo: nombre, cantidad: cant, precio_unitario: precio, subtotal: Math.round(cant * precio) });
+      if (String(l.total == null ? '' : l.total).trim() === '') { sinTotal.push(nombre); continue; }
+      const tot = num(l.total);
+      if (tot == null || tot < 0) { malas.push(nombre); continue; }
+      lineas.push({ codigo: l.codigo || null, articulo: nombre, cantidad: cant, precio_unitario: unitario(tot, cant), subtotal: Math.round(tot) });
     }
-    if (sinPrecio.length) errores.push('Falta el precio de: ' + sinPrecio.join(', ') + ' (si no llegó, pon la cantidad en 0).');
-    if (malas.length) errores.push('Revisa la cantidad o el precio de: ' + malas.join(', ') + '.');
-    if (!lineas.length && !sinPrecio.length && !malas.length) errores.push('Escribe la cantidad y el precio de lo que llegó (al menos un artículo).');
-    const suma = lineas.reduce((s, l) => s + l.subtotal, 0);
-    const diferencia = total == null ? null : suma - total;
-    if (total != null && total > 0 && lineas.length && Math.abs(diferencia) > Math.max(1, lineas.length)) {
-      errores.push('Los artículos suman $ ' + suma.toLocaleString('es-CO') + ' y el total de la cuenta es $ ' + total.toLocaleString('es-CO') + ': revisa cantidades y precios.');
-    }
-    return { ok: !errores.length, errores, lineas, suma, total, diferencia };
+    if (sinTotal.length) errores.push('Falta el total de: ' + sinTotal.join(', ') + ' (si no llegó, pon la cantidad en 0).');
+    if (malas.length) errores.push('Revisa la cantidad o el total de: ' + malas.join(', ') + '.');
+    if (!lineas.length && !sinTotal.length && !malas.length) errores.push('Escribe la cantidad y el total de lo que llegó (al menos un artículo).');
+    const total = lineas.reduce((s, l) => s + l.subtotal, 0);
+    if (lineas.length && total <= 0) errores.push('El total de la cuenta no puede ser $ 0.');
+    return { ok: !errores.length, errores, lineas, total };
   }
 
   // donde se guarda la foto en el almacenamiento (la base exige que empiece por cuentas_cobro/)
@@ -63,5 +63,5 @@
     return 'cuentas_cobro/' + (p.marca_id || 'sin-marca') + '/' + String(p.numero || p.id || 'pedido').replace(/[^A-Za-z0-9-]/g, '') + '_' + (ahoraMs || Date.now()) + '.jpg';
   }
 
-  return { num, cantidad, numeroLimpio, validar, rutaFoto };
+  return { num, cantidad, unitario, numeroLimpio, validar, rutaFoto };
 });
