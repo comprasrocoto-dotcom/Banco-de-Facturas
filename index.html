@@ -345,7 +345,7 @@ async function sesion(u){
   $("login").style.display="none"; $("app").style.display="block";
   try{ pintarBotonManual(); }catch(e){}     // 📖 Manual: solo si su perfil tiene algun manual habilitado
   if(perfil.debe_cambiar_clave) await exigirCambioClave();     // contraseña temporal: hay que cambiarla antes de seguir
-  const s=perfil.sedes;
+  const s=perfil.sedes; let sedeFija=null;
   if(perfil.rol==="admin"||perfil.rol==="pagos"){$("btnsubir").style.display="inline-block";$("barraDescarga").style.display="flex";$("m-hiopos").style.display="inline-block";$("m-cruce").style.display="inline-block";$("m-precios").style.display="inline-block";}
   if(perfil.rol==="admin"){ $("m-admin").style.display="inline-block"; $("btnIngresos").style.display="inline-block"; }
   const {data:ss}=await SB.from("sedes").select("id,nombre,marca_id,marcas(nombre)").order("nombre");
@@ -359,6 +359,9 @@ async function sesion(u){
     });
     $("fSede").innerHTML='<option value="">📍 Todas las sedes</option>'+
       Object.keys(porMarca).map(m=>`<optgroup label="${m}">${porMarca[m].map(s=>`<option value="${s.id}">${s.nombre}</option>`).join("")}</optgroup>`).join("");
+    // (13/10/2026) analista con UNA sola sede (ej. usuario de pedidos de Provenza): sin selector ni "Todas las sedes"; queda fija en la suya
+    const permitidasSede=AnalistaSedes.permitidas(sedes,alcanceUsuario);
+    if(alcanceUsuario&&alcanceUsuario.restringido&&permitidasSede.length===1){ sedeFija=permitidasSede[0]; $("fSede").value=String(sedeFija.id); $("fSede").style.display="none"; }
   }
   aplicarPermisosUI();      // mostrar/ocultar segun los permisos del perfil
   const {data:ms}=await SB.from("marcas").select("id,nombre").order("nombre");
@@ -367,7 +370,8 @@ async function sesion(u){
   // marcas (igual que #fSede), (b) arranca sin elegir (no la primera de la lista), y subirPdfs() exige elegirla antes de subir.
   const marcaIdsAg=(alcanceUsuario&&alcanceUsuario.restringido)?new Set(AnalistaSedes.permitidas(sedes,alcanceUsuario).map(s=>s.marca_id)):null;
   $("mar").innerHTML='<option value="">— elige la marca —</option>'+(ms||[]).filter(m=>!marcaIdsAg||marcaIdsAg.has(m.id)).map(m=>`<option value="${m.id}">${m.nombre}</option>`).join("");
-  $("sede").textContent=(s?s.nombre:"—")+(s&&s.marcas?" · "+s.marcas.nombre:"");
+  const sv=s||sedeFija;
+  $("sede").textContent=(sv?sv.nombre:"—")+(sv&&sv.marcas?" · "+sv.marcas.nombre:"");
   await cargar();
 }
 async function entrar(){
@@ -2380,7 +2384,8 @@ let ingresoDocs=[];
 async function cargarErroresIngreso(){
   const c=$("erroresIngreso"); if(!c) return;
   try{
-    if(typeof can!=="function" || !(perfil && (perfil.rol==="admin"||perfil.rol==="pagos"))){ c.style.display="none"; return; }
+    // (13/10/2026) la cola de ingresos es para quien lanza el agente (permiso ingresos.iniciar): un perfil "solo pedidos" no la ve
+    if(typeof can!=="function" || !(perfil && (perfil.rol==="admin"||perfil.rol==="pagos")) || !can("ingresos.iniciar")){ c.style.display="none"; return; }
     const r=await SB.from("ingreso_documento").select("pedido_id,numero,estado,etapa,error_etapa,error").in("estado",["ERROR","PENDIENTE_REINTENTO"]).order("actualizado_en",{ascending:false}).limit(50);
     ingresoDocs=r.data||[];
   }catch(e){ ingresoDocs=[]; }

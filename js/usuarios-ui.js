@@ -25,6 +25,8 @@ function aplicarPermisosUI() {
   mostrar('m-admin', can('admin.ver') || can('admin.usuarios'));
   mostrar('btnsubir', can('facturas.subir')); mostrar('barraDescarga', can('facturas.subir'), 'flex');
   mostrar('btnIngresos', can('ingresos.iniciar'));
+  // (13/10/2026) Organizador Hiopos: solo quien ve el Cruce DIAN (un perfil "solo pedidos" de nivel pagos ya no lo ve)
+  if (!can('cruce_dian.ver')) mostrar('m-hiopos', false);
   mostrar('btnNuevoPedido', can('pedidos.crear'));
   mostrar('ad-usuarios', can('admin.usuarios'));
   mostrar('ad-prov', can('admin.ver')); mostrar('ad-art', can('admin.ver')); mostrar('ad-cat', can('admin.ver'));
