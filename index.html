@@ -309,6 +309,8 @@ tr:hover td{background:#f1f5f9}
 <script src="js/fecha-recibido.js"></script>
 <script src="js/select-buscable.js"></script>
 <script src="js/centro-costo.js"></script>
+<script src="js/cuenta-cobro.js"></script>
+<script src="js/cuenta-cobro-ui.js"></script>
 <script src="js/organizador-hiopos.js"></script>
 <script src="js/hoja-contable.js"></script>
 <script src="js/hoja-contable-ui.js"></script>
@@ -2094,6 +2096,7 @@ async function abrirPedido(id){
      <div id="env_${p.id}"></div>
      <div class="row" style="margin-top:14px">
        ${!p.factura_cufe?`<button class="s" onclick="abrirAmarre('pedido',${p.id})">🔗 Amarrar a factura</button>`:""}
+       ${!p.factura_cufe&&typeof abrirCuentaCobro==="function"?`<button class="s" title="Proveedor sin factura electrónica: foto de la cuenta de cobro + cantidades y precios" onclick="abrirCuentaCobro(${p.id})">📷 Cuenta de cobro</button>`:""}
        ${p.factura_cufe?`<span class="badge st-sellada">Amarrado a ${numFacturaDe(p)||"factura"}</span>`:""}
        ${(p.factura_cufe&&typeof Desamarrar!=="undefined"&&Desamarrar.puede(perfil))?`<button class="d" title="Suelta la factura de este pedido sin borrar nada: la factura queda libre en el banco" onclick="desamarrarPedido(${p.id})">⛓ Desamarrar factura</button>`:""}
        ${p.observacion_pedido?`<span class="mut">Obs: ${p.observacion_pedido}</span>`:""}
