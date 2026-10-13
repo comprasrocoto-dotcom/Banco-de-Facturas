@@ -141,6 +141,7 @@ tr:hover td{background:#f1f5f9}
         <select id="selTipo" class="sel-chip" title="Qué documentos ver: facturas o notas crédito" onchange="setTipo(this.value)">
           <option value="factura">Facturas</option>
           <option value="nota_credito">Notas crédito</option>
+          <option value="cuenta_cobro">Cuentas de cobro</option>
         </select>
         <button class="chip on" id="v-pool"     onclick="setVista('pool')">Sin asignar</button>
         <button class="chip"    id="v-mias"     onclick="setVista('mias')">Mías</button>
@@ -2714,7 +2715,10 @@ async function cambiarFiltroSede(){
   await cargarPedidos();
   pintar();
 }
-function setTipo(t){tipo=t;const s=$("selTipo"); if(s&&s.value!==t) s.value=t; pintar();}
+function setTipo(t){tipo=t;const s=$("selTipo"); if(s&&s.value!==t) s.value=t;
+  // (13/10/2026) las cuentas de cobro quedan selladas al subirlas (la sede ya las recibio): se abren en "Selladas"
+  if(t==="cuenta_cobro"&&(vista==="pool"||vista==="mias")){ setVista("selladas"); return; }
+  pintar();}
 function setVista(v){vista=v;if(v!=="listas") listasSede=null;["pool","mias","selladas","hecho","nov","listas"].forEach(x=>$("v-"+x).classList.toggle("on",x==v));pintar();}
 function novDe(c){return novedades.find(n=>n.cufe===c);}
 // ── Ingresadas sin sellar (19/09/2026): ya tienen Ingreso ERP pero siguen en Sin asignar / Mías sin sellar ──
@@ -2806,10 +2810,10 @@ function pintar(){
         ${chipsNotaCredito(f)}
         <span class="sp"></span>
         ${(perfil.rol==="sede"&&f.estado=="pool")?`<button class="s" onclick="tomar('${f.cufe}')">Es mía</button>`:""}
-        ${((f.estado==="asignada"||f.estado==="sellada")&&(perfil.rol==="sede"||perfil.rol==="admin"||perfil.rol==="pagos"))?`<button class="d" onclick="soltar('${f.cufe}')">↩ ${f.estado==="sellada"?"Quitar el sello":"No es mía"}</button>`:""}
+        ${(f.tipo!=="cuenta_cobro"&&(f.estado==="asignada"||f.estado==="sellada")&&(perfil.rol==="sede"||perfil.rol==="admin"||perfil.rol==="pagos"))?`<button class="d" onclick="soltar('${f.cufe}')">↩ ${f.estado==="sellada"?"Quitar el sello":"No es mía"}</button>`:""}
         ${((perfil.rol==="admin"||perfil.rol==="pagos")&&f.estado!=="sellada"&&f.estado!=="pagada")?`<select id="sel_${f.cufe}" style="width:auto;margin:0">${AnalistaSedes.permitidas(sedes,alcanceUsuario).filter(s=>s.marca_id===f.marca_id).map(s=>`<option value="${s.id}"${f.sede_id===s.id?" selected":""}>${s.nombre}</option>`).join("")}</select><button class="s" onclick="asignar('${f.cufe}')">Asignar</button>`:""}
         ${f.estado=="asignada"?`<button class="p" onclick="sellar('${f.cufe}')">✔ Sellar y aprobar</button>`:""}
-        ${f.archivo_pdf?`<button onclick="verPdf('${f.cufe}')">📄 Ver PDF</button>`:""}
+        ${f.archivo_pdf?(f.tipo==="cuenta_cobro"?`<button class="p" onclick="verPdf('${f.cufe}')">📷 Ver foto</button><button onclick="verLineasCuentaCobro('${f.cufe}',this)">📋 Ver artículos</button>`:`<button onclick="verPdf('${f.cufe}')">📄 Ver PDF</button>`):""}
         ${(f.archivo_pdf_sellado&&(f.estado==="sellada"||f.estado==="pagada"))?`<button class="p" onclick="verPdfArchivo('${f.archivo_pdf_sellado}')">✅ Ver sellada</button>`:""}
         ${f.archivo_recibo?`<button onclick="verPdfArchivo('${f.archivo_recibo}')">📸 Ver recibo</button>`:""}
         ${(f.tipo=="factura")?`<button class="s" onclick="abrirAmarre('factura','${f.cufe}')">🔗 Buscar pedido</button>`:""}

@@ -109,6 +109,22 @@ function ccComprimir(file) {
   });
 }
 
+// (13/10/2026) en Facturas > "Cuentas de cobro": lo que la sede digito (articulo, cantidad, precio unitario y total), debajo de la tarjeta
+async function verLineasCuentaCobro(cufe, boton) {
+  const card = boton && boton.closest('.card'); if (!card) return;
+  const ya = card.querySelector('.cc-lineas'); if (ya) { ya.remove(); return; }
+  const caja = document.createElement('div'); caja.className = 'cc-lineas'; caja.style.cssText = 'margin-top:10px;overflow:auto';
+  caja.innerHTML = '<div class="mut">Cargando artículos...</div>'; card.appendChild(caja);
+  const r = await SB.from('cuenta_cobro_linea').select('orden,codigo,articulo,cantidad,precio_unitario,subtotal').eq('factura_cufe', cufe).order('orden');
+  if (r.error) { caja.innerHTML = '<div class="err">No pude cargar los artículos: ' + escAg(r.error.message) + '</div>'; return; }
+  const l = r.data || [];
+  if (!l.length) { caja.innerHTML = '<div class="mut">Esta cuenta de cobro no tiene artículos guardados.</div>'; return; }
+  const n = (x) => Number(x || 0).toLocaleString('es-CO', { maximumFractionDigits: 2 });
+  caja.innerHTML = `<table style="font-size:13px"><thead><tr><th>Código</th><th>Artículo</th><th style="text-align:right">Cant.</th><th style="text-align:right">Precio unit.</th><th style="text-align:right">Total</th></tr></thead><tbody>${
+    l.map((x) => `<tr><td>${escAg(x.codigo || '—')}</td><td>${escAg(x.articulo)}</td><td style="text-align:right">${n(x.cantidad)}</td><td style="text-align:right">$ ${n(x.precio_unitario)}</td><td style="text-align:right">${money(Number(x.subtotal))}</td></tr>`).join('')
+  }</tbody><tfoot><tr><td colspan="4" style="text-align:right;font-weight:700">Total</td><td style="text-align:right;font-weight:700">${money(l.reduce((s, x) => s + Number(x.subtotal || 0), 0))}</td></tr></tfoot></table>`;
+}
+
 function ccCerrar() { const m = $('modalCC'); if (m) m.classList.remove('on'); }
 
 async function ccGuardar() {
