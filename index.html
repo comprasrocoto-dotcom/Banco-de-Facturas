@@ -2818,6 +2818,12 @@ function panelSinSellar(base){
   caja.innerHTML='<div class="card" style="border-color:#fcd34d;background:#fffbeb;margin:0 0 14px"><div class="row"><div><b style="color:#92400e">⏳ '+texto+'</b><div class="mut">'
     +(vieja>=2?"La más antigua lleva "+vieja+" días.":"Compras ya hizo su parte; falta que la sede las tome y las selle.")+'</div></div><span class="sp"></span><button class="p" onclick="setVista(\'listas\')">Verlas</button></div></div>';
 }
+// (14/10/2026) "📍 Provenza · Rocoto" arriba en la tarjeta de la factura: su sede, o la de su pedido si aun no tiene
+function sedeChip(f,mapa){
+  const s=SinSellar.sedeDe(f,mapa), sd=s.id!=null?(sedes||[]).find(x=>x.id===s.id):null;
+  if(!sd) return '<span class="badge" style="font-size:12px;vertical-align:middle">📍 Sin sede</span>';
+  return '<span class="badge" style="background:#eff6ff;color:#1e3a8a;border-color:#bfdbfe;font-weight:700;font-size:12px;vertical-align:middle" title="'+(s.origen==="pedido"?"Sede de su pedido":"Sede de la factura")+'">📍 '+escAg(sd.nombre)+(sd.marcas&&sd.marcas.nombre?" · "+escAg(sd.marcas.nombre):"")+'</span>';
+}
 function filtrarListasSede(k){ listasSede=(k===null||k==="null")?null:(k==="none"?"none":Number(k)); pintar(); }
 function badgeSinSellar(f){
   const e=SinSellar.etiqueta(f,BancoUtils.hoyColombia()), c={nuevo:["#075985","#f0f9ff","#7dd3fc"],aviso:["#92400e","#fffbeb","#fcd34d"],alerta:["#991b1b","#fef2f2","#fca5a5"]}[e.nivel];
@@ -2856,12 +2862,13 @@ function pintar(){
   EXPORTAR.actual.facturas=l;   // lo que se ve (con vista, filtros y búsqueda) es lo que baja en Excel/CSV
   const cont=$("lista");
   if(!l.length){cont.innerHTML='<div class="vacio">No hay documentos acá.</div>';return;}
+  const mapaSF=mapaSedePorFactura();   // (14/10/2026) sede de cada factura (o la de su pedido) arriba en la tarjeta
   cont.innerHTML=l.map(f=>{
     const nv=novDe(f.cufe);
     const st={pool:["Sin asignar","st-pool"],asignada:["Mía · sin sellar","st-asignada"],sellada:["Sellada y aprobada","st-sellada"],pagada:["En pagos","st-sellada"],rechazada:["Rechazada","st-pool"]}[f.estado]||[f.estado,""];
     return `<div class="card">
       <div class="row">
-        <div><div class="emisor">${f.emisor||"—"}</div>
+        <div><div class="emisor">${f.emisor||"—"} ${sedeChip(f,mapaSF)}</div>
           <div class="mut">${(()=>{const n=f.documento||((f.prefijo||"")+(f.folio||""));return n? "<b style='color:#0f766e'>N° "+n+"</b>" : "<span style='color:#b45309;font-weight:700'>⚠️ sin número en el PDF</span>";})()} · ${fch(f.fecha_emision)} · NIT ${f.nit_emisor||"—"}</div></div>
         ${f.estado==="pool"?`<div style="margin-left:auto;display:flex;align-items:center;gap:12px"><button class="ojo" title="Ver el resumen de la factura" aria-label="Ver el resumen de la factura" onclick="verResumenFactura('${f.cufe}')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button><div class="total" style="margin-left:0">${money(f.total)}</div></div>`:`<div class="total">${money(f.total)}</div>`}
       </div>
