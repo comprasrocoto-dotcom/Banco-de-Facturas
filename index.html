@@ -37,6 +37,16 @@ h1{font-size:16px;margin:0;letter-spacing:.3px;font-weight:700}
   -webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat:no-repeat;background-position:right 12px center}
 .sel-chip option{color:#0f172a;background:#fff;font-weight:600}
+/* (13/10/2026) filtros de seleccion multiple (js/filtro-multiple.js) */
+.fm{position:relative;display:inline-block}
+.fm-btn{padding:5px 14px}
+.fm-btn.fm-activo{box-shadow:0 0 0 2px #fde68a inset}
+.fm-panel{position:absolute;z-index:30;top:calc(100% + 4px);left:0;min-width:220px;max-width:min(320px,90vw);max-height:60vh;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 30px rgba(15,23,42,.18);padding:6px 4px}
+.fm-op{display:flex;align-items:center;gap:8px;padding:6px 10px;font-size:14px;color:#0f172a;cursor:pointer;border-radius:6px;font-weight:500;margin:0}
+.fm-op:hover{background:#f1f5f9}
+.fm-op input{width:auto;margin:0}
+.fm-todas{border-bottom:1px solid var(--line);font-weight:700}
+.fm-grupo{padding:6px 10px 2px;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase}
 .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
 .wrap{max-width:1120px;margin:0 auto;padding:22px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px;box-shadow:0 1px 2px rgba(15,23,42,.05)}
@@ -131,6 +141,7 @@ tr:hover td{background:#f1f5f9}
     <select id="fSede" style="width:auto;margin:0;display:none" onchange="cambiarFiltroSede()">
       <option value="">📍 Todas las sedes</option>
     </select>
+    <span id="caja_fmSede" style="display:none"></span>
     <span class="sp"></span>
     <button id="btnManual" style="display:none" title="Manual de uso (se abre en otra pestaña)" onclick="abrirManual()">📖 Manual</button>
     <button onclick="salir()">Salir</button>
@@ -138,11 +149,7 @@ tr:hover td{background:#f1f5f9}
   <div class="wrap">
     <div id="filtrosFacturas">
       <div class="row" style="margin-bottom:10px">
-        <select id="selTipo" class="sel-chip" title="Qué documentos ver: facturas o notas crédito" onchange="setTipo(this.value)">
-          <option value="factura">Facturas</option>
-          <option value="nota_credito">Notas crédito</option>
-          <option value="cuenta_cobro">Cuentas de cobro</option>
-        </select>
+        <span id="caja_fmTipo" title="Qué documentos ver: puedes marcar varios"></span>
         <button class="chip on" id="v-pool"     onclick="setVista('pool')">Sin asignar</button>
         <button class="chip"    id="v-mias"     onclick="setVista('mias')">Mías</button>
         <button class="chip"    id="v-selladas" onclick="setVista('selladas')">Selladas</button>
@@ -155,13 +162,7 @@ tr:hover td{background:#f1f5f9}
         <span data-exp="facturas"></span>
       </div>
       <div id="panelFiltrosFac" class="row filtros-panel" style="display:flex">
-        <select id="fcat" style="width:auto" onchange="pintar()">
-          <option value="">Todas las categorías</option>
-          <option value="insumos">Insumos</option>
-          <option value="empaque">Material de empaque</option>
-          <option value="aseo">Aseo</option>
-          <option value="loza_utensilios">Loza y utensilios</option>
-        </select>
+        <span id="caja_fmCat"></span>
         <input id="q" placeholder="🔎 Nº factura, proveedor o CUFE" style="width:260px;margin:0" oninput="pintar()">
         <span class="mut">Fecha:</span>
         <input type="date" id="fdesde" style="width:auto;margin:0" onchange="pintar()">
@@ -315,6 +316,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/copiar-articulo.js"></script>
 <script src="js/editar-pedido-lista.js"></script>
 <script src="js/pedido-erp.js"></script>
+<script src="js/filtro-multiple.js"></script>
 <script src="js/organizador-hiopos.js"></script>
 <script src="js/hoja-contable.js"></script>
 <script src="js/hoja-contable-ui.js"></script>
@@ -325,7 +327,7 @@ tr:hover td{background:#f1f5f9}
 const SB = supabase.createClient("https://egzggxwfyqeihzgpjgmp.supabase.co", "sb_publishable_3rzP6pCef1S5nRzFkG-eHw_-BF73n91");
 let alcanceUsuario=null;   // { restringido, sedes } del usuario (mi_alcance): un analista con sedes asignadas solo ve/pide las suyas
 let usuario=null, perfil=null, facturas=[], novedades=[], sedes=[], pedidos=[], pedidosCargados=false, pedVista="pendiente", modulo="banco";
-let tipo="factura", vista="pool", novActual=null;
+let tipo="factura", vista="pool", novActual=null, sedeFijaId=null;   // sedeFijaId: usuario de UNA sola sede (13/10/2026)
 const $=id=>document.getElementById(id);
 const money=n=>"$ "+(n||0).toLocaleString("es-CO",{maximumFractionDigits:0});
 const fch=s=>s?new Date(s+"T12:00:00").toLocaleDateString("es-CO",{day:"2-digit",month:"short",year:"numeric"}):"";
@@ -357,7 +359,7 @@ async function sesion(u){
   const {data:ss}=await SB.from("sedes").select("id,nombre,marca_id,marcas(nombre)").order("nombre");
   sedes=ss||[];
   if(perfil.rol==="admin"||perfil.rol==="pagos"){
-    $("fSede").style.display="inline-block";
+    $("caja_fmSede").style.display="inline-block";
     const porMarca={};
     AnalistaSedes.permitidas(sedes,alcanceUsuario).forEach(s=>{
       const marca=(s.marcas&&s.marcas.nombre)||"Sin marca";
@@ -365,9 +367,10 @@ async function sesion(u){
     });
     $("fSede").innerHTML='<option value="">📍 Todas las sedes</option>'+
       Object.keys(porMarca).map(m=>`<optgroup label="${m}">${porMarca[m].map(s=>`<option value="${s.id}">${s.nombre}</option>`).join("")}</optgroup>`).join("");
+    FM_OPC.fmSede=Object.keys(porMarca).flatMap(m=>porMarca[m].map(s=>({valor:s.id,texto:s.nombre,grupo:m}))); fmPintar("fmSede");   // (13/10/2026) varias sedes a la vez
     // (13/10/2026) analista con UNA sola sede (ej. usuario de pedidos de Provenza): sin selector ni "Todas las sedes"; queda fija en la suya
     const permitidasSede=AnalistaSedes.permitidas(sedes,alcanceUsuario);
-    if(alcanceUsuario&&alcanceUsuario.restringido&&permitidasSede.length===1){ sedeFija=permitidasSede[0]; $("fSede").value=String(sedeFija.id); $("fSede").style.display="none"; }
+    if(alcanceUsuario&&alcanceUsuario.restringido&&permitidasSede.length===1){ sedeFija=permitidasSede[0]; $("fSede").value=String(sedeFija.id); $("fSede").style.display="none"; $("caja_fmSede").style.display="none"; sedeFijaId=sedeFija.id; }
   }
   aplicarPermisosUI();      // mostrar/ocultar segun los permisos del perfil
   const {data:ms}=await SB.from("marcas").select("id,nombre").order("nombre");
@@ -1022,7 +1025,7 @@ function pintarAdmin(){
   const c=$("listaAdmin");
   if(adminVista==="prov"){
     { const sel=$("admMarca"); let cur=sel.value;
-      if(!adminMarcaTocada){ const fs=Number(($("fSede")||{}).value||0); const mm=fs?((sedes.find(s=>s.id===fs)||{}).marca_id):null; cur=mm?String(mm):""; }   // si el encabezado tiene una sede elegida, la marca de esa sede
+      if(!adminMarcaTocada){ const sf=sedesFiltro(), fs=sf.length===1?sf[0]:0; const mm=fs?((sedes.find(s=>s.id===fs)||{}).marca_id):null; cur=mm?String(mm):""; }   // si el encabezado tiene una sede elegida, la marca de esa sede
       sel.innerHTML=MarcaProv.opcionesMarca(adminMarcas,cur); }
     let l=MarcaProv.proveedoresDeAdmin(adminProv,adminVinc,$("admMarca").value).filter(x=>!q||SelectBuscable.coincide((x.razon_social||"")+" "+(x.nit||"")+" "+(x.nombre_comercial||"")+" "+(x.asesor||"")+" "+(x.correo||""),q)).filter(filtraFechaAdmin);
     EXPORTAR.actual.admin_prov=l;
@@ -1683,7 +1686,7 @@ async function cargarPedidos(){
   // Las sedes solo ven SUS pedidos; admin/pagos ven todos
   let query=SB.from("pedidos").select("*").order("id",{ascending:false}).limit(1200);
   if(perfil.rol==="sede") query=query.eq("sede_id",perfil.sede_id);
-  else{ const fSedeVal=$("fSede").value; if(fSedeVal) query=query.eq("sede_id",Number(fSedeVal)); }
+  else{ const sf=sedesFiltro(); if(sf.length) query=query.in("sede_id",sf); }   // (13/10/2026) varias sedes
   const {data,error}=await query;
   if(error){$("listaped").innerHTML='<div class="vacio">No pude cargar los pedidos: '+error.message+'</div>';return;}
   pedidos=data||[]; pedidosCargados=true; pintarPedidos();
@@ -2177,11 +2180,10 @@ async function pedirIngresoPedido(id){
 // Exporta CSV con las facturas pendientes de ingreso para buscar en el portal DIAN
 async function exportarPendientesDian(){
   const res=$("resdesc"); res.textContent="";
-  const fSedeVal=$("fSede").value;
   const fd=$("fdesde").value, fh=$("fhasta").value;
   // Exportar TODAS las facturas de la web (no solo pendientes) para que el cruce sea completo
   let l=facturas;
-  if(fSedeVal) l=l.filter(f=>f.sede_id===Number(fSedeVal));
+  l=l.filter(f=>sedeOk(f.sede_id));
   if(fd) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe>=fd;});
   if(fh) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe<=fh;});
   if(!l.length){res.textContent="No hay facturas para exportar.";return;}
@@ -2719,10 +2721,35 @@ async function cambiarFiltroSede(){
   await cargarPedidos();
   pintar();
 }
-function setTipo(t){tipo=t;const s=$("selTipo"); if(s&&s.value!==t) s.value=t;
-  // (13/10/2026) las cuentas de cobro quedan selladas al subirlas (la sede ya las recibio): se abren en "Selladas"
-  if(t==="cuenta_cobro"&&(vista==="pool"||vista==="mias")){ setVista("selladas"); return; }
-  pintar();}
+// (13/10/2026) FILTROS MULTIPLES (js/filtro-multiple.js): tipo de documento, sedes y categorias; vacio = todos
+const FM_OPC={
+  fmTipo:[{valor:"factura",texto:"Facturas"},{valor:"cuenta_cobro",texto:"Cuentas de cobro"},{valor:"nota_credito",texto:"Notas crédito"}],
+  fmCat:[{valor:"insumos",texto:"Insumos"},{valor:"empaque",texto:"Material de empaque"},{valor:"aseo",texto:"Aseo"},{valor:"loza_utensilios",texto:"Loza y utensilios"}],
+  fmSede:[]};
+const FM_TODOS={fmTipo:"Todos los documentos",fmCat:"Todas las categorías",fmSede:"📍 Todas las sedes"};
+const FM_SEL={fmTipo:["factura","cuenta_cobro"],fmCat:[],fmSede:[]};
+let fmAbierto=null;
+function fmPintar(id){ const c=$("caja_"+id); if(c&&typeof FiltroMultiple!=="undefined") c.innerHTML=FiltroMultiple.html(id,FM_OPC[id],FM_SEL[id],FM_TODOS[id],"fmAccion",fmAbierto===id); }
+function fmAccion(acc,id,valor){
+  if(acc==="abrir"){ fmAbierto=fmAbierto===id?null:id; ["fmTipo","fmCat","fmSede"].forEach(fmPintar); return; }
+  FM_SEL[id]=acc==="todas"?[]:FiltroMultiple.alternar(FM_SEL[id],valor,FM_OPC[id]);
+  fmPintar(id); fmAlCambiar(id);
+}
+function fmAlCambiar(id){
+  if(id==="fmSede"){ cambiarFiltroSede(); return; }
+  if(id==="fmTipo"){
+    tipo=FM_SEL.fmTipo.length===1?FM_SEL.fmTipo[0]:"varios";
+    // las cuentas de cobro quedan selladas al subirlas (la sede ya las recibio): solas, se abren en "Selladas"
+    if(tipo==="cuenta_cobro"&&(vista==="pool"||vista==="mias")){ setVista("selladas"); return; }
+  }
+  pintar();
+}
+document.addEventListener("click",e=>{ if(fmAbierto&&!e.target.closest(".fm")){ fmAbierto=null; ["fmTipo","fmCat","fmSede"].forEach(fmPintar); } });
+// sedes del filtro (vacio = todas); un usuario de UNA sola sede queda fijo en la suya
+function sedesFiltro(){ return sedeFijaId?[Number(sedeFijaId)]:FM_SEL.fmSede.map(Number); }
+function sedeOk(id){ const sf=sedesFiltro(); return !sf.length||sf.includes(Number(id)); }
+function setTipo(t){ FM_SEL.fmTipo=t?[t]:[]; fmPintar("fmTipo"); fmAlCambiar("fmTipo"); }
+fmPintar("fmTipo"); fmPintar("fmCat");
 function setVista(v){vista=v;if(v!=="listas") listasSede=null;["pool","mias","selladas","hecho","nov","listas"].forEach(x=>$("v-"+x).classList.toggle("on",x==v));pintar();}
 function novDe(c){return novedades.find(n=>n.cufe===c);}
 // ── Ingresadas sin sellar (19/09/2026): ya tienen Ingreso ERP pero siguen en Sin asignar / Mías sin sellar ──
@@ -2763,11 +2790,9 @@ function badgeSinSellar(f){
 }
 
 function pintar(){
-  const cat=$("fcat").value;
-  const fSedeVal=$("fSede").value;
-  // (13/10/2026) las cuentas de cobro salen TAMBIEN en «Facturas» (con su etiqueta); «Cuentas de cobro» muestra solo esas
-  const esDelTipo=f=>f.tipo===tipo||(tipo==="factura"&&f.tipo==="cuenta_cobro");
-  const base=facturas.filter(f=>esDelTipo(f)&&(!cat||f.categoria===cat)&&(!fSedeVal||f.sede_id===Number(fSedeVal)));
+  // (13/10/2026) filtros MULTIPLES: tipo de documento, categoria y sede (vacio = todos). Por defecto Facturas + Cuentas de cobro
+  const esDelTipo=f=>FiltroMultiple.permite(FM_SEL.fmTipo,f.tipo);
+  const base=facturas.filter(f=>esDelTipo(f)&&FiltroMultiple.permite(FM_SEL.fmCat,f.categoria)&&sedeOk(f.sede_id));
   let l=base;
   panelSinSellar(base);
   if(vista=="listas")   l=SinSellar.ordenar(sinSellarVisibles(base).filter(f=>listasSede==null||sedeListaKey(f)===listasSede));
@@ -3040,7 +3065,9 @@ async function bajarPdfsEnZip(lista, nombreFn, nombreZip, res){
       if(sig){ const r=await fetch(sig.signedUrl); if(r.ok) blob=await r.blob(); }
     }catch(e){ console.warn("descarga PDF:",e); }
     if(!blob){ fallidas.push(nombreFn(f)); continue; }
-    zip.file(BancoUtils.nombreUnico(nombreFn(f),usados), blob); ok++;
+    // (13/10/2026) las cuentas de cobro son una FOTO (jpg): se guarda con su extension real, no como .pdf
+    let nombreArch=nombreFn(f); const ext=String(f.archivo_pdf_sellado||f.archivo_pdf||"").match(/\.(jpe?g|png)$/i); if(ext) nombreArch=nombreArch.replace(/\.pdf$/i,"."+ext[1].toLowerCase());
+    zip.file(BancoUtils.nombreUnico(nombreArch,usados), blob); ok++;
   }
   if(ok){
     const out=await zip.generateAsync({type:"blob"});
@@ -3061,7 +3088,7 @@ async function descargarCicloCompleto(){
   const g=rangoDescarga(); if(g.error){ res.textContent=g.error; return; }
   // (05/10/2026) Ciclo completo = lo mismo que la vista "✅ Proceso terminado": con N° de ingreso ERP y sellada (o nota
   // credito, que no se sella), por FECHA DE INGRESO AL ERP (antes: solo selladas y por fecha de sello -> faltaban documentos)
-  const {lista,sinPdf,fueraDeRango}=BancoUtils.filtrarTerminadas(facturas,{desde:g.desde,hasta:g.hasta,sedeId:$("fSede").value});
+  const {lista,sinPdf,fueraDeRango}=BancoUtils.filtrarTerminadas(facturas,{desde:g.desde,hasta:g.hasta,sedeIds:sedesFiltro()});
   if(!lista.length){ res.textContent="No hay documentos con el proceso terminado"+textoRango(g.desde,g.hasta)+" (fecha de ingreso al ERP)."+(sinPdf?" ("+sinPdf+" sin PDF)":""); return; }
   const r=await bajarPdfsEnZip(lista,BancoUtils.nombreArchivoCiclo,"ciclo_completo_"+etiquetaRango(g.desde,g.hasta)+".zip",res);
   const nc=lista.filter(f=>f.tipo==="nota_credito").length;
@@ -3071,7 +3098,7 @@ async function descargarCicloCompleto(){
 async function descargarSelladas(){
   const res=$("resdesc"); res.textContent="";
   const g=rangoDescarga(); if(g.error){ res.textContent=g.error; return; }
-  const {lista,sinFechaSello}=BancoUtils.filtrarSelladas(facturas,{desde:g.desde,hasta:g.hasta,sedeId:$("fSede").value});
+  const {lista,sinFechaSello}=BancoUtils.filtrarSelladas(facturas,{desde:g.desde,hasta:g.hasta,sedeIds:sedesFiltro()});
   if(!lista.length){ res.textContent="No hay selladas"+textoRango(g.desde,g.hasta)+"."+(sinFechaSello?" ("+sinFechaSello+" sin fecha de sello)":""); return; }
   const nombreSellada=f=>{
     const num=((f.prefijo||"")+(f.folio||""))||f.cufe.slice(0,12);
@@ -3085,10 +3112,9 @@ async function descargarSelladas(){
 // con centro de costo, cuenta contable, base, IVA y total por factura
 async function descargarContabilidad(){
   const res=$("resdesc"); res.textContent="";
-  const fSedeVal=$("fSede").value;
   const fd=$("fdesde").value, fh=$("fhasta").value;
   let l=facturas.filter(f=>f.num_ingreso && f.archivo_pdf);
-  if(fSedeVal) l=l.filter(f=>f.sede_id===Number(fSedeVal));
+  l=l.filter(f=>sedeOk(f.sede_id));
   if(fd) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe>=fd;});
   if(fh) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe<=fh;});
   if(!l.length){res.textContent="No hay facturas con ingreso ERP en ese rango.";return;}
@@ -3221,7 +3247,6 @@ async function descargarPendientes(){
   console.log("DEBUG descargarPendientes: facturas totales=",facturas.length,
     "con num_ingreso=",facturas.filter(f=>f.num_ingreso).length);
   const res=$("resdesc"); res.textContent="";
-  const fSedeVal=$("fSede").value;
   const fd=$("fdesde").value, fh=$("fhasta").value;
   // Pendiente = todavía NO tiene N° de ingreso ERP. La tabla "novedades" no tiene
   // forma de marcarse como resuelta (no hay columna "resuelta" ni política de delete),
@@ -3232,7 +3257,7 @@ async function descargarPendientes(){
   let l=facturas.filter(f=>!f.num_ingreso&&(f.estado==="asignada"||f.estado==="sellada"));
   console.log("DEBUG descargarPendientes: pasan el filtro de num_ingreso/estado ->",
     l.map(f=>({cufe:f.cufe,num:(f.prefijo||"")+(f.folio||""),num_ingreso:f.num_ingreso||null,tiene_novedad:!!novDe(f.cufe),estado:f.estado})));
-  if(fSedeVal) l=l.filter(f=>f.sede_id===Number(fSedeVal));
+  l=l.filter(f=>sedeOk(f.sede_id));
   if(fd) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe>=fd;});
   if(fh) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe<=fh;});
   l=l.filter(f=>f.archivo_pdf);

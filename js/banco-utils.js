@@ -43,6 +43,7 @@
     const lista = (facturas || []).filter((f) => {
       if (!esSellada(f)) return false;
       if (o.sedeId && f.sede_id !== Number(o.sedeId)) return false;
+      if (o.sedeIds && o.sedeIds.length && !o.sedeIds.map(Number).includes(f.sede_id)) return false;   // (13/10/2026) varias sedes
       if (o.conIngreso && !f.num_ingreso) return false;
       if (!f.archivo_pdf) return false;
       if (!o.desde && !o.hasta) return true;
@@ -74,6 +75,7 @@
       if (!esTerminada(f)) return false;
       if (o.tipo && f.tipo !== o.tipo) return false;
       if (o.sedeId && f.sede_id !== Number(o.sedeId)) return false;
+      if (o.sedeIds && o.sedeIds.length && !o.sedeIds.map(Number).includes(f.sede_id)) return false;   // (13/10/2026) varias sedes
       if (!enRangoFecha(fechaTerminado(f), o.desde, o.hasta)) { fueraDeRango++; return false; }
       if (!f.archivo_pdf) { sinPdf++; return false; }
       return true;
