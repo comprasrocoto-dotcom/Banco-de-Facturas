@@ -104,6 +104,7 @@
         <datalist id="${id}_l">${(conocidas || []).slice(0, 300).map((u) => `<option value="${esc(u)}">`).join('')}</datalist>
         <button class="p" onclick="guardarArticuloAdmin(${Number(a.id)})">💾 Guardar</button>
         <button onclick="cancelarEdicionAdmin()">Cancelar</button></div>
+      ${opciones.marcasHtml ? `<div style="margin-top:8px"><span class="mut">Marcas que lo manejan (definen en qué marcas aparece al hacer pedidos)</span><div style="margin-top:4px">${opciones.marcasHtml}</div></div>` : ''}
       <div class="mut" style="margin-top:6px">La unidad es en la que se compra y se pide (formato del ERP). Si cambias el código, se actualiza también en los amarres a proveedores (con sus precios), el historial de precios y las líneas de los pedidos; debe ser el código que tiene el ERP. Queda registrado quién y cuándo.</div>
       ${opciones.error ? `<div style="color:#b91c1c;margin-top:6px">${esc(opciones.error)}</div>` : ''}
       ${opciones.copiarHtml || ''}</div>`;

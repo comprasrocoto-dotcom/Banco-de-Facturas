@@ -317,6 +317,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/editar-pedido-lista.js"></script>
 <script src="js/pedido-erp.js"></script>
 <script src="js/filtro-multiple.js"></script>
+<script src="js/articulo-marcas.js"></script>
 <script src="js/organizador-hiopos.js"></script>
 <script src="js/hoja-contable.js"></script>
 <script src="js/hoja-contable-ui.js"></script>
@@ -394,7 +395,7 @@ async function salir(){await SB.auth.signOut();location.reload();}
 let arts=[], provs=[], cat=[], minmax=[], provArts=[], npLineas=0;
 // PROVEEDORES POR MARCA (js/marca-proveedores.js): artsGlobal/catGlobal son los de siempre (Rocoto/Arrebatao); las marcas con productos propios (Sin Par) usan marca_articulo / marca_catalogo
 let npProvVis=[], npProvIdx=0;   // proveedores que ofrece el buscador de "Nuevo pedido" y la fila resaltada
-let artsGlobal=null, catGlobal=null, vinculosProv=[], marcaArts=[], marcaCat=[], npMarcaPropia=false;
+let artsGlobal=null, catGlobal=null, vinculosProv=[], marcaArts=[], marcaCat=[], npMarcaPropia=false, vincArt=[];   // vincArt: articulo_marca (13/10/2026)
 let reglasAparte=[];   // (06/10/2026) regla_pedido_aparte: PROVEEDOR + PRODUCTO (por id) que van en un pedido aparte (js/separar-pedido.js)
 // articulos.id de un codigo del catalogo GENERAL (las reglas son por id de articulos; un articulo de catalogo propio de marca no aplica)
 function idArticuloDe(cod){ const a=(artsGlobal||[]).find(x=>x.codigo_barras===cod); return a&&a.id!=null?a.id:null; }
@@ -449,7 +450,8 @@ async function nuevoPedido(){
     arts=await traerTodo("articulos","id,codigo_barras,articulo_hiopos,articulo_comercial,unimedida_compra,subfamilia",["articulo_comercial","id"]);   // id: reglas de pedido aparte (06/10/2026)
     cat=await traerTodo("catalogo_compras","codigo_barras,id_proveedor,precio_negociado",["id"]);
     artsGlobal=arts; catGlobal=cat;
-    vinculosProv=await traerTodo("proveedor_marca","proveedor_id,marca_id",["proveedor_id"]);   // si la tabla no existe/falla: queda vacío y todo se ve como antes
+    vinculosProv=await traerTodo("proveedor_marca","proveedor_id,marca_id",["proveedor_id"]);
+    try{ vincArt=await traerTodo("articulo_marca","articulo_id,marca_id",["id"]); }catch(e){ vincArt=[]; }   // si falla: todos los articulos, como antes   // si la tabla no existe/falla: queda vacío y todo se ve como antes
     marcaArts=await traerTodo("marca_articulo","marca_id,codigo_barras,articulo,unidad_compra,subfamilia",["id"]);
     marcaCat=await traerTodo("marca_catalogo","marca_id,codigo_barras,id_proveedor,precio_negociado",["id"]);
     minmax=await traerTodo("maximos_minimos","articulo,almacen,subarticulo,minimo,maximo",["id"]);
@@ -494,7 +496,7 @@ function aplicarMarcaNP(){
   if(artsGlobal===null) return;
   const marca=marcaDeSedeNP();
   npMarcaPropia=MarcaProv.tieneCatalogoPropio(marcaArts,marca);
-  arts=npMarcaPropia?MarcaProv.articulosDeMarca(marcaArts,marca):artsGlobal;
+  arts=npMarcaPropia?MarcaProv.articulosDeMarca(marcaArts,marca):ArticuloMarcas.visibles(artsGlobal,vincArt,marca);   // (13/10/2026) solo los de esta marca (o sin marca)
   cat=npMarcaPropia?MarcaProv.catalogoDeMarca(marcaCat,marca):catGlobal;
   const antes=Number($("np_prov").value||0);
   const vis=MarcaProv.proveedoresVisibles(provs,vinculosProv,marca);
@@ -982,7 +984,7 @@ async function guardarPedido(){
 }
 let adminCargado=false, adminVista="prov", adminProv=[], adminArt=[], adminCat=[];
 let adminMarcaArts=[], adminMarcaCat=[];   // articulos y catalogo propios de una marca (Sin Par...)
-let adminMarcas=[], adminVinc=[], adminMarcaTocada=false;   // marcas y proveedor_marca (js/marca-proveedores.js)
+let adminMarcas=[], adminVinc=[], adminMarcaTocada=false, adminArtMarca=[];   // marcas y proveedor_marca (js/marca-proveedores.js)
 let adminLimite=400;   // cuántos artículos se pintan de una vez en Admin > Artículos (hay más de 700: "Ver 400 más")
 let adminEdit=null;   // {tipo:"prov"|"art", id, error} = la tarjeta que se está editando (ver js/admin-editar.js)
 function setAdmin(v){ adminVista=v; adminEdit=null; adminLimite=400;
@@ -1001,6 +1003,7 @@ async function cargarAdmin(){
   adminProv=a.data||[];
   const b=await SB.from("articulos").select("*").order("articulo_hiopos").limit(5000);
   adminArt=b.data||[];
+  try{ adminArtMarca=await traerTodo("articulo_marca","articulo_id,marca_id",["id"]); }catch(e){ adminArtMarca=[]; }   // (13/10/2026) en que marcas aparece cada articulo
   const c=await SB.from("catalogo_compras").select("*").limit(5000);
   adminCat=c.data||[];
   adminMarcas=(await SB.from("marcas").select("id,nombre").order("nombre")).data||[];
@@ -1048,7 +1051,7 @@ function pintarAdmin(){
     EXPORTAR.catalogoArt = mSel ? ((adminMarcas.find(m=>m.id===mSel)||{}).nombre||"")+" (catálogo propio)" : "Rocoto y Arrebatao (general)";
     EXPORTAR.actual.admin_art = ()=>l.map(x=>{ const del=mSel?adminMarcaCat.filter(k=>k.marca_id===mSel&&k.codigo_barras===x.codigo_barras):adminCat.filter(k=>k.codigo_barras===x.codigo_barras); const pr=del.filter(k=>k.precio_negociado!=null).map(k=>Number(k.precio_negociado)); return {...x,_prov:del.length,_pmin:pr.length?Math.min(...pr):null,_pmax:pr.length?Math.max(...pr):null}; });
     c.innerHTML = (l.slice(0,adminLimite).map(x=>{
-      if(adminEdit&&adminEdit.tipo==="art"&&adminEdit.id===x.id) return AdminEditar.editorArticulo(x,conocidas,{error:adminEdit.error, copiarHtml:htmlCopiarArticulo(x,mSel)});
+      if(adminEdit&&adminEdit.tipo==="art"&&adminEdit.id===x.id) return AdminEditar.editorArticulo(x,conocidas,{error:adminEdit.error, copiarHtml:htmlCopiarArticulo(x,mSel), marcasHtml:mSel?"":ArticuloMarcas.casillas(adminMarcas,adminMarcaArts,adminArtMarca,x,"ea_"+x.id)});
       const delArt=mSel?adminMarcaCat.filter(k=>k.marca_id===mSel&&k.codigo_barras===x.codigo_barras):adminCat.filter(k=>k.codigo_barras===x.codigo_barras);
       const precios=delArt.filter(k=>k.precio_negociado!=null).map(k=>Number(k.precio_negociado));
       const info = delArt.length
@@ -1473,6 +1476,16 @@ async function guardarArticuloAdmin(id){
   const fallo=(m)=>{ adminEdit={tipo:"art",id,error:m}; pintarAdmin(); };
   const v=AdminEditar.validarArticulo(a,{codigo:$("ea_"+id+"_codigo").value, unidad:$("ea_"+id+"_unidad").value}, adminArt);
   if(!v.ok) return fallo(v.errores.join(" "));
+  // (13/10/2026) marcas en las que aparece (lista general), igual que en Proveedores
+  const genM=ArticuloMarcas.marcasGenerales(adminMarcas,adminMarcaArts);
+  // sin marcas cargadas (o sin las casillas en pantalla) no se toca nada de marcas
+  const cm=(genM.length&&genM.some(mm=>$("ea_"+id+"_m"+mm.id)))?ArticuloMarcas.cambios(adminArtMarca,id,genM.filter(mm=>{ const el=$("ea_"+id+"_m"+mm.id); return el&&el.checked; }).map(mm=>mm.id),genM):{ok:true,agregar:[],quitar:[]};
+  if(!cm.ok) return fallo(cm.error);
+  if(cm.agregar.length||cm.quitar.length){
+    if(cm.agregar.length){ const ri=await SB.from("articulo_marca").insert(cm.agregar.map(mid=>({articulo_id:id,marca_id:mid,origen:"admin"}))); if(ri.error) return fallo("No se pudieron guardar las marcas: "+ri.error.message); cm.agregar.forEach(mid=>adminArtMarca.push({articulo_id:id,marca_id:mid})); }
+    if(cm.quitar.length){ const rd=await SB.from("articulo_marca").delete().eq("articulo_id",id).in("marca_id",cm.quitar); if(rd.error) return fallo("No se pudieron guardar las marcas: "+rd.error.message); adminArtMarca=adminArtMarca.filter(vv=>!(Number(vv.articulo_id)===id&&cm.quitar.includes(Number(vv.marca_id)))); }
+    vincArt=adminArtMarca.slice();   // la lista de "Nuevo pedido" ya cargada
+  }
   if(!v.codigo.cambio && !v.unidad.cambio){ adminEdit=null; pintarAdmin(); return; }
   let msg="Cambios en "+(a.articulo_hiopos||a.codigo_barras)+":\n";
   if(v.codigo.cambio) msg+="\n• Código: "+a.codigo_barras+"  →  "+v.codigo.valor+"\n  (se actualiza también en los amarres a proveedores, el historial de precios y las líneas de los pedidos)\n";
@@ -2595,8 +2608,9 @@ async function articulosMarcaPedido(p){
     const propios=await traerTodo("marca_articulo","marca_id,codigo_barras,articulo,unidad_compra,subfamilia",["id"]);
     if(p.marca_id && MarcaProv.tieneCatalogoPropio(propios,p.marca_id)) return MarcaProv.articulosDeMarca(propios,p.marca_id);
   }catch(e){}
-  if(artsGlobal&&artsGlobal.length) return artsGlobal;
-  return await traerTodo("articulos","id,codigo_barras,articulo_hiopos,articulo_comercial,unimedida_compra,subfamilia",["articulo_comercial","id"]);
+  let vinc=[]; try{ vinc=await traerTodo("articulo_marca","articulo_id,marca_id",["id"]); }catch(e){}
+  const gen=(artsGlobal&&artsGlobal.length)?artsGlobal:await traerTodo("articulos","id,codigo_barras,articulo_hiopos,articulo_comercial,unimedida_compra,subfamilia",["articulo_comercial","id"]);
+  return ArticuloMarcas.visibles(gen,vinc,p.marca_id);   // (13/10/2026) solo los de la marca del pedido (o sin marca)
 }
 async function editarPedido(id){
   const p=pedidos.find(x=>x.id===id)||{};
