@@ -102,6 +102,12 @@ tr:hover td{background:#f1f5f9}
 .np-busca-art{margin-top:10px;padding:10px 12px;border:1px dashed #a5f3fc;border-radius:10px;background:#f0fdff}
 /* tarjetas DENTRO de un modal (proveedor por articulo): sin heredar el tamano/sombra/scroll del propio modal (.modal .card) */
 .modal .card .card{max-width:none;width:auto;max-height:none;overflow:visible;box-shadow:none;border:1px solid var(--line)}
+/* (14/10/2026) «Tu pedido»: resumen abajo en Nuevo pedido (js/resumen-pedido.js) */
+.np-res{margin:0 0 8px}
+.np-res-cab{background:none;border:0;padding:2px 0;color:#0f766e;font-weight:600;cursor:pointer;font-size:14px}
+.np-res-lista{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;max-height:22vh;overflow:auto}
+.np-res-it{display:inline-flex;align-items:center;gap:4px;background:#f0fdf4;border:1px solid #86efac;border-radius:999px;padding:3px 4px 3px 10px;font-size:13px}
+.np-res-x{border:0;background:none;color:#b91c1c;cursor:pointer;padding:0 6px;font-size:13px;line-height:1}
 .np-pie{position:sticky;bottom:-16px;margin:12px -16px -16px;padding:10px 16px 12px;background:#fff;border-top:1px solid var(--line);box-shadow:0 -6px 14px rgba(15,23,42,.06);z-index:5}
 #np_tabla tr.np-con td{background:#ecfdf5}
 #np_tabla tr.np-con input{border-color:#22c55e;font-weight:700}
@@ -318,6 +324,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/pedido-erp.js"></script>
 <script src="js/filtro-multiple.js"></script>
 <script src="js/articulo-marcas.js"></script>
+<script src="js/resumen-pedido.js"></script>
 <script src="js/organizador-hiopos.js"></script>
 <script src="js/hoja-contable.js"></script>
 <script src="js/hoja-contable-ui.js"></script>
@@ -745,7 +752,17 @@ function npContar(){
   const n=Object.keys(npCant).filter(k=>Number(npCant[k])>0).length;
   const b=$("np_cuenta"); if(b){ b.textContent=n?n+" con cantidad":""; b.style.display=n?"":"none"; }
   const g=$("np_guardar_n"); if(g) g.textContent=n?" ("+n+")":"";
+  npResumen();
 }
+// (14/10/2026) «🧾 Tu pedido»: lo que lleva el pedido, abajo junto al Total (js/resumen-pedido.js)
+let npResAbierto=true;
+function npResumen(){
+  const c=$("np_resumen"); if(!c||typeof ResumenPedido==="undefined") return;
+  const libres=[...(($("np_lineas")||{}).querySelectorAll?$("np_lineas").querySelectorAll("div.row"):[])].map(r=>{ const a=r.querySelector("input[list]"), k=r.querySelector("input[type=number]"); return {nombre:a?a.value:"", cant:k?numEs(k.value):0}; });
+  c.innerHTML=ResumenPedido.html(ResumenPedido.armar(npCant,listaArticulos(),libres),npResAbierto,"npQuitarDelPedido","npResAlternar");
+}
+function npResAlternar(){ npResAbierto=!npResAbierto; npResumen(); }
+function npQuitarDelPedido(cod){ paso(cod,0); }
 function paso(cod,v){
   v=numEs(v); if(v<0) v=0;
   npCant[cod]=v;
@@ -826,6 +843,7 @@ function calcularTotal(){
     tot += pr*cant;
   });
   $("np_total").textContent="Total: "+money(tot);
+  if(typeof npResumen==="function") npResumen();   // (14/10/2026) los articulos libres tambien salen en «Tu pedido»
 }
 // ── ALERTA DE MÁXIMO/MÍNIMO ──────────────────────────────────────────────
 // La tabla maximos_minimos guarda el ALMACEN y el ARTICULO por NOMBRE (texto),
@@ -3525,6 +3543,7 @@ async function guardarNov(){
     </div>
   </div>
   <div class="np-pie">
+    <div id="np_resumen"></div>
     <div class="err" id="np_err"></div>
     <div class="row"><b id="np_total" style="margin-right:auto">Total: $ 0</b>
       <button onclick="$('modalPedido').classList.remove('on')">Cancelar</button>
