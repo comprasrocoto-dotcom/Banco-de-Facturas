@@ -14,8 +14,12 @@ function ccModal() {
   m.innerHTML = `<div class="card" style="max-width:720px">
     <h1 id="ccTitulo">📷 Cuenta de cobro</h1>
     <div class="mut" style="margin-bottom:8px">Para proveedores sin factura electrónica. Toma la foto del papel y escribe lo que dice: el agente la ingresa al ERP con estos datos.</div>
-    <label style="font-weight:700">1. Foto de la cuenta de cobro <span style="color:#b91c1c">*</span></label>
-    <input type="file" id="ccFoto" accept="image/*" capture="environment" onchange="ccElegirFoto(this)">
+    <label style="font-weight:700">1. Foto o PDF de la cuenta de cobro <span style="color:#b91c1c">*</span></label>
+    <div class="row" style="gap:8px;margin:4px 0">
+      <button type="button" class="s" onclick="$('ccFotoCam').click()">📷 Tomar foto</button>
+      <button type="button" onclick="$('ccFoto').click()">📎 Subir foto o PDF</button></div>
+    <input type="file" id="ccFotoCam" accept="image/*" capture="environment" style="display:none" onchange="ccElegirFoto(this)">
+    <input type="file" id="ccFoto" accept="image/*,application/pdf,.pdf" style="display:none" onchange="ccElegirFoto(this)">
     <div id="ccFotoVista" style="margin:6px 0"></div>
     <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap">
       <div><label style="font-weight:700">2. N° de la cuenta <span style="color:#b91c1c">*</span></label><input id="ccNumero" placeholder="Ej. 0457" style="width:140px;margin:4px 0" autocomplete="off"></div>
@@ -43,7 +47,7 @@ async function abrirCuentaCobro(pedidoId) {
   CC.pedido = p; CC.foto = null; CC.guardando = false;
   if (CC.fotoUrl) { try { URL.revokeObjectURL(CC.fotoUrl); } catch (e) {} CC.fotoUrl = null; }
   $('ccTitulo').textContent = '📷 Cuenta de cobro — pedido ' + (p.numero || '') + ' · ' + (p.proveedor_texto || p.proveedor || '');
-  $('ccFoto').value = ''; $('ccFotoVista').innerHTML = ''; $('ccNumero').value = ''; $('ccErr').textContent = '';
+  $('ccFoto').value = ''; $('ccFotoCam').value = ''; $('ccFotoVista').innerHTML = ''; $('ccNumero').value = ''; $('ccErr').textContent = '';
   const hoy = FechaRecibido.hoyCO();
   $('ccFecha').value = hoy; $('ccFecha').max = hoy; if (p.fecha) $('ccFecha').min = String(p.fecha).slice(0, 10);
   // centro de costo (solo si la marca lo usa), igual que en "Amarrar"
@@ -82,14 +86,22 @@ function ccSuma() {
     (v.lineas.length > 1 ? ' <span style="font-weight:400;font-size:13px">(suma de ' + v.lineas.length + ' artículos)</span>' : '') + '</div>';
 }
 
-// foto: se reduce (lado mayor 1600 px, JPG) para que suba rapido desde el celular
+// foto: se reduce (lado mayor 1600 px, JPG) para que suba rapido desde el celular.
+// (14/10/2026) tambien PDF: va tal cual (hasta 10 MB)
 async function ccElegirFoto(input) {
   const f = input.files && input.files[0];
-  CC.foto = null; $('ccFotoVista').innerHTML = '';
+  CC.foto = null; CC.ext = 'jpg'; $('ccFotoVista').innerHTML = '';
   if (!f) return;
-  if (!/^image\//.test(f.type)) { $('ccErr').textContent = 'El archivo no es una foto.'; return; }
+  const esPdf = f.type === 'application/pdf' || /\.pdf$/i.test(f.name || '');
+  if (!esPdf && !/^image\//.test(f.type)) { $('ccErr').textContent = 'El archivo no es una foto ni un PDF.'; return; }
+  if (CC.fotoUrl) { try { URL.revokeObjectURL(CC.fotoUrl); } catch (e) {} CC.fotoUrl = null; }
+  if (esPdf) {
+    if (f.size > 10 * 1024 * 1024) { $('ccErr').textContent = 'El PDF pesa más de 10 MB: súbelo más liviano o toma una foto.'; return; }
+    CC.foto = f; CC.ext = 'pdf';
+    $('ccFotoVista').innerHTML = `<span class="badge" style="font-size:13px">📄 ${escAg(f.name || 'cuenta de cobro.pdf')} · ${Math.max(1, Math.round(f.size / 1024))} KB</span>`;
+    $('ccErr').textContent = ''; return;
+  }
   try { CC.foto = await ccComprimir(f); } catch (e) { CC.foto = f; }
-  if (CC.fotoUrl) { try { URL.revokeObjectURL(CC.fotoUrl); } catch (e) {} }
   CC.fotoUrl = URL.createObjectURL(CC.foto);
   $('ccFotoVista').innerHTML = `<img src="${CC.fotoUrl}" alt="Foto de la cuenta de cobro" style="max-width:100%;max-height:220px;border:1px solid var(--line);border-radius:8px">`;
   $('ccErr').textContent = '';
@@ -137,9 +149,9 @@ async function ccGuardar() {
   if ($('ccCentro')) { const vc = CentroCosto.validar(centrosCosto, p.marca_id, $('ccCentro').value); if (!vc.ok) errores.push(vc.error); else cc = vc.serie; }
   if (errores.length) { err.innerHTML = errores.map(escAg).join('<br>'); return; }
   CC.guardando = true; $('ccGuardar').disabled = true; $('ccGuardar').textContent = 'Guardando...';
-  const ruta = CuentaCobro.rutaFoto(p, Date.now());
+  const ruta = CuentaCobro.rutaFoto(p, Date.now(), CC.ext);
   try {
-    const up = await SB.storage.from('facturas').upload(ruta, CC.foto, { contentType: 'image/jpeg', upsert: false });
+    const up = await SB.storage.from('facturas').upload(ruta, CC.foto, { contentType: CC.ext === 'pdf' ? 'application/pdf' : 'image/jpeg', upsert: false });
     if (up.error) throw new Error('No pude subir la foto: ' + up.error.message);
     const r = await SB.rpc('cuenta_cobro_amarrar', { p_pedido_id: p.id, p_numero: $('ccNumero').value, p_fecha_recibido: vf.fecha, p_total: v.total,
       p_foto: ruta, p_lineas: v.lineas, p_centro_costo: cc, p_usuario: (perfil && perfil.nombre) || (usuario && usuario.email) || null });

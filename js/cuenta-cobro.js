@@ -35,7 +35,7 @@
   // -> { ok, errores[], lineas (solo las que llegaron: cantidad > 0, con su precio_unitario), total }
   function validar(datos) {
     const d = datos || {}, errores = [];
-    if (!d.foto) errores.push('Toma o elige la foto de la cuenta de cobro.');
+    if (!d.foto) errores.push('Toma la foto o sube el PDF de la cuenta de cobro.');
     if (!numeroLimpio(d.numero)) errores.push('Escribe el número de la cuenta de cobro (el que trae el papel).');
     const lineas = [], sinTotal = [], malas = [];
     for (const l of d.lineas || []) {
@@ -57,10 +57,10 @@
     return { ok: !errores.length, errores, lineas, total };
   }
 
-  // donde se guarda la foto en el almacenamiento (la base exige que empiece por cuentas_cobro/)
-  function rutaFoto(pedido, ahoraMs) {
+  // donde se guarda la foto en el almacenamiento (la base exige que empiece por cuentas_cobro/). (14/10/2026) ext: 'jpg' o 'pdf'
+  function rutaFoto(pedido, ahoraMs, ext) {
     const p = pedido || {};
-    return 'cuentas_cobro/' + (p.marca_id || 'sin-marca') + '/' + String(p.numero || p.id || 'pedido').replace(/[^A-Za-z0-9-]/g, '') + '_' + (ahoraMs || Date.now()) + '.jpg';
+    return 'cuentas_cobro/' + (p.marca_id || 'sin-marca') + '/' + String(p.numero || p.id || 'pedido').replace(/[^A-Za-z0-9-]/g, '') + '_' + (ahoraMs || Date.now()) + '.' + (ext === 'pdf' ? 'pdf' : 'jpg');
   }
 
   return { num, cantidad, unitario, numeroLimpio, validar, rutaFoto };
