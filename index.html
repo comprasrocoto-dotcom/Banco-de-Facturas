@@ -1745,7 +1745,12 @@ function pintarPedidos(){
     const est = p.estado==="facturado" ? '<span class="badge st-sellada">Facturado</span>' : '<span class="badge st-pool">Pendiente</span>';
     const amFecha = p.factura_cufe && p.factura_amarrada_en
       ? ' title="'+(p.fecha_recibido?'Recibida el '+FechaRecibido.mostrar(p.fecha_recibido)+' · ':'')+'Enlazada el '+new Date(p.factura_amarrada_en).toLocaleString('es-CO',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})+'"' : '';
-    const am  = p.factura_cufe ? '<span class="badge st-asignada"'+amFecha+'>Amarrado a '+(p.numero_factura||"factura")+'</span>' : '';
+    // (14/10/2026) arriba: el NUMERO de la factura o de la cuenta de cobro amarrada (antes decia "Amarrado a factura" si el agente
+    // aun no lo habia guardado en el pedido). Se toma de la factura amarrada (numFacturaDe) y se dice si es cuenta de cobro.
+    const fAm = p.factura_cufe ? (facturas||[]).find(x=>x.cufe===p.factura_cufe) : null;
+    const esCC = (fAm && fAm.tipo==="cuenta_cobro") || /^CC-/.test(p.factura_cufe||"");
+    const numAm = p.factura_cufe ? numFacturaDe(p) : "";
+    const am  = p.factura_cufe ? '<span class="badge st-asignada"'+amFecha+' style="font-weight:700">'+(esCC?"📷 Cuenta de cobro ":"🧾 Factura ")+escAg(numAm||"amarrada")+'</span>' : '';
     const erp = p.pedido_erp ? '<span class="badge">ERP '+p.pedido_erp+'</span>' : '';
     return `<div class="card" style="padding:0;overflow:hidden">
       <div class="row" style="padding:14px 16px;cursor:pointer" onclick="abrirPedido(${p.id})">
