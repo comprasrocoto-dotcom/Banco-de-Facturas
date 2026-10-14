@@ -1069,7 +1069,7 @@ function pintarAdmin(){
     EXPORTAR.catalogoArt = mSel ? ((adminMarcas.find(m=>m.id===mSel)||{}).nombre||"")+" (catálogo propio)" : "Rocoto y Arrebatao (general)";
     EXPORTAR.actual.admin_art = ()=>l.map(x=>{ const del=mSel?adminMarcaCat.filter(k=>k.marca_id===mSel&&k.codigo_barras===x.codigo_barras):adminCat.filter(k=>k.codigo_barras===x.codigo_barras); const pr=del.filter(k=>k.precio_negociado!=null).map(k=>Number(k.precio_negociado)); return {...x,_prov:del.length,_pmin:pr.length?Math.min(...pr):null,_pmax:pr.length?Math.max(...pr):null}; });
     c.innerHTML = (l.slice(0,adminLimite).map(x=>{
-      if(adminEdit&&adminEdit.tipo==="art"&&adminEdit.id===x.id) return AdminEditar.editorArticulo(x,conocidas,{error:adminEdit.error, copiarHtml:htmlCopiarArticulo(x,mSel), marcasHtml:mSel?"":ArticuloMarcas.casillas(adminMarcas,adminMarcaArts,adminArtMarca,x,"ea_"+x.id)});
+      if(adminEdit&&adminEdit.tipo==="art"&&adminEdit.id===x.id) return AdminEditar.editorArticulo(x,conocidas,{error:adminEdit.error, copiarHtml:htmlCopiarArticulo(x,mSel), marcasHtml:ArticuloMarcas.casillasTodas(ArticuloMarcas.estadoTodas({marcas:adminMarcas,marcaArts:adminMarcaArts,vinc:adminArtMarca,general:adminArt,articulo:x,origen:mSel}),adminMarcas,"ea_"+x.id)});
       const delArt=mSel?adminMarcaCat.filter(k=>k.marca_id===mSel&&k.codigo_barras===x.codigo_barras):adminCat.filter(k=>k.codigo_barras===x.codigo_barras);
       const precios=delArt.filter(k=>k.precio_negociado!=null).map(k=>Number(k.precio_negociado));
       const info = delArt.length
@@ -1494,17 +1494,9 @@ async function guardarArticuloAdmin(id){
   const fallo=(m)=>{ adminEdit={tipo:"art",id,error:m}; pintarAdmin(); };
   const v=AdminEditar.validarArticulo(a,{codigo:$("ea_"+id+"_codigo").value, unidad:$("ea_"+id+"_unidad").value}, adminArt);
   if(!v.ok) return fallo(v.errores.join(" "));
-  // (13/10/2026) marcas en las que aparece (lista general), igual que en Proveedores
-  const genM=ArticuloMarcas.marcasGenerales(adminMarcas,adminMarcaArts);
-  // sin marcas cargadas (o sin las casillas en pantalla) no se toca nada de marcas
-  const cm=(genM.length&&genM.some(mm=>$("ea_"+id+"_m"+mm.id)))?ArticuloMarcas.cambios(adminArtMarca,id,genM.filter(mm=>{ const el=$("ea_"+id+"_m"+mm.id); return el&&el.checked; }).map(mm=>mm.id),genM):{ok:true,agregar:[],quitar:[]};
-  if(!cm.ok) return fallo(cm.error);
-  if(cm.agregar.length||cm.quitar.length){
-    if(cm.agregar.length){ const ri=await SB.from("articulo_marca").insert(cm.agregar.map(mid=>({articulo_id:id,marca_id:mid,origen:"admin"}))); if(ri.error) return fallo("No se pudieron guardar las marcas: "+ri.error.message); cm.agregar.forEach(mid=>adminArtMarca.push({articulo_id:id,marca_id:mid})); }
-    if(cm.quitar.length){ const rd=await SB.from("articulo_marca").delete().eq("articulo_id",id).in("marca_id",cm.quitar); if(rd.error) return fallo("No se pudieron guardar las marcas: "+rd.error.message); adminArtMarca=adminArtMarca.filter(vv=>!(Number(vv.articulo_id)===id&&cm.quitar.includes(Number(vv.marca_id)))); }
-    vincArt=adminArtMarca.slice();   // la lista de "Nuevo pedido" ya cargada
-  }
-  if(!v.codigo.cambio && !v.unidad.cambio){ adminEdit=null; pintarAdmin(); return; }
+  // (13-14/10/2026) marcas: visibilidad en la lista general y copiar a las listas de otras marcas (guardarMarcasArticulo)
+  const gm=await guardarMarcasArticulo(a,0); if(!gm.ok) return fallo(gm.error);
+  if(!v.codigo.cambio && !v.unidad.cambio){ adminEdit=null; if(gm.cambios){ adminCargado=false; await cargarAdmin(); } pintarAdmin(); return; }
   let msg="Cambios en "+(a.articulo_hiopos||a.codigo_barras)+":\n";
   if(v.codigo.cambio) msg+="\n• Código: "+a.codigo_barras+"  →  "+v.codigo.valor+"\n  (se actualiza también en los amarres a proveedores, el historial de precios y las líneas de los pedidos)\n";
   if(v.unidad.cambio) msg+="\n• Unidad: "+(a.unimedida_compra||"—")+"  →  "+v.unidad.valor+"\n  (los pedidos ya creados no cambian su unidad)\n";
@@ -1528,6 +1520,31 @@ async function guardarArticuloAdmin(id){
   adminEdit=null; pintarAdmin();
 }
 // Artículos de una marca con catálogo propio (Sin Par...): mismo editor; el código se cambia con marca_articulo_cambiar_codigo (marca_articulo + marca_catalogo + líneas de pedidos de ESA marca)
+// (14/10/2026) MARCAS DEL ARTICULO (js/articulo-marcas.js): todas las marcas en el editor. En la lista general define en que marcas
+// aparece (articulo_marca); en una lista de otra marca (Sin Par / la general vista desde Sin Par) COPIA el articulo con el codigo
+// de ese ERP (nunca borra de una lista). -> { ok, error?, cambios }
+async function guardarMarcasArticulo(x, origen){
+  const base="ea_"+x.id;
+  if(!adminMarcas.some(m=>$(base+"_m"+m.id))) return {ok:true,cambios:false};   // sin casillas en pantalla: no se toca nada
+  const est=ArticuloMarcas.estadoTodas({marcas:adminMarcas,marcaArts:adminMarcaArts,vinc:adminArtMarca,general:adminArt,articulo:x,origen});
+  const plan=ArticuloMarcas.planGuardar(est,{marcada:id=>{ const el=$(base+"_m"+id); return !!(el&&el.checked); }, codigo:id=>(($(base+"_cod"+id)||{}).value||""), codigoGen:(($(base+"_codgen")||{}).value||"")},CopiarArticulo,adminArt,adminMarcaArts);
+  if(!plan.ok) return plan;
+  for(const c of plan.copiarPropias){
+    const f=CopiarArticulo.fila(x,c.marca_id,c.codigo), r=await SB.from(f.tabla).insert(f.datos);
+    if(r.error) return {ok:false,error:"No se pudo agregar a "+c.nombre+": "+(/duplicate|unique/i.test(r.error.message)?"ese código ya existe en su lista.":r.error.message)};
+  }
+  let gaId=plan.gaId;
+  if(plan.copiarGeneral){
+    const f=CopiarArticulo.fila(x,0,plan.copiarGeneral.codigo), r=await SB.from("articulos").insert(f.datos).select("id").single();
+    if(r.error||!r.data) return {ok:false,error:"No se pudo agregar a la lista general: "+(r.error?(/duplicate|unique/i.test(r.error.message)?"ese código ya existe.":r.error.message):"sin respuesta")};
+    gaId=r.data.id;
+  }
+  if(gaId&&plan.agregar.length){ const ri=await SB.from("articulo_marca").insert(plan.agregar.map(mid=>({articulo_id:gaId,marca_id:mid,origen:"admin"}))); if(ri.error) return {ok:false,error:"No se pudieron guardar las marcas: "+ri.error.message}; }
+  if(gaId&&plan.quitar.length){ const rd=await SB.from("articulo_marca").delete().eq("articulo_id",gaId).in("marca_id",plan.quitar); if(rd.error) return {ok:false,error:"No se pudieron guardar las marcas: "+rd.error.message}; }
+  const cambios=!!(plan.copiarPropias.length||plan.copiarGeneral||plan.agregar.length||plan.quitar.length);
+  if(cambios){ marcaArts=[]; marcaCat=[]; provs=[]; vincArt=[]; }   // "Nuevo pedido" vuelve a leer sus listas
+  return {ok:true,cambios};
+}
 async function guardarArticuloMarca(id){
   const mSel=Number($("admCatalogo").value)||0;
   const fila=adminMarcaArts.find(x=>x.id===id); if(!fila) return;
@@ -1535,7 +1552,8 @@ async function guardarArticuloMarca(id){
   const fallo=(m)=>{ adminEdit={tipo:"art",id,error:m}; pintarAdmin(); };
   const v=AdminEditar.validarArticulo(a,{codigo:$("ea_"+id+"_codigo").value, unidad:$("ea_"+id+"_unidad").value}, lista);
   if(!v.ok) return fallo(v.errores.join(" "));
-  if(!v.codigo.cambio && !v.unidad.cambio){ adminEdit=null; pintarAdmin(); return; }
+  const gm=await guardarMarcasArticulo(a,mSel); if(!gm.ok) return fallo(gm.error);   // (14/10/2026) marcas: copiar a la lista general / otras
+  if(!v.codigo.cambio && !v.unidad.cambio){ adminEdit=null; if(gm.cambios){ adminCargado=false; await cargarAdmin(); } pintarAdmin(); return; }
   let msg="Cambios en "+(fila.articulo||fila.codigo_barras)+" (catálogo propio de la marca):\n";
   if(v.codigo.cambio) msg+="\n• Código: "+fila.codigo_barras+"  →  "+v.codigo.valor+"\n  (se actualiza también en sus proveedores y en las líneas de pedidos de esta marca; no toca a otras marcas)\n";
   if(v.unidad.cambio) msg+="\n• Unidad: "+(fila.unidad_compra||"—")+"  →  "+v.unidad.valor+"\n";

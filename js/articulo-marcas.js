@@ -56,5 +56,65 @@
     return cb + (propias ? `<div style="margin-top:6px">${propias}</div>` : '');
   }
 
-  return { esc, marcasGenerales, marcasPropias, filasDe, marcadas, cambios, visibles, casillas };
+  // ===================== (14/10/2026) TODAS las marcas en el editor, sea cual sea la lista del articulo =====================
+  // origen: 0 = el articulo esta en la lista GENERAL; id = esta en la lista propia de esa marca (Sin Par).
+  // En las marcas de OTRA lista, la casilla dice si el articulo ya esta ahi (por nombre); si no esta y se marca, se pide el
+  // codigo en el ERP de esa marca y al guardar se copia (nunca se borra de una lista desde aqui).
+  const nombreNorm = (s) => String(s || '').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z0-9]+/g, ' ').trim();
+  const nombreDe = (a) => (a && (a.articulo_comercial || a.articulo_hiopos || a.articulo)) || '';
+
+  function estadoTodas(o) {
+    const origen = Number(o.origen) || 0, a = o.articulo || {}, n = nombreNorm(nombreDe(a));
+    const gen = marcasGenerales(o.marcas, o.marcaArts);
+    const ga = origen === 0 ? a : ((o.general || []).find((g) => n && nombreNorm(nombreDe(g)) === n) || null);
+    const propias = marcasPropias(o.marcas, o.marcaArts).map((m) => ({
+      marca: m, esOrigen: m.id === origen,
+      enLista: m.id === origen ? null : ((o.marcaArts || []).find((x) => x.marca_id === m.id && n && nombreNorm(x.articulo) === n) || null) }));
+    return { origen, articulo: a, gen, ga, vinc: o.vinc || [], marcadasGen: ga ? marcadas(o.vinc, ga.id, gen) : [], propias };
+  }
+
+  // HTML: una casilla por marca (en el orden de `marcas`) + los campos de codigo que hagan falta
+  function casillasTodas(est, marcas, idBase) {
+    const b = esc(idBase), cod = esc(est.articulo.codigo_barras || '');
+    const cb = (id, marcado, deshab, nombre, extra) => `<label style="display:inline-flex;gap:4px;align-items:center;margin-right:12px"><input type="checkbox" id="${b}_m${Number(id)}" ${marcado ? 'checked' : ''} ${deshab ? 'disabled' : ''} style="width:auto;margin:0"> ${esc(nombre)}${extra ? ' <span class="mut" style="font-size:12px">' + extra + '</span>' : ''}</label>`;
+    const genIds = new Set(est.gen.map((m) => m.id)), sel = new Set(est.marcadasGen);
+    let html = '';
+    for (const m of marcas || []) {
+      if (genIds.has(m.id)) { html += cb(m.id, sel.has(m.id), false, m.nombre, ''); continue; }
+      const p = est.propias.find((x) => x.marca.id === m.id); if (!p) continue;
+      if (p.esOrigen) html += cb(m.id, true, true, m.nombre, '(su lista)');
+      else if (p.enLista) html += cb(m.id, true, true, m.nombre, '(ya está: código ' + esc(p.enLista.codigo_barras) + ')');
+      else html += cb(m.id, false, false, m.nombre, '');
+    }
+    const campos = [];
+    if (!est.ga && est.gen.length) campos.push(`<label style="display:inline-flex;gap:6px;align-items:center;margin-right:14px"><span class="mut" style="font-size:12px">Si marcas ${esc(est.gen.map((m) => m.nombre).join(' / '))}: código en su ERP</span><input id="${b}_codgen" value="${cod}" style="width:130px;margin:0;text-transform:uppercase" autocomplete="off"></label>`);
+    for (const p of est.propias) if (!p.esOrigen && !p.enLista) campos.push(`<label style="display:inline-flex;gap:6px;align-items:center;margin-right:14px"><span class="mut" style="font-size:12px">Si marcas ${esc(p.marca.nombre)}: código en su ERP</span><input id="${b}_cod${Number(p.marca.id)}" value="${cod}" style="width:130px;margin:0;text-transform:uppercase" autocomplete="off"></label>`);
+    return html + (campos.length ? `<div style="margin-top:6px">${campos.join('')}</div>` : '');
+  }
+
+  // que hacer al guardar. leer = { marcada(id) -> bool, codigo(id) -> texto, codigoGen -> texto }; ca = CopiarArticulo (validar)
+  // -> { ok, error?, copiarPropias:[{marca_id,nombre,codigo}], copiarGeneral:{codigo}|null, gaId, agregar:[ids], quitar:[ids] }
+  function planGuardar(est, leer, ca, general, marcaArts) {
+    const out = { ok: true, copiarPropias: [], copiarGeneral: null, gaId: est.ga ? est.ga.id : null, agregar: [], quitar: [] };
+    for (const p of est.propias) {
+      if (p.esOrigen || p.enLista || !leer.marcada(p.marca.id)) continue;
+      const v = ca.validar(leer.codigo(p.marca.id), p.marca.id, general, marcaArts);
+      if (!v.ok) return { ok: false, error: p.marca.nombre + ': ' + v.error };
+      out.copiarPropias.push({ marca_id: p.marca.id, nombre: p.marca.nombre, codigo: v.codigo });
+    }
+    const elegidas = est.gen.filter((m) => leer.marcada(m.id)).map((m) => m.id);
+    if (est.ga) {
+      if (!elegidas.length && est.gen.length) return { ok: false, error: 'Marca al menos una de ' + est.gen.map((m) => m.nombre).join(', ') + ': un artículo sin marcas no aparecería en ningún pedido de ellas.' };
+      const cc = cambios(est.vinc, est.ga.id, elegidas, est.gen);
+      out.agregar = cc.agregar; out.quitar = cc.quitar;
+    } else if (elegidas.length) {
+      const v = ca.validar(leer.codigoGen, 0, general, marcaArts);
+      if (!v.ok) return { ok: false, error: 'Lista general: ' + v.error };
+      out.copiarGeneral = { codigo: v.codigo };
+      out.agregar = elegidas.length === est.gen.length ? [] : elegidas;   // todas = sin filas (aparece en todas)
+    }
+    return out;
+  }
+
+  return { esc, marcasGenerales, marcasPropias, filasDe, marcadas, cambios, visibles, casillas, estadoTodas, casillasTodas, planGuardar };
 });
