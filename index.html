@@ -2765,7 +2765,9 @@ function badgeSinSellar(f){
 function pintar(){
   const cat=$("fcat").value;
   const fSedeVal=$("fSede").value;
-  const base=facturas.filter(f=>f.tipo===tipo&&(!cat||f.categoria===cat)&&(!fSedeVal||f.sede_id===Number(fSedeVal)));
+  // (13/10/2026) las cuentas de cobro salen TAMBIEN en «Facturas» (con su etiqueta); «Cuentas de cobro» muestra solo esas
+  const esDelTipo=f=>f.tipo===tipo||(tipo==="factura"&&f.tipo==="cuenta_cobro");
+  const base=facturas.filter(f=>esDelTipo(f)&&(!cat||f.categoria===cat)&&(!fSedeVal||f.sede_id===Number(fSedeVal)));
   let l=base;
   panelSinSellar(base);
   if(vista=="listas")   l=SinSellar.ordenar(sinSellarVisibles(base).filter(f=>listasSede==null||sedeListaKey(f)===listasSede));
@@ -2811,6 +2813,7 @@ function pintar(){
         ${f.num_ingreso?`<span class="badge st-sellada" style="font-size:13px;padding:5px 12px;font-weight:700">Ingreso ERP: ${f.num_ingreso}${CentroCosto.detalle(f.num_ingreso)?" · "+CentroCosto.detalle(f.num_ingreso):""}</span>`:""}
         ${SinSellar.esIngresadaSinSellar(f)?badgeSinSellar(f):""}
         ${(f.pedido_erp||f.pedido_num)?`<span class="badge st-asignada">🔗 Pedido ${f.pedido_erp||f.pedido_num}</span>`:""}
+        ${f.tipo==="cuenta_cobro"?`<span class="badge" style="color:#92400e;background:#fffbeb;border-color:#fcd34d;font-weight:700">📷 Cuenta de cobro</span>`:""}
         ${chipsNotaCredito(f)}
         <span class="sp"></span>
         ${(perfil.rol==="sede"&&f.estado=="pool")?`<button class="s" onclick="tomar('${f.cufe}')">Es mía</button>`:""}
