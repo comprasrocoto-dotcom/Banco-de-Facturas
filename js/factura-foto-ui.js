@@ -16,7 +16,7 @@ function ffModal() {
   m.innerHTML = `<div class="card" style="max-width:560px">
     <h1 id="ffTitulo">📸 Foto de la factura</h1>
     <div class="mut" id="ffAyuda" style="margin-bottom:8px">Toma la foto de la factura donde se vean el número y el código QR. El sistema busca esa factura en el banco y la amarra a este pedido. Si todavía no está en el banco, se amarra sola cuando llegue.</div>
-    <label style="font-weight:700">Tipo de documento</label>
+    <label id="ffTipoLbl" style="font-weight:700;display:block">Tipo de documento</label>
     <select id="ffTipo" style="margin:4px 0 8px" onchange="ffCambiarTipo(this.value)"></select>
     <label style="font-weight:700">1. Foto del documento <span style="color:#b91c1c">*</span></label>
     <div class="row" style="gap:8px;margin:4px 0">
@@ -92,6 +92,7 @@ async function abrirFotoFactura(pedidoId, soloSoportes) {
   $('ffNovTipo').value = ''; $('ffNovTexto').value = ''; $('ffNovTexto').style.display = 'none';
   if ($('ffNovBox')) $('ffNovBox').style.display = FF.baseNueva === false ? 'none' : '';
   if ($('ffTipo')) $('ffTipo').style.display = tipos.length > 1 ? '' : 'none';
+  if ($('ffTipoLbl')) $('ffTipoLbl').style.display = tipos.length > 1 ? 'block' : 'none';
   const hoy = FechaRecibido.hoyCO();
   $('ffFecha').value = hoy; $('ffFecha').max = hoy;
   let htmlCC = '';
