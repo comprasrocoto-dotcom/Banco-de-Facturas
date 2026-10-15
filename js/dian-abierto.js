@@ -55,13 +55,43 @@
       (abierta ? `<button title="Quitar la marca (dejarla como pendiente)" style="padding:4px 8px" onclick="dianDesmarcar('${c}',this)">↺</button>` : '') + '</span>';
   }
 
-  return { CLAVE, MAX, norm, crear, botonHtml, hashDian, ESTILO_ABIERTA };
+  // (15/10/2026) NIT que se escribe en la busqueda de la DIAN: el de NUESTRA EMPRESA (receptor; la marca a la que se cargo la
+  // factura, ej. Rocoto), no el del proveedor. La DIAN acepta emisor o receptor. Orden: NIT receptor del reporte de la DIAN ->
+  // NIT de la marca (marca_id) -> NIT del proveedor (como antes). Siempre sin digito de verificacion.
+  //   d = { nit_receptor | nitReceptor, marca_id, nit }   nitsMarca = { [marca_id]: nit }
+  function sinDv(n) {
+    const s = String(n == null ? '' : n).trim();
+    if (!s) return '';
+    if (s.indexOf('-') >= 0) return s.split('-')[0].replace(/\D/g, '');
+    const d = s.replace(/\D/g, '');
+    return d.length === 10 && /^[89]/.test(d) ? d.slice(0, 9) : d;   // empresa: 9 digitos + DV pegado
+  }
+  function nitBusqueda(d, nitsMarca) {
+    d = d || {};
+    const rec = sinDv(d.nit_receptor || d.nitReceptor);
+    if (rec.length >= 5) return rec;
+    const mar = sinDv(nitsMarca && d.marca_id != null ? nitsMarca[d.marca_id] : '');
+    if (mar.length >= 5) return mar;
+    return sinDv(d.nit);
+  }
+
+  return { CLAVE, MAX, norm, crear, botonHtml, hashDian, ESTILO_ABIERTA, nitBusqueda, sinDv };
 });
 
 // ---------------------------------------------------------------- en la pagina
 var DIAN_ABIERTO = (typeof DianAbierto !== 'undefined') ? DianAbierto.crear((function () { try { return window.localStorage; } catch (e) { return null; } })()) : null;
 // d = { nit, numero, tipo } de la factura (opcional): con eso "Abrir en DIAN" deja los datos listos para el favorito ⚡ DIAN BOT
-function dianDatosFavorito(cufe, d) { return d && typeof FavoritoDian !== 'undefined' ? FavoritoDian.datosPortapapeles(Object.assign({ cufe: cufe }, d)) : ''; }
+// (15/10/2026) el NIT que va a la DIAN es el de nuestra empresa (receptor / marca); ver DianAbierto.nitBusqueda
+var DIAN_NITS_MARCA = {};
+async function dianCargarNitsMarca() {
+  try { const r = await SB.from('marcas').select('id,nit'); const m = {}; (r.data || []).forEach((x) => { if (x && x.nit) m[x.id] = x.nit; }); DIAN_NITS_MARCA = m; } catch (e) { /* sin NIT de marcas: se usa el del reporte o el del proveedor */ }
+}
+function dianNitEmpresa(d) { return DianAbierto.nitBusqueda(d, DIAN_NITS_MARCA) || String((d && d.nit) || ''); }
+function dianDatosFavorito(cufe, d) {
+  if (!d || typeof FavoritoDian === 'undefined') return '';
+  const nit = DianAbierto.nitBusqueda(d, DIAN_NITS_MARCA) || d.nit;
+  return FavoritoDian.datosPortapapeles(Object.assign({ cufe: cufe }, d, { nit: nit }));
+}
 function dianBotonHtml(cufe, d) { return DianAbierto.botonHtml(cufe, BancoUtils.urlDian(cufe), DIAN_ABIERTO.esta(cufe), dianDatosFavorito(cufe, d)); }
 const dianBfDe = (span) => { try { const a = span && span.querySelector ? span.querySelector('a[data-bf]') : null; return a ? a.getAttribute('data-bf') : ''; } catch (e) { return ''; } };
 // Repinta SOLO ese boton (y resalta/quita el resalte de su fila) sin volver a dibujar la lista; se hace despues del clic (setTimeout) para no quitar el enlace antes de que se abra

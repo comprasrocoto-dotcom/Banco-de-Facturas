@@ -437,6 +437,7 @@ async function sesion(u){
   }
   aplicarPermisosUI();      // mostrar/ocultar segun los permisos del perfil
   const {data:ms}=await SB.from("marcas").select("id,nombre").order("nombre");
+  if(typeof dianCargarNitsMarca==="function") dianCargarNitsMarca();   // (15/10/2026) NIT de la empresa para "Abrir en DIAN"
   // (29/09/2026) "Subir facturas": un analista con sedes de VARIAS marcas (ej. Deiby: 123 wok y Rocoto) podia dejar aca la marca de la
   // ultima vez sin darse cuenta -> el PDF se intentaba desbloquear con el NIT de OTRA marca. Ahora el selector: (a) solo ofrece SUS
   // marcas (igual que #fSede), (b) arranca sin elegir (no la primera de la lista), y subirPdfs() exige elegirla antes de subir.
@@ -1356,7 +1357,7 @@ function pintarAgente(c,q){
         ${m.estado==="subida"?"":`<div class="mut">NIT que pide la DIAN: <b>${escAg(m.nit_emisor)}</b></div>`}
         ${m.ultimo_error&&m.estado!=="subida"?`<div class="mut" style="color:#b45309">Aviso: ${escAg(String(m.ultimo_error).slice(0,300))}</div>`:""}</div>
         <span class="badge ${est}">${escAg(({pendiente:"esperando el PDF",bajando:"esperando el PDF",agotado:"esperando el PDF",subida:"subida al banco",error:"error"})[m.estado]||m.estado)}</span>
-        ${m.estado!=="subida"?`${dianBotonHtml(m.cufe,{nit:m.nit_emisor,numero:m.documento,tipo:m.tipo})}`:""}${m.estado==="error"?`<button onclick="agReintentarDian(${i})">Reintentar ahora</button>`:""}
+        ${m.estado!=="subida"?`${dianBotonHtml(m.cufe,{nit:m.nit_emisor,nit_receptor:m.nit_receptor,marca_id:m.marca_id,numero:m.documento,tipo:m.tipo})}`:""}${m.estado==="error"?`<button onclick="agReintentarDian(${i})">Reintentar ahora</button>`:""}
       </div></div>`;}).join(""):'<div class="vacio">Todavía no has pedido ninguna descarga.</div>';
   }
   // 2) Lo que decidió el agente (para corregirlo si se equivocó)
@@ -2444,7 +2445,7 @@ function pintarPendCruce(){
       <div class="mut" id="cruceProgreso" style="margin-top:6px;white-space:pre-line">${escAg(c.progresoTxt||"")}</div>
       <div id="cruceLista"></div>
     </div>`;
-  h+=c.visible.length?`<table><thead><tr><th></th><th>N° factura</th><th>Proveedor</th><th>NIT</th><th>Fecha</th><th class="num">Total</th><th></th></tr></thead><tbody>${c.visible.slice(0,300).map((x,i)=>`<tr><td><input type="checkbox" style="width:auto;margin:0" ${c.sel.has(x.r.cufe)?"checked":""} onchange="cruceSel(${i},this.checked)"></td><td><b>${escAg(x.r.numero||"—")}</b></td><td>${escAg(x.r.emisor||"—")}</td><td>${escAg(x.r.nit||"—")} <button title="Copiar el NIT" style="padding:1px 6px" onclick="copiarTexto('${escAg(x.r.nit||"")}',this)">📋</button></td><td>${escAg(x.r.fecha||"")}</td><td class="num">${escAg(x.r.total||"")}</td><td><a href="${escAg(BancoUtils.urlDian(x.r.cufe)+(typeof DianAbierto!=="undefined"?DianAbierto.hashDian("BFDIAN|"+x.r.cufe+"|"+String(x.r.nit||"").split("-")[0].replace(/\D/g,"")+"|"+(x.r.numero||"")+"|factura"):""))}" target="_blank" rel="noopener noreferrer">Abrir en DIAN ↗</a></td></tr>`).join("")}</tbody></table>${c.visible.length>300?`<div class="mut">… y ${c.visible.length-300} más (“Marcar todas” también las incluye; todas están en el CSV).</div>`:""}`
+  h+=c.visible.length?`<table><thead><tr><th></th><th>N° factura</th><th>Proveedor</th><th>NIT</th><th>Fecha</th><th class="num">Total</th><th></th></tr></thead><tbody>${c.visible.slice(0,300).map((x,i)=>`<tr><td><input type="checkbox" style="width:auto;margin:0" ${c.sel.has(x.r.cufe)?"checked":""} onchange="cruceSel(${i},this.checked)"></td><td><b>${escAg(x.r.numero||"—")}</b></td><td>${escAg(x.r.emisor||"—")}</td><td>${escAg(x.r.nit||"—")} <button title="Copiar el NIT" style="padding:1px 6px" onclick="copiarTexto('${escAg(x.r.nit||"")}',this)">📋</button></td><td>${escAg(x.r.fecha||"")}</td><td class="num">${escAg(x.r.total||"")}</td><td><a href="${escAg(BancoUtils.urlDian(x.r.cufe)+(typeof DianAbierto!=="undefined"?DianAbierto.hashDian("BFDIAN|"+x.r.cufe+"|"+(typeof dianNitEmpresa==="function"?dianNitEmpresa({nitReceptor:x.r.nitReceptor,marca_id:c.marca,nit:x.r.nit}):String(x.r.nit||"").split("-")[0].replace(/\D/g,""))+"|"+(x.r.numero||"")+"|factura"):""))}" target="_blank" rel="noopener noreferrer">Abrir en DIAN ↗</a></td></tr>`).join("")}</tbody></table>${c.visible.length>300?`<div class="mut">… y ${c.visible.length-300} más (“Marcar todas” también las incluye; todas están en el CSV).</div>`:""}`
     :`<div class="vacio">Con ese filtro no queda ninguna. Desmarca “Solo proveedores que ya tienen facturas en el banco” para verlas todas.</div>`;
   cont.innerHTML=h;
   pintarListaDian();
@@ -2468,7 +2469,7 @@ function pintarListaDian(){
   el.innerHTML=`<div style="margin-top:10px"><b>Lista para bajar de la DIAN</b> <span class="mut">(el PDF que bajes queda en Descargas y se sube solo)</span> ${typeof botonFavoritoDian==="function"?botonFavoritoDian():""}</div>`+
     c.itemsCola.map(it=>{ const e=est[it.cufe]; const hecho=e==="subida";
       return `<div class="row" style="border-bottom:1px solid var(--line);padding:6px 0;gap:10px"><div style="flex:3"><b>${escAg(it.documento||"—")}</b> · ${escAg(it.emisor||"—")} <span class="mut">· NIT ${escAg(it.nit_emisor)}</span></div>
-        ${hecho?`<span class="badge st-sellada">✅ subida al banco</span>`:`<button title="Copiar el NIT" onclick="copiarTexto('${escAg(it.nit_emisor)}',this)">📋 NIT</button>${dianBotonHtml(it.cufe,{nit:it.nit_emisor,numero:it.documento,tipo:it.tipo})}<span class="badge st-asignada">esperando el PDF</span>`}</div>`; }).join("");
+        ${hecho?`<span class="badge st-sellada">✅ subida al banco</span>`:`<button title="Copiar el NIT de la empresa (el que pide la DIAN)" onclick="copiarTexto('${escAg(typeof dianNitEmpresa==="function"?dianNitEmpresa({nit_receptor:it.nit_receptor,marca_id:c.marca,nit:it.nit_emisor}):it.nit_emisor)}',this)">📋 NIT</button>${dianBotonHtml(it.cufe,{nit:it.nit_emisor,nit_receptor:it.nit_receptor,marca_id:c.marca,numero:it.documento,tipo:it.tipo})}<span class="badge st-asignada">esperando el PDF</span>`}</div>`; }).join("");
 }
 async function enviarADian(){
   const c=cr; if(!c||c.enviando) return;
