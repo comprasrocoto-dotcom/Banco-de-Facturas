@@ -1848,6 +1848,9 @@ async function cargarPedidos(){
 function pintarPedidos(){
   const q=($("qp").value||"").trim().toLowerCase();
   let l=pedidos.filter(p=>pedVista=="todos"||p.estado===pedVista);
+  // (15/10/2026) a la SEDE (y al usuario de una sola sede) "Pendientes" le muestra solo lo que AUN NO TIENE FACTURA amarrada: lo ya
+  // amarrado esta en manos del agente/analista (se ve en «Todos» hasta que quede facturado). Admin y analistas siguen viendo todo.
+  if(pedVista==="pendiente" && ((perfil&&perfil.rol==="sede") || (typeof sedeFijaId!=="undefined"&&sedeFijaId))) l=l.filter(p=>!p.factura_cufe);
   // Filtro por fecha
   const fd=$("fped_desde").value, fh=$("fped_hasta").value;
   if(fd||fh){
