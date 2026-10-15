@@ -1775,7 +1775,10 @@ function pintarPedidos(){
   const cont=$("listaped");
   if(!l.length){cont.innerHTML='<div class="vacio">No hay pedidos acá.</div>';return;}
   cont.innerHTML=l.slice(0,300).map(p=>{
-    const est = p.estado==="facturado" ? '<span class="badge st-sellada">Facturado</span>' : '<span class="badge st-pool">Pendiente</span>';
+    // (14/10/2026) "anulado" = pedido duplicado por doble toque: no sale en Pendientes ni para amarrar, solo en Todos
+    const est = p.estado==="facturado" ? '<span class="badge st-sellada">Facturado</span>'
+      : p.estado==="anulado" ? '<span class="badge" style="background:#fee2e2;color:#991b1b" title="'+escAg(p.observacion||"Anulado")+'">Anulado</span>'
+      : '<span class="badge st-pool">Pendiente</span>';
     const amFecha = p.factura_cufe && p.factura_amarrada_en
       ? ' title="'+(p.fecha_recibido?'Recibida el '+FechaRecibido.mostrar(p.fecha_recibido)+' · ':'')+'Enlazada el '+new Date(p.factura_amarrada_en).toLocaleString('es-CO',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})+'"' : '';
     // (14/10/2026) arriba: el NUMERO de la factura o de la cuenta de cobro amarrada (antes decia "Amarrado a factura" si el agente
