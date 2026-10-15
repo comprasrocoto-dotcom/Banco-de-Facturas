@@ -59,6 +59,9 @@
 
   // ---- proveedor
   const CAMPOS_PROV = ['razon_social', 'nombre_comercial', 'nit', 'telefono1', 'telefono2', 'correo', 'asesor'];
+  // (14/10/2026) proveedores.documento: factura electronica -> en el pedido «📸 Foto de la factura» y «🔗 Amarrar»; cuenta de cobro -> «📷 Cuenta de cobro»
+  const DOCUMENTO_PROV = [['', 'Sin definir (el pedido muestra todos los botones)'], ['factura', 'Factura electrónica'], ['cuenta_cobro', 'Cuenta de cobro']];
+  const documentoProv = (v) => (v === 'factura' || v === 'cuenta_cobro' ? v : null);
   const soloDigitos = (s) => String(s == null ? '' : s).replace(/[^0-9]/g, '');
   const correoValido = (s) => /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(s);
 
@@ -126,11 +129,13 @@
       <div class="row" style="gap:10px;margin-top:6px;flex-wrap:wrap">${campo('razon_social', 'Razón social *', 2)}${campo('nombre_comercial', 'Nombre comercial', 2)}</div>
       <div class="row" style="gap:10px;margin-top:6px;flex-wrap:wrap">${campo('nit', 'NIT (sin dígito de verificación)', 1, 'inputmode="numeric"')}${campo('asesor', 'Asesor / contacto', 1)}</div>
       <div class="row" style="gap:10px;margin-top:6px;flex-wrap:wrap">${campo('telefono1', 'Teléfono / WhatsApp', 1, 'inputmode="tel"')}${campo('telefono2', 'Teléfono 2', 1, 'inputmode="tel"')}${campo('correo', 'Correo', 2, 'type="text"')}</div>
+      <label style="display:block;margin-top:6px;max-width:420px"><span class="mut">Documento que entrega (decide los botones del pedido)</span>
+        <select id="${id}_documento" style="margin:2px 0 0;width:100%">${DOCUMENTO_PROV.map(([v, t]) => `<option value="${v}"${(p.documento || '') === v ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
       ${opciones.marcasHtml ? `<div style="margin-top:8px"><span class="mut">Marcas que lo manejan (definen en qué marcas aparece al hacer pedidos)</span><div style="margin-top:4px">${opciones.marcasHtml}</div></div>` : ''}
       <div class="row" style="margin-top:10px;gap:8px"><button class="p" onclick="guardarProveedorAdmin(${Number(p.id)})">💾 Guardar cambios</button><button onclick="cancelarEdicionAdmin()">Cancelar</button></div>
       <div class="mut" style="margin-top:6px">El teléfono es el WhatsApp al que se envían los pedidos; el correo, donde llegan. Cambiar el NIT o la razón social afecta cómo se reconoce a este proveedor en facturas y pedidos nuevos.</div>
       ${opciones.error ? `<div style="color:#b91c1c;margin-top:6px">${esc(opciones.error)}</div>` : ''}</div>`;
   }
 
-  return { esc, normalizarUnidad, normalizarCodigo, unidadesConocidas, validarUnidad, validarCodigo, validarArticulo, validarProveedor, cambiosProveedor, cambiaIdentidad, editorArticulo, editorProveedor, CAMPOS_PROV };
+  return { esc, normalizarUnidad, normalizarCodigo, unidadesConocidas, validarUnidad, validarCodigo, validarArticulo, validarProveedor, cambiosProveedor, cambiaIdentidad, editorArticulo, editorProveedor, CAMPOS_PROV, DOCUMENTO_PROV, documentoProv };
 });

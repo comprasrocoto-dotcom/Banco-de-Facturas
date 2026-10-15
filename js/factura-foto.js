@@ -79,5 +79,14 @@
     return '';
   }
 
-  return { leerQR, numeroLimpio, coincide, rutaFoto, aviso, alnum };
+  // (14/10/2026) que botones ofrece el pedido segun el documento que entrega el proveedor (proveedores.documento):
+  //  'factura' -> foto de la factura + amarrar; 'cuenta_cobro' -> solo cuenta de cobro; sin definir -> los tres (como antes)
+  function botonesPedido(documento) {
+    if (documento === 'factura') return { foto: true, amarrar: true, cuenta: false };
+    if (documento === 'cuenta_cobro') return { foto: false, amarrar: false, cuenta: true };
+    return { foto: true, amarrar: true, cuenta: true };
+  }
+  const DOCUMENTOS = [['', 'Sin definir (el pedido muestra todo)'], ['factura', 'Factura electrónica'], ['cuenta_cobro', 'Cuenta de cobro']];
+
+  return { leerQR, numeroLimpio, coincide, rutaFoto, aviso, alnum, botonesPedido, DOCUMENTOS };
 });

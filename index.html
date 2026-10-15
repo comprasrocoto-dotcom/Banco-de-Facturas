@@ -1607,6 +1607,8 @@ async function guardarProveedorAdmin(id){
   const v=AdminEditar.validarProveedor(d,{id,otros:adminProv});
   if(!v.ok){ adminEdit={tipo:"prov",id,error:v.errores.join(" ")}; pintarAdmin(); return; }
   const cambios=AdminEditar.cambiosProveedor(p,v.valores);
+  const docEl=$("ep_"+id+"_documento");   // (14/10/2026) documento que entrega (decide los botones del pedido)
+  if(docEl && AdminEditar.documentoProv){ const nd=AdminEditar.documentoProv(docEl.value); if((p.documento||null)!==nd) cambios.documento=nd; }
   const marcasElegidas=adminMarcas.filter(mm=>{ const el=$("ep_"+id+"_m"+mm.id); return el&&el.checked; }).map(mm=>mm.id);
   const cm=MarcaProv.cambiosMarcas(MarcaProv.marcasDe(adminVinc,id),marcasElegidas);
   if(!Object.keys(cambios).length && !cm.agregar.length && !cm.quitar.length){ adminEdit=null; pintarAdmin(); return; }
@@ -2157,6 +2159,10 @@ async function abrirPedido(id){
   const l=await SB.from("pedido_lineas").select("codigo,insumo,cantidad").eq("pedido_id",id);
   const lineas=l.data||[];
   const cds=[...new Set(lineas.map(x=>x.codigo).filter(Boolean))];
+  // (14/10/2026) botones segun lo que entrega el proveedor: factura electronica -> foto/amarrar; cuenta de cobro -> solo cuenta de cobro
+  let docProv=null;
+  if(p.proveedor_id && !p.factura_cufe){ try{ const rp=await SB.from("proveedores").select("documento").eq("id",p.proveedor_id).maybeSingle(); docProv=(rp&&rp.data&&rp.data.documento)||null; }catch(e){ docProv=null; } }
+  const bot=(typeof FacturaFoto!=="undefined"&&FacturaFoto.botonesPedido)?FacturaFoto.botonesPedido(docProv):{foto:true,amarrar:true,cuenta:true};
   let uni={};
   if(cds.length){
     const a=await SB.from("articulos").select("codigo_barras,unimedida_compra").in("codigo_barras",cds.slice(0,300));
@@ -2227,9 +2233,9 @@ async function abrirPedido(id){
      </div>
      <div id="env_${p.id}"></div>
      <div class="row" style="margin-top:14px">
-       ${!p.factura_cufe&&p.estado!=="anulado"&&typeof abrirFotoFactura==="function"?`<button class="s" title="Foto de la factura: el sistema la busca en el banco y la amarra a este pedido" onclick="abrirFotoFactura(${p.id})">📸 Foto de la factura</button>`:""}
-       ${!p.factura_cufe?`<button class="s" onclick="abrirAmarre('pedido',${p.id})">🔗 Amarrar a factura</button>`:""}
-       ${!p.factura_cufe&&typeof abrirCuentaCobro==="function"?`<button class="s" title="Proveedor sin factura electrónica: foto de la cuenta de cobro + cantidades y precios" onclick="abrirCuentaCobro(${p.id})">📷 Cuenta de cobro</button>`:""}
+       ${!p.factura_cufe&&bot.foto&&p.estado!=="anulado"&&typeof abrirFotoFactura==="function"?`<button class="s" title="Foto de la factura: el sistema la busca en el banco y la amarra a este pedido" onclick="abrirFotoFactura(${p.id})">📸 Foto de la factura</button>`:""}
+       ${!p.factura_cufe&&bot.amarrar?`<button class="s" onclick="abrirAmarre('pedido',${p.id})">🔗 Amarrar a factura</button>`:""}
+       ${!p.factura_cufe&&bot.cuenta&&typeof abrirCuentaCobro==="function"?`<button class="s" title="Proveedor sin factura electrónica: foto de la cuenta de cobro + cantidades y precios" onclick="abrirCuentaCobro(${p.id})">📷 Cuenta de cobro</button>`:""}
        ${p.factura_cufe?`<span class="badge st-sellada">Amarrado a ${numFacturaDe(p)||"factura"}</span>`:""}
        ${(p.factura_cufe&&typeof Desamarrar!=="undefined"&&Desamarrar.puede(perfil))?`<button class="d" title="Suelta la factura de este pedido sin borrar nada: la factura queda libre en el banco" onclick="desamarrarPedido(${p.id})">⛓ Desamarrar factura</button>`:""}
        ${p.observacion_pedido?`<span class="mut">Obs: ${p.observacion_pedido}</span>`:""}
