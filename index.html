@@ -932,6 +932,16 @@ async function clonarPedido(id){
   if(cl){ cl.innerHTML="⧉ <b>Clonando el pedido #"+escAg(p.numero||p.id)+"</b> — se guardará como un pedido NUEVO (el original no cambia). Revisa cantidades, responsable y fechas."+avisos.map(a=>'<div style="margin-top:4px;color:#b45309">⚠️ '+escAg(a)+'</div>').join(""); cl.style.display="block"; }
 }
 async function guardarPedido(){
+  // (14/10/2026) UN solo guardado a la vez: un doble toque (o tocar otra vez mientras guarda) creaba el pedido DOS veces
+  // (PED-0737/0739, 0742/0743...). Mientras guarda, el boton queda bloqueado y dice "Guardando…".
+  if(guardarPedido.enCurso) return;
+  guardarPedido.enCurso=true;
+  const btn=$("np_guardar_btn"), txt=btn?btn.firstChild&&btn.firstChild.nodeValue:null;
+  if(btn){ btn.disabled=true; if(btn.firstChild) btn.firstChild.nodeValue="Guardando… "; }
+  try{ await guardarPedidoUnaVez(); }
+  finally{ guardarPedido.enCurso=false; if(btn){ btn.disabled=false; if(btn.firstChild&&txt!=null) btn.firstChild.nodeValue=txt; } }
+}
+async function guardarPedidoUnaVez(){
   if(!(await revisarMaximos())) return;
   const prov=Number($("np_prov").value||0);
   if(!prov){$("np_err").textContent="Elegí el proveedor (el sistema no pudo adivinarlo solo: el artículo tiene varios proveedores posibles, o ninguno registrado todavía).";return;}
@@ -952,11 +962,8 @@ async function guardarPedido(){
   const sedeNom = (sedes.find(s=>s.id===sedeId)||{}).nombre || (perfil.sedes&&perfil.sedes.nombre) || "";
   const marcaId = (sedes.find(s=>s.id===sedeId)||{}).marca_id || perfil.sedes?.marca_id || null;
   const pv = provs.find(x=>x.id===prov)||{};
-  const catDe = s => { s=(s||"").toUpperCase();
-    if(s.includes("ASEO")) return "aseo";
-    if(s.includes("EMPAQUE")) return "empaque";
-    if(s.includes("UTENSIL")||s.includes("LOZA")) return "loza";
-    return "insumos"; };
+  // (14/10/2026) por PALABRAS (js/separar-pedido.js): "GASEOSAS" ya no cuenta como "ASEO"
+  const catDe = s => SepararPedido.categoria(s);
   // (06/10/2026) REGLA POR PROVEEDOR + PRODUCTO (tabla regla_pedido_aparte, por id): p. ej. JUAN D. HOYOS (200) + papa
   // delgada (490) / papa Surecrisp (769) -> PEDIDO ESPECIAL aparte, con todos los de ese grupo juntos. Con otro proveedor no
   // aplica. Lo demas sigue la regla de siempre (insumos / aseo-empaque).
@@ -3601,7 +3608,7 @@ async function guardarNov(){
     <div class="err" id="np_err"></div>
     <div class="row"><b id="np_total" style="margin-right:auto">Total: $ 0</b>
       <button onclick="$('modalPedido').classList.remove('on')">Cancelar</button>
-      <button class="p" onclick="guardarPedido()">Guardar pedido<span id="np_guardar_n"></span></button></div>
+      <button class="p" id="np_guardar_btn" onclick="guardarPedido()">Guardar pedido<span id="np_guardar_n"></span></button></div>
   </div>
 </div></div>
 

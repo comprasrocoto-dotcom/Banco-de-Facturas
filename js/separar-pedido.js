@@ -50,5 +50,17 @@
     return (id && m.get(id)) || null;
   }
 
-  return { reglasDe, partir, grupoDe };
+  // (14/10/2026) CATEGORIA de la orden segun la subfamilia: insumos | aseo | empaque | loza. Por PALABRAS, no por letras
+  // sueltas: antes "GASEOSAS Y SODAS" contenia "ASEO" (g-ASEO-sas) y la gaseosa salia en la orden de material de aseo,
+  // separada del agua (INDUSTRIA NACIONAL DE GASEOSAS, PED-0725/0726, 0737/0738).
+  function categoria(subfamilia) {
+    const palabras = String(subfamilia || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().split(/[^A-Z]+/).filter(Boolean);
+    const hay = (fn) => palabras.some(fn);
+    if (hay((w) => w === 'ASEO')) return 'aseo';
+    if (hay((w) => w.startsWith('EMPAQUE'))) return 'empaque';
+    if (hay((w) => w.startsWith('UTENSIL') || w === 'LOZA' || w === 'LOZAS')) return 'loza';
+    return 'insumos';
+  }
+
+  return { reglasDe, partir, grupoDe, categoria };
 });
