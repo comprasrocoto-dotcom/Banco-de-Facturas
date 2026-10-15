@@ -53,6 +53,14 @@
       const vu = validarUnidad(a.unimedida_compra, escrito.unidad);
       if (!vu.ok) errores.push(vu.error); else r.unidad = { cambio: true, valor: vu.unidad };
     }
+    // (15/10/2026) nombre del articulo: espacios de mas fuera; hasta 150 letras. Vacio = se conserva el que tenia (nunca queda sin nombre)
+    r.nombre = { cambio: false };
+    const nuevoNombre = String(escrito.nombre == null ? '' : escrito.nombre).replace(/\s+/g, ' ').trim();
+    if (nuevoNombre) {
+      const antes = String(a.articulo_hiopos || a.articulo_comercial || '').replace(/\s+/g, ' ').trim();
+      if (nuevoNombre.length > 150) errores.push('El nombre es muy largo (máximo 150 letras).');
+      else if (nuevoNombre !== antes) r.nombre = { cambio: true, valor: nuevoNombre, antes };
+    }
     r.ok = errores.length === 0;
     return r;
   }
@@ -99,6 +107,9 @@
     const id = 'ea_' + Number(a.id);
     return `<div class="card" style="margin:6px 0;border-left:5px solid #0f766e">
       <div class="emisor">✏️ Editar artículo · ${esc(a.articulo_hiopos || a.articulo_comercial || '—')}</div>
+      <div class="row" style="margin-top:8px;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <label style="display:block;flex:1 1 320px"><span class="mut">Nombre del artículo</span>
+          <input id="${id}_nombre" value="${esc(a.articulo_hiopos || a.articulo_comercial || '')}" placeholder="Como debe verse en pedidos y en el ERP" style="margin:2px 0 0;width:100%" autocomplete="off"></label></div>
       <div class="row" style="margin-top:8px;gap:10px;flex-wrap:wrap;align-items:flex-end">
         <label style="display:block;min-width:160px"><span class="mut">Código</span>
           <input id="${id}_codigo" value="${esc(a.codigo_barras || '')}" style="margin:2px 0 0;width:100%;text-transform:uppercase" autocomplete="off"></label>
