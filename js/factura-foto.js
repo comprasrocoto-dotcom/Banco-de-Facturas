@@ -119,5 +119,11 @@
     return { ok: true, tipo: t, texto: tx };
   }
 
-  return { leerQR, numeroLimpio, coincide, rutaFoto, aviso, alnum, botonesPedido, DOCUMENTOS, TIPOS_DOC, NOVEDADES, nombreTipo, requisitos, tiposOfrecidos, validarNovedad };
+  // error de la base que dice "esa funcion no existe con esos datos" (aun no se aplico factura_foto_documentos.sql)
+  function baseSinDocumentos(err) {
+    const t = String((err && (err.message || '')) + ' ' + (err && (err.code || '')) + ' ' + (err && (err.details || '')) + ' ' + (err && (err.hint || '')));
+    return /PGRST202|could not find the function|function .*factura_foto_registrar.* does not exist|p_tipo/i.test(t);
+  }
+
+  return { leerQR, numeroLimpio, coincide, rutaFoto, aviso, alnum, botonesPedido, DOCUMENTOS, TIPOS_DOC, NOVEDADES, nombreTipo, requisitos, tiposOfrecidos, validarNovedad, baseSinDocumentos };
 });

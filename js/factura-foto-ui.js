@@ -32,7 +32,7 @@ function ffModal() {
     </div>
     <div><label style="font-weight:700">4. Recibido por <span style="color:#b91c1c">*</span></label><input id="ffRecibe" placeholder="Nombre de quien recibe" style="margin:4px 0" autocomplete="off"></div>
     <div id="ffCentroBox" style="display:none;margin:4px 0"><label style="font-weight:700">Centro de costo <span style="color:#b91c1c">*</span></label><div id="ffCentroSel"></div></div>
-    <div style="margin-top:8px;padding:10px 12px;border:1px solid #fde68a;background:#fffbeb;border-radius:10px">
+    <div id="ffNovBox" style="margin-top:8px;padding:10px 12px;border:1px solid #fde68a;background:#fffbeb;border-radius:10px">
       <label style="font-weight:700">5. ¿Llegó todo bien? (novedad)</label>
       <select id="ffNovTipo" style="margin:4px 0" onchange="ffCambiarNovedad()"></select>
       <textarea id="ffNovTexto" placeholder="Cuenta qué pasó: producto, cantidad y motivo (ej. devolví 2 cajas de Coca-Cola por golpeadas)" style="display:none;min-height:64px;margin:4px 0"></textarea>
@@ -79,7 +79,9 @@ function ffCambiarNovedad() {
 async function abrirFotoFactura(pedidoId, soloSoportes) {
   const p = (typeof pedidos !== 'undefined' ? pedidos : []).find((x) => x.id === pedidoId);
   if (!p) return;
-  const tipos = FacturaFoto.tiposOfrecidos(p, !!soloSoportes);
+  let tipos = FacturaFoto.tiposOfrecidos(p, !!soloSoportes);
+  if (FF.baseNueva === false) tipos = tipos.filter(([t]) => t === 'factura');   // base sin factura_foto_documentos.sql
+  if (!tipos.length) { alert('Esta opción todavía no está activa: falta actualizar la base de datos.'); return; }
   const m = ffModal();
   FF.pedido = p; FF.foto = null; FF.cufe = null; FF.guardando = false;
   if (FF.fotoUrl) { try { URL.revokeObjectURL(FF.fotoUrl); } catch (e) {} FF.fotoUrl = null; }
@@ -88,6 +90,8 @@ async function abrirFotoFactura(pedidoId, soloSoportes) {
   $('ffTipo').innerHTML = tipos.map(([v, t]) => `<option value="${v}">${escAg(t)}</option>`).join('');
   $('ffNovTipo').innerHTML = FacturaFoto.NOVEDADES.map(([v, t]) => `<option value="${v}">${escAg(t)}</option>`).join('');
   $('ffNovTipo').value = ''; $('ffNovTexto').value = ''; $('ffNovTexto').style.display = 'none';
+  if ($('ffNovBox')) $('ffNovBox').style.display = FF.baseNueva === false ? 'none' : '';
+  if ($('ffTipo')) $('ffTipo').style.display = tipos.length > 1 ? '' : 'none';
   const hoy = FechaRecibido.hoyCO();
   $('ffFecha').value = hoy; $('ffFecha').max = hoy;
   let htmlCC = '';
@@ -173,8 +177,14 @@ async function ffGuardar() {
   try {
     const up = await SB.storage.from('facturas').upload(ruta, FF.foto, { contentType: 'image/jpeg', upsert: false });
     if (up.error) throw new Error('No pude subir la foto: ' + up.error.message);
-    const r = await SB.rpc('factura_foto_registrar', { p_pedido_id: p.id, p_numero: num, p_foto: ruta, p_fecha_recibido: vf.fecha,
-      p_cufe_qr: rq.qr ? FF.cufe : null, p_centro_costo: cc, p_recibido_por: recibe, p_tipo: tipo, p_novedad_tipo: vn.tipo, p_novedad: vn.texto });
+    const base = { p_pedido_id: p.id, p_numero: num, p_foto: ruta, p_fecha_recibido: vf.fecha, p_cufe_qr: rq.qr ? FF.cufe : null, p_centro_costo: cc, p_recibido_por: recibe };
+    let r = await SB.rpc('factura_foto_registrar', Object.assign({}, base, { p_tipo: tipo, p_novedad_tipo: vn.tipo, p_novedad: vn.texto }));
+    // la base aun sin supabase/factura_foto_documentos.sql (funcion de 7 datos): la factura sin novedad se guarda como antes;
+    // lo nuevo (nota credito, devolucion, otro, novedad) avisa que falta actualizar la base
+    if (r.error && FacturaFoto.baseSinDocumentos(r.error)) {
+      if (tipo === 'factura' && !vn.tipo) r = await SB.rpc('factura_foto_registrar', base);
+      else { try { await SB.storage.from('facturas').remove([ruta]); } catch (e) {} throw new Error('Esta opción (' + FacturaFoto.nombreTipo(tipo).toLowerCase() + (vn.tipo ? ' / novedad' : '') + ') todavía no está activa: falta actualizar la base de datos. Por ahora usa «Factura electrónica» sin novedad, o reporta la novedad desde Facturas → «Novedad».'); }
+    }
     if (r.error) { try { await SB.storage.from('facturas').remove([ruta]); } catch (e) {} throw new Error(r.error.message); }
     const d = r.data || {};
     ffCerrar();
@@ -215,6 +225,7 @@ async function pintarDocsPedido(pedidoId) {
 async function cargarFotosFactura() {
   try {
     let r = await SB.from('factura_foto').select('pedido_id,numero,estado,motivo,tipo_doc').in('estado', ['ESPERANDO', 'NOVEDAD']).limit(1000);
+    FF.baseNueva = !r.error;   // false: la base aun sin factura_foto_documentos.sql -> solo la foto de factura de siempre
     if (r.error) r = await SB.from('factura_foto').select('pedido_id,numero,estado,motivo').in('estado', ['ESPERANDO', 'NOVEDAD']).limit(1000);   // base sin tipo_doc
     FF.porPedido = {};
     (r.data || []).forEach((x) => { const y = FF.porPedido[x.pedido_id]; if (!y || x.estado === 'NOVEDAD') FF.porPedido[x.pedido_id] = x; });
