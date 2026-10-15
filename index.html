@@ -380,6 +380,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/unidad-proveedor.js"></script>
 <script src="js/factura-foto.js"></script>
 <script src="js/factura-foto-ui.js"></script>
+<script src="js/codigo-marca.js"></script>
 <script src="js/organizador-hiopos.js"></script>
 <script src="js/hoja-contable.js"></script>
 <script src="js/hoja-contable-ui.js"></script>
@@ -1078,6 +1079,7 @@ async function guardarPedidoUnaVez(){
 let adminCargado=false, adminVista="prov", adminProv=[], adminArt=[], adminCat=[];
 let adminMarcaArts=[], adminMarcaCat=[];   // articulos y catalogo propios de una marca (Sin Par...)
 let adminMarcas=[], adminVinc=[], adminMarcaTocada=false, adminArtMarca=[];   // marcas y proveedor_marca (js/marca-proveedores.js)
+let adminCodMarca=[];   // (15/10/2026) codigo del ERP por marca de los articulos compartidos (js/codigo-marca.js)
 let adminLimite=400;   // cuántos artículos se pintan de una vez en Admin > Artículos (hay más de 700: "Ver 400 más")
 let adminEdit=null;   // {tipo:"prov"|"art", id, error} = la tarjeta que se está editando (ver js/admin-editar.js)
 function setAdmin(v){ adminVista=v; adminEdit=null; adminLimite=400;
@@ -1097,6 +1099,7 @@ async function cargarAdmin(){
   const b=await SB.from("articulos").select("*").order("articulo_hiopos").limit(5000);
   adminArt=b.data||[];
   try{ adminArtMarca=await traerTodo("articulo_marca","articulo_id,marca_id",["id"]); }catch(e){ adminArtMarca=[]; }   // (13/10/2026) en que marcas aparece cada articulo
+  try{ adminCodMarca=await traerTodo("articulo_codigo_marca","id,articulo_id,marca_id,codigo",["id"]); }catch(e){ adminCodMarca=[]; }   // (15/10/2026) codigo por marca
   const c=await SB.from("catalogo_compras").select("*").limit(5000);
   adminCat=c.data||[];
   adminMarcas=(await SB.from("marcas").select("id,nombre").order("nombre")).data||[];
@@ -1144,7 +1147,7 @@ function pintarAdmin(){
     EXPORTAR.catalogoArt = mSel ? ((adminMarcas.find(m=>m.id===mSel)||{}).nombre||"")+" (catálogo propio)" : "Rocoto y Arrebatao (general)";
     EXPORTAR.actual.admin_art = ()=>l.map(x=>{ const del=mSel?adminMarcaCat.filter(k=>k.marca_id===mSel&&k.codigo_barras===x.codigo_barras):adminCat.filter(k=>k.codigo_barras===x.codigo_barras); const pr=del.filter(k=>k.precio_negociado!=null).map(k=>Number(k.precio_negociado)); return {...x,_prov:del.length,_pmin:pr.length?Math.min(...pr):null,_pmax:pr.length?Math.max(...pr):null}; });
     c.innerHTML = (l.slice(0,adminLimite).map(x=>{
-      if(adminEdit&&adminEdit.tipo==="art"&&adminEdit.id===x.id) return AdminEditar.editorArticulo(x,conocidas,{error:adminEdit.error, copiarHtml:htmlCopiarArticulo(x,mSel), marcasHtml:ArticuloMarcas.casillasTodas(ArticuloMarcas.estadoTodas({marcas:adminMarcas,marcaArts:adminMarcaArts,vinc:adminArtMarca,general:adminArt,articulo:x,origen:mSel}),adminMarcas,"ea_"+x.id)});
+      if(adminEdit&&adminEdit.tipo==="art"&&adminEdit.id===x.id) return AdminEditar.editorArticulo(x,conocidas,{error:adminEdit.error, copiarHtml:htmlCopiarArticulo(x,mSel), marcasHtml:ArticuloMarcas.casillasTodas(ArticuloMarcas.estadoTodas({marcas:adminMarcas,marcaArts:adminMarcaArts,vinc:adminArtMarca,general:adminArt,articulo:x,origen:mSel}),adminMarcas,"ea_"+x.id), codMarcaHtml:(typeof htmlCodigosMarca==="function"?htmlCodigosMarca(x,mSel):"")});
       const delArt=mSel?adminMarcaCat.filter(k=>k.marca_id===mSel&&k.codigo_barras===x.codigo_barras):adminCat.filter(k=>k.codigo_barras===x.codigo_barras);
       const precios=delArt.filter(k=>k.precio_negociado!=null).map(k=>Number(k.precio_negociado));
       const info = delArt.length
@@ -1563,6 +1566,48 @@ async function copiarArticuloAMarca(id, origen){
 }
 function editarProveedorAdmin(id){ adminEdit={tipo:"prov",id}; pintarAdmin(); }
 function cancelarEdicionAdmin(){ adminEdit=null; pintarAdmin(); }
+// (15/10/2026) CODIGO DEL ERP POR MARCA (js/codigo-marca.js): una casilla por marca de la lista general. Vacio = codigo general.
+// Solo se usa al ir al ERP (CSV del robot y ⬇ CSV): en la web el articulo sigue con su codigo general.
+function htmlCodigosMarca(x, mSel){
+  if(mSel || typeof CodigoMarca==="undefined" || typeof ArticuloMarcas==="undefined") return "";   // solo en la lista general
+  const gen=ArticuloMarcas.marcasGenerales(adminMarcas,adminMarcaArts);
+  if(!gen.length) return "";
+  const act={}; adminCodMarca.filter(c=>c.articulo_id===x.id).forEach(c=>{ act[c.marca_id]=c.codigo; });
+  return `<div style="margin-top:8px;padding:8px 10px;border:1px dashed #a5b4fc;border-radius:10px;background:#f5f7ff">
+    <div class="mut" style="font-weight:600;color:#3730a3">🏷 Código en el ERP de cada marca <span style="font-weight:400">(solo si en el ERP de esa marca el código es otro; vacío = ${escAg(x.codigo_barras||"el general")})</span></div>
+    <div class="row" style="gap:10px;margin-top:4px;flex-wrap:wrap">${gen.map(m=>`<label style="display:block;min-width:150px"><span class="mut">${escAg(m.nombre)}</span>
+      <input id="ea_${x.id}_cm${m.id}" value="${escAg(act[m.id]||"")}" placeholder="${escAg(x.codigo_barras||"")}" style="margin:2px 0 0;width:100%;text-transform:uppercase" autocomplete="off"></label>`).join("")}</div>
+    <div class="mut" style="font-size:12px;margin-top:4px">El agente usa este código solo al subir el pedido o la factura al ERP de esa marca (y en el ⬇ CSV). Proveedores, precios y pedidos siguen con el código general.</div></div>`;
+}
+// -> { ok, error?, cambios }
+async function guardarCodigosMarca(x){
+  if(typeof CodigoMarca==="undefined" || typeof ArticuloMarcas==="undefined") return {ok:true,cambios:false};
+  const gen=ArticuloMarcas.marcasGenerales(adminMarcas,adminMarcaArts);
+  const escritos={}; let hay=false; gen.forEach(m=>{ const el=$("ea_"+x.id+"_cm"+m.id); if(el){ hay=true; escritos[m.id]=el.value; } });
+  if(!hay) return {ok:true,cambios:false};
+  const act={}; adminCodMarca.filter(c=>c.articulo_id===x.id).forEach(c=>{ act[c.marca_id]=c.codigo; });
+  const c=CodigoMarca.cambios(act,escritos,x.codigo_barras);
+  if(!c.ok) return {ok:false,error:c.errores.join(" ")};
+  const quien=(perfil&&perfil.nombre)||(usuario&&usuario.email)||null;
+  for(const p of c.poner){
+    const r=await SB.from("articulo_codigo_marca").upsert({articulo_id:x.id,marca_id:p.marca_id,codigo:p.codigo,creado_por:quien},{onConflict:"articulo_id,marca_id"}).select("id");
+    if(r.error) return {ok:false,error:"No se pudo guardar el código de "+(((adminMarcas.find(m=>m.id===p.marca_id)||{}).nombre)||"la marca")+": "+(/duplicate|unique/i.test(r.error.message)?"ese código ya lo tiene otro artículo en esa marca.":r.error.message)};
+  }
+  if(c.quitar.length){
+    const r=await SB.from("articulo_codigo_marca").delete().eq("articulo_id",x.id).in("marca_id",c.quitar);
+    if(r.error) return {ok:false,error:"No se pudo quitar el código de la marca: "+r.error.message};
+  }
+  if(c.poner.length||c.quitar.length){ adminCodMarca=await traerTodo("articulo_codigo_marca","id,articulo_id,marca_id,codigo",["id"]); CODIGOS_MARCA_WEB=null; }
+  return {ok:true,cambios:!!(c.poner.length||c.quitar.length)};
+}
+// mapa para el ⬇ CSV del pedido (se lee una vez)
+let CODIGOS_MARCA_WEB=null;
+async function codigosMarcaWeb(){
+  if(CODIGOS_MARCA_WEB) return CODIGOS_MARCA_WEB;
+  try{ const r=await SB.from("articulo_codigo_marca").select("marca_id,codigo,articulos(codigo_barras)").limit(10000); CODIGOS_MARCA_WEB=(typeof CodigoMarca!=="undefined"&&!r.error)?CodigoMarca.indexar(r.data||[]):new Map(); }
+  catch(e){ CODIGOS_MARCA_WEB=new Map(); }
+  return CODIGOS_MARCA_WEB;
+}
 async function guardarArticuloAdmin(id){
   if((Number(($("admCatalogo")||{}).value)||0)>0) return guardarArticuloMarca(id);
   const a=adminArt.find(x=>x.id===id); if(!a) return;
@@ -1571,6 +1616,7 @@ async function guardarArticuloAdmin(id){
   if(!v.ok) return fallo(v.errores.join(" "));
   // (13-14/10/2026) marcas: visibilidad en la lista general y copiar a las listas de otras marcas (guardarMarcasArticulo)
   const gm=await guardarMarcasArticulo(a,0); if(!gm.ok) return fallo(gm.error);
+  const gc=(typeof guardarCodigosMarca==="function")?await guardarCodigosMarca(a):{ok:true}; if(!gc.ok) return fallo(gc.error);   // (15/10/2026) codigo por marca
   // (15/10/2026) NOMBRE: articulo_hiopos (y el comercial si era el mismo o estaba vacio). nombre_editado_en hace que en "Nuevo pedido"
   // se vea este nombre aunque en pedidos viejos quedara otro. Los pedidos ya creados conservan el nombre con que se hicieron.
   if(v.nombre&&v.nombre.cambio){
@@ -2758,8 +2804,11 @@ function numFacturaDe(p){
 }
 function csvPedido(id){
   const p=pedidos.find(x=>x.id===id)||{};
-  SB.from("pedido_lineas").select("codigo,insumo,cantidad").eq("pedido_id",id).then(r=>{
-    const filas=[["CODIGO","ARTICULO","CANTIDAD"]].concat((r.data||[]).map(x=>[x.codigo||"",(x.insumo||"").replace(/;/g,","),x.cantidad!=null?x.cantidad:""]));
+  SB.from("pedido_lineas").select("codigo,insumo,cantidad").eq("pedido_id",id).then(async r=>{
+    // (15/10/2026) el codigo del ERP de la marca del pedido si el articulo tiene uno propio (js/codigo-marca.js); si no, el de siempre
+    let ls=r.data||[];
+    try{ if(typeof CodigoMarca!=="undefined"&&typeof codigosMarcaWeb==="function") ls=CodigoMarca.traducir(ls,p.marca_id,await codigosMarcaWeb()).items; }catch(e){}
+    const filas=[["CODIGO","ARTICULO","CANTIDAD"]].concat(ls.map(x=>[x.codigo||"",(x.insumo||"").replace(/;/g,","),x.cantidad!=null?x.cantidad:""]));
     const csv=filas.map(f=>f.join(";")).join("\r\n");
     const b=new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"});
     const a=document.createElement("a"); a.href=URL.createObjectURL(b);
