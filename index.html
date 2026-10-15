@@ -325,6 +325,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/filtro-multiple.js"></script>
 <script src="js/articulo-marcas.js"></script>
 <script src="js/resumen-pedido.js"></script>
+<script src="js/unidad-proveedor.js"></script>
 <script src="js/organizador-hiopos.js"></script>
 <script src="js/hoja-contable.js"></script>
 <script src="js/hoja-contable-ui.js"></script>
@@ -1496,6 +1497,10 @@ async function guardarArticuloAdmin(id){
   if(!v.ok) return fallo(v.errores.join(" "));
   // (13-14/10/2026) marcas: visibilidad en la lista general y copiar a las listas de otras marcas (guardarMarcasArticulo)
   const gm=await guardarMarcasArticulo(a,0); if(!gm.ok) return fallo(gm.error);
+  // (14/10/2026) unidad para el proveedor (orden de compra) y su equivalencia con la del POS (js/unidad-proveedor.js)
+  const up=UnidadProveedor.leerEditor(a,($("ea_"+id+"_uprov")||{}).value,($("ea_"+id+"_fprov")||{}).value);
+  if(!up.ok) return fallo(up.error);
+  if(up.cambio){ const ru=await SB.from("articulos").update(up.valores).eq("id",id).select("id"); if(ru.error||!(ru.data&&ru.data.length)) return fallo("No se pudo guardar la unidad del proveedor: "+(ru.error?ru.error.message:"sin permiso")); Object.assign(a,up.valores); }
   if(!v.codigo.cambio && !v.unidad.cambio){ adminEdit=null; if(gm.cambios){ adminCargado=false; await cargarAdmin(); } pintarAdmin(); return; }
   let msg="Cambios en "+(a.articulo_hiopos||a.codigo_barras)+":\n";
   if(v.codigo.cambio) msg+="\n• Código: "+a.codigo_barras+"  →  "+v.codigo.valor+"\n  (se actualiza también en los amarres a proveedores, el historial de precios y las líneas de los pedidos)\n";
@@ -1553,6 +1558,9 @@ async function guardarArticuloMarca(id){
   const v=AdminEditar.validarArticulo(a,{codigo:$("ea_"+id+"_codigo").value, unidad:$("ea_"+id+"_unidad").value}, lista);
   if(!v.ok) return fallo(v.errores.join(" "));
   const gm=await guardarMarcasArticulo(a,mSel); if(!gm.ok) return fallo(gm.error);   // (14/10/2026) marcas: copiar a la lista general / otras
+  const up=UnidadProveedor.leerEditor(a,($("ea_"+id+"_uprov")||{}).value,($("ea_"+id+"_fprov")||{}).value);   // (14/10/2026) unidad para el proveedor
+  if(!up.ok) return fallo(up.error);
+  if(up.cambio){ const ru=await SB.from("marca_articulo").update(up.valores).eq("id",id).select("id"); if(ru.error||!(ru.data&&ru.data.length)) return fallo("No se pudo guardar la unidad del proveedor: "+(ru.error?ru.error.message:"sin permiso")); Object.assign(fila,up.valores); Object.assign(a,up.valores); marcaArts=[]; }
   if(!v.codigo.cambio && !v.unidad.cambio){ adminEdit=null; if(gm.cambios){ adminCargado=false; await cargarAdmin(); } pintarAdmin(); return; }
   let msg="Cambios en "+(fila.articulo||fila.codigo_barras)+" (catálogo propio de la marca):\n";
   if(v.codigo.cambio) msg+="\n• Código: "+fila.codigo_barras+"  →  "+v.codigo.valor+"\n  (se actualiza también en sus proveedores y en las líneas de pedidos de esta marca; no toca a otras marcas)\n";
@@ -1789,6 +1797,22 @@ function pintarPedidos(){
   }).join("") + (l.length>300?'<div class="vacio">Mostrando 300 de '+l.length+' — usá el buscador para afinar.</div>':"");
 }
 // opciones.soloBlob: en vez de descargar, devuelve el PDF (Blob) para adjuntarlo al enviar el pedido al proveedor (mismo documento que el boton "⬇ PDF").
+// (14/10/2026) unidad de cada codigo del pedido en la lista de SU marca (Sin Par: marca_articulo; si no, articulos) y la
+// configuracion de la unidad del proveedor -> { codigo: { unidadPos, conf } }  (conf = UnidadProveedor.de(...) o null)
+async function unidadesDelPedido(p, cds){
+  const out={}; if(!cds||!cds.length) return out;
+  const lista=cds.slice(0,300);
+  if(p&&p.marca_id){
+    const m=await SB.from("marca_articulo").select("codigo_barras,unidad_compra,unidad_proveedor,factor_proveedor").eq("marca_id",p.marca_id).in("codigo_barras",lista);
+    (m.data||[]).forEach(x=>{ out[x.codigo_barras]={unidadPos:x.unidad_compra||"", conf:UnidadProveedor.de(x)}; });
+  }
+  const faltan=lista.filter(c=>!out[c]);
+  if(faltan.length){
+    const a=await SB.from("articulos").select("codigo_barras,unimedida_compra,unidad_proveedor,factor_proveedor").in("codigo_barras",faltan);
+    (a.data||[]).forEach(x=>{ out[x.codigo_barras]={unidadPos:x.unimedida_compra||"", conf:UnidadProveedor.de(x)}; });
+  }
+  return out;
+}
 async function ordenCompra(id, opciones){
   const soloBlob=!!(opciones&&opciones.soloBlob);
   const p=pedidos.find(x=>x.id===id); if(!p){return null;}
@@ -1798,11 +1822,11 @@ async function ordenCompra(id, opciones){
   const l=await SB.from("pedido_lineas").select("codigo,insumo,cantidad").eq("pedido_id",id);
   const lineas=l.data||[];
   const cds=[...new Set(lineas.map(x=>x.codigo).filter(Boolean))];
-  let uni={};
-  if(cds.length){
-    const a=await SB.from("articulos").select("codigo_barras,unimedida_compra").in("codigo_barras",cds.slice(0,300));
-    (a.data||[]).forEach(x=>{ uni[x.codigo_barras]=x.unimedida_compra; });
-  }
+  // (14/10/2026) unidad de cada linea en la lista de la MARCA del pedido y, si el articulo la tiene, la UNIDAD DEL PROVEEDOR:
+  // la orden le llega en su unidad (cantidad x equivalencia)
+  const uc=await unidadesDelPedido(p,cds);
+  const uni={}; for(const k in uc) uni[k]=uc[k].conf?uc[k].conf.unidad:uc[k].unidadPos;
+  lineas.forEach(x=>{ x.cantPos=x.cantidad; const u=uc[x.codigo]; if(u&&u.conf) x.cantidad=UnidadProveedor.paraProveedor(x.cantidad,u.unidadPos,u.conf).cantidad; });
   let prec={};
   if(p.proveedor_id && cds.length){
     const q=await SB.from("catalogo_compras").select("codigo_barras,precio_negociado")
@@ -1815,9 +1839,9 @@ async function ordenCompra(id, opciones){
       <td>${x.insumo||""}</td>
       ${hayUni?`<td>${uni[x.codigo]||"—"}</td>`:""}
       <td class="num">${x.cantidad!=null?x.cantidad:""}</td>
-      <td class="num">${prec[x.codigo]!=null ? money(prec[x.codigo]*Number(x.cantidad||0)) : "—"}</td></tr>`).join("");
+      <td class="num">${prec[x.codigo]!=null ? money(prec[x.codigo]*Number(x.cantPos??x.cantidad??0)) : "—"}</td></tr>`).join("");
   const total=lineas.reduce((t,x)=>t+Number(x.cantidad||0),0);
-  const totalPlata=lineas.reduce((t,x)=>t+(prec[x.codigo]!=null?prec[x.codigo]*Number(x.cantidad||0):0),0);
+  const totalPlata=lineas.reduce((t,x)=>t+(prec[x.codigo]!=null?prec[x.codigo]*Number(x.cantPos??x.cantidad??0):0),0);
   const hayPrecios=lineas.some(x=>prec[x.codigo]!=null);
   const hoy=new Date().toLocaleDateString("es-CO");
   const cont=document.createElement("div");

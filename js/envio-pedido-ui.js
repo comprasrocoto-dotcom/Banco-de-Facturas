@@ -150,8 +150,15 @@ async function envioDatos(x, intento, opciones) {
   if (!lineas.length) throw new Error('El pedido no tiene productos.');
   const cds = [...new Set(lineas.map((y) => y.codigo).filter(Boolean))], unidades = {};
   if (cds.length) {
-    const a = await SB.from('articulos').select('codigo_barras,unimedida_compra').in('codigo_barras', cds.slice(0, 300));
-    (a.data || []).forEach((y) => { if (y.unimedida_compra) unidades[y.codigo_barras] = y.unimedida_compra; });
+    // (14/10/2026) unidad en la lista de la marca del pedido y, si el articulo la tiene, la UNIDAD DEL PROVEEDOR (cantidad x equivalencia)
+    if (typeof unidadesDelPedido === 'function' && typeof UnidadProveedor !== 'undefined') {
+      const uc = await unidadesDelPedido(x.p, cds);
+      for (const k in uc) { const u = uc[k]; const un = u.conf ? u.conf.unidad : u.unidadPos; if (un) unidades[k] = un; }
+      lineas.forEach((y) => { const u = uc[y.codigo]; if (u && u.conf) y.cantidad = UnidadProveedor.paraProveedor(y.cantidad, u.unidadPos, u.conf).cantidad; });
+    } else {
+      const a = await SB.from('articulos').select('codigo_barras,unimedida_compra').in('codigo_barras', cds.slice(0, 300));
+      (a.data || []).forEach((y) => { if (y.unimedida_compra) unidades[y.codigo_barras] = y.unimedida_compra; });
+    }
   }
   const sede = (typeof sedes !== 'undefined' ? sedes : []).find((s) => s.id === x.p.sede_id) || {};
   const empresa = [x.p.sede_texto || sede.nombre].filter(Boolean).join(' ');

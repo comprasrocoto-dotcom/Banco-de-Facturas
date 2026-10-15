@@ -59,7 +59,8 @@
   }
   // articulos propios de una marca con la forma de `articulos` (y su id) para reutilizar las tarjetas y el editor de Admin
   const articulosAdmin = (marcaArts, marcaId) => (marcaArts || []).filter((a) => a.marca_id === marcaId).map((a) => ({
-    id: a.id, codigo_barras: a.codigo_barras, articulo_hiopos: a.articulo, articulo_comercial: a.articulo, unimedida_compra: a.unidad_compra || '', unimedida_hiopos: '', subfamilia: a.subfamilia || '' }));
+    id: a.id, codigo_barras: a.codigo_barras, articulo_hiopos: a.articulo, articulo_comercial: a.articulo, unimedida_compra: a.unidad_compra || '', unimedida_hiopos: '', subfamilia: a.subfamilia || '',
+    unidad_proveedor: a.unidad_proveedor || '', factor_proveedor: a.factor_proveedor }));   // (14/10/2026) unidad para el proveedor
   // texto de la pregunta "¿para que marca es el articulo?"
   function preguntaMarcaArticulo(marcas, porDefecto) {
     return '¿Para qué marca es el artículo?\n\n0. Rocoto y Arrebatao (catálogo general: comparten el mismo ERP)\n' + marcasPropias(marcas).map((m) => m.id + '. ' + m.nombre + ' (su propio ERP: códigos propios)').join('\n') + '\n\nEscribe el número' + (porDefecto != null ? ' (Enter = ' + porDefecto + ')' : '') + ':';

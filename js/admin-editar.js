@@ -104,6 +104,12 @@
         <datalist id="${id}_l">${(conocidas || []).slice(0, 300).map((u) => `<option value="${esc(u)}">`).join('')}</datalist>
         <button class="p" onclick="guardarArticuloAdmin(${Number(a.id)})">💾 Guardar</button>
         <button onclick="cancelarEdicionAdmin()">Cancelar</button></div>
+      <div class="row" style="margin-top:8px;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <label style="display:block;min-width:200px"><span class="mut">Unidad para el proveedor (orden de compra)</span>
+          <input id="${id}_uprov" value="${esc(a.unidad_proveedor || '')}" placeholder="ej. UNIDAD, CAJA (vacío = la misma del POS)" style="margin:2px 0 0;width:100%;text-transform:uppercase" autocomplete="off"></label>
+        <label style="display:block;min-width:200px"><span class="mut">Equivalencia: 1 ${esc(a.unimedida_compra || 'unidad del POS')} =</span>
+          <span style="display:flex;gap:6px;align-items:center"><input id="${id}_fprov" value="${esc(a.unidad_proveedor ? (a.factor_proveedor || 1) : '')}" placeholder="1" inputmode="decimal" style="margin:2px 0 0;width:90px" autocomplete="off"><span class="mut">del proveedor</span></span></label>
+        <span class="mut" style="font-size:12px;max-width:420px">Al proveedor le llega la orden en SU unidad; el ingreso al ERP se hace en la unidad del POS (si factura en la suya, el agente convierte cantidad y precio).</span></div>
       ${opciones.marcasHtml ? `<div style="margin-top:8px"><span class="mut">Marcas que lo manejan (definen en qué marcas aparece al hacer pedidos)</span><div style="margin-top:4px">${opciones.marcasHtml}</div></div>` : ''}
       <div class="mut" style="margin-top:6px">La unidad es en la que se compra y se pide (formato del ERP). Si cambias el código, se actualiza también en los amarres a proveedores (con sus precios), el historial de precios y las líneas de los pedidos; debe ser el código que tiene el ERP. Queda registrado quién y cuándo.</div>
       ${opciones.error ? `<div style="color:#b91c1c;margin-top:6px">${esc(opciones.error)}</div>` : ''}
