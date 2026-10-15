@@ -121,6 +121,58 @@ tr:hover td{background:#f1f5f9}
 #vistaAdmin.adm-import #panelFiltrosAdm,#vistaAdmin.adm-import #btnFiltrosAdm{display:none!important}   /* Importar bases no usa el filtro por fecha */
 #vistaAdmin.adm-sinfecha #panelFiltrosAdm,#vistaAdmin.adm-sinfecha #btnFiltrosAdm{display:none!important}   /* Catálogo completo tampoco */
 #fSede{background:#d1fae5;border:2px solid #059669;color:#064e3b;font-weight:700;padding:8px 16px;font-size:14px;border-radius:8px}
+/* (14/10/2026) PEDIDOS EN CELULAR Y TABLET. Solo pantallas angostas: en el computador todo queda igual.
+   Las tablas de productos pasan a "tarjetas" (nombre arriba; codigo, unidad y cantidad abajo) para no deslizar de lado. */
+@media (max-width:820px){
+  .wrap{padding:16px 12px}
+  .modal{padding:10px}
+  #panelFiltrosPed #qp{flex:1 1 220px;width:auto!important}
+}
+@media (max-width:640px){
+  header{position:static;padding:10px 12px;gap:8px}          /* el encabezado ya no tapa media pantalla al bajar */
+  header h1{flex:1 1 100%}
+  header .chip{padding:5px 10px;font-size:12.5px}
+  .wrap{padding:12px 10px}
+  /* lista de pedidos: inicial + proveedor en una linea; etiquetas y numero debajo */
+  .ped-cab{padding:12px!important;gap:8px!important}
+  .ped-cab>.ped-ini{width:30px!important;height:30px!important;font-size:14px}
+  .ped-cab>.ped-nom{flex:1 1 calc(100% - 44px);min-width:0}
+  .ped-cab>.sp{display:none}
+  /* detalle del pedido */
+  .ped-det{padding:0 12px 12px!important}
+  .ped-info{gap:12px 22px!important}
+  .ped-datos{gap:10px 22px!important}
+  .ped-tbl thead{display:none}
+  .ped-tbl,.ped-tbl tbody{display:block;width:100%}
+  .ped-tbl tr{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px;padding:9px 4px;border-bottom:1px solid var(--line)}
+  .ped-tbl td{border:0;padding:0;text-align:left!important;background:none!important}
+  .ped-tbl td:nth-child(2){flex:1 1 100%;font-weight:600;color:#0f172a;order:-1}
+  .ped-tbl td:nth-child(1),.ped-tbl td:nth-child(3){font-size:12px}
+  .ped-tbl td:nth-child(4)::before{content:"Cant. ";font-weight:400;color:var(--mut);font-size:12px}
+  .ped-tbl td:nth-child(5)::before{content:"Precio ";color:var(--mut);font-size:12px}
+  .ped-tbl td:nth-child(6){margin-left:auto}
+  .ped-tbl td:nth-child(6)::before{content:"Total ";font-weight:400;color:var(--mut);font-size:12px}
+  /* Nuevo pedido: ventana a pantalla completa y productos en tarjetas con la cantidad a la mano */
+  #modalPedido{padding:0}
+  #modalPedido>.card{width:100vw!important;max-width:none!important;height:100%;max-height:100%;border-radius:0}
+  .np-tbl thead{display:none}
+  .np-tbl,.np-tbl tbody{display:block;width:100%}
+  .np-tbl tr{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:10px 8px;border-bottom:1px solid var(--line)}
+  .np-tbl td{border:0;padding:0;background:none!important}
+  .np-tbl td[colspan]{flex:1 1 100%}
+  .np-tbl td:nth-child(2){flex:1 1 100%;font-weight:600;color:#0f172a;order:-1}
+  .np-tbl td:nth-child(1),.np-tbl td:nth-child(3),.np-tbl td:nth-child(4),.np-tbl td:nth-child(5){font-size:12px}
+  .np-tbl td:nth-child(4)::before{content:"mín ";color:var(--mut)}
+  .np-tbl td:nth-child(5)::before{content:"máx ";color:var(--mut)}
+  .np-tbl td:nth-child(6){margin-left:auto}
+  .np-tbl td:nth-child(6) input{width:64px!important}
+  .np-tbl td:nth-child(6) button{padding:8px 13px!important;font-size:15px}
+  .np-tbl-caja{max-height:none!important;overflow:visible!important}   /* sin desplazamiento dentro del desplazamiento: baja toda la ventana */
+  .np-pie .row>b{flex:1 1 100%}
+  .np-pie .row>button{flex:1 1 0;padding:12px 10px;font-size:14px}
+  #np_tabla tr.np-con{background:#ecfdf5}
+  #np_tabla tr.np-dest{background:#dbeafe;border:2px solid #2563eb}
+}
 </style>
 </head>
 <body>
@@ -1795,9 +1847,9 @@ function pintarPedidos(){
     const am  = p.factura_cufe ? '<span class="badge st-asignada"'+amFecha+' style="font-weight:700">'+(esCC?"📷 Cuenta de cobro ":"🧾 Factura ")+escAg(numAm||"amarrada")+'</span>' : '';
     const erp = p.pedido_erp ? '<span class="badge">ERP '+p.pedido_erp+'</span>' : '';
     return `<div class="card" style="padding:0;overflow:hidden">
-      <div class="row" style="padding:14px 16px;cursor:pointer" onclick="abrirPedido(${p.id})">
-        <div style="width:34px;height:34px;border-radius:50%;background:#15803d;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700">${(p.proveedor_texto||"?")[0]}</div>
-        <div><div class="emisor">${p.proveedor_texto||p.proveedor||"—"}</div>
+      <div class="row ped-cab" style="padding:14px 16px;cursor:pointer" onclick="abrirPedido(${p.id})">
+        <div class="ped-ini" style="width:34px;height:34px;border-radius:50%;background:#15803d;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700">${(p.proveedor_texto||"?")[0]}</div>
+        <div class="ped-nom"><div class="emisor">${p.proveedor_texto||p.proveedor||"—"}</div>
           <div class="mut">${p.sede_texto||"—"} · ${fch(p.fecha)} · ${(p.lineas_n||"")?p.lineas_n+" art.":""}</div></div>
         <span class="sp"></span>
         ${est} ${erp} ${am} ${typeof fotoFacturaBadge==="function"?fotoFacturaBadge(p):""}
@@ -2190,13 +2242,13 @@ async function abrirPedido(id){
   const totalArts=lineas.reduce((t,x)=>t+Number(x.cantidad||0),0);
   c.dataset.on="1"; if(ch) ch.textContent="⌃";
   c.innerHTML=`
-   <div style="padding:0 16px 16px">
+   <div class="ped-det" style="padding:0 16px 16px">
      <div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:12px;padding:12px 16px;margin-bottom:14px">
        <div class="mut" style="font-weight:700;color:#166534">📋 NÚMERO DE PEDIDO (SISTEMA)</div>
        <div style="font-size:22px;font-weight:800;color:#166534;letter-spacing:.5px">${p.pedido_erp||"—"}</div>
      </div>
      <div class="row" style="align-items:flex-start;gap:26px">
-       <div style="flex:1;display:flex;gap:34px;flex-wrap:wrap">
+       <div class="ped-info" style="flex:1;display:flex;gap:34px;flex-wrap:wrap">
          <div><div class="mut" style="font-weight:700">ORDEN</div><div style="font-weight:700">#${p.numero||""}</div></div>
          <div><div class="mut" style="font-weight:700">FECHA</div><div style="font-weight:700">${fch(p.fecha)}</div></div>
          <div><div class="mut" style="font-weight:700">SEDE</div><div style="font-weight:700">${p.sede_texto||sede.nombre||""}</div></div>
@@ -2210,18 +2262,18 @@ async function abrirPedido(id){
          ${(typeof can==="function"&&can("pedidos.crear"))?`<button onclick="clonarPedido(${p.id})" style="background:#0e7490;border-color:#0e7490;color:#fff" title="Crea un pedido NUEVO con la misma sede, proveedor y cantidades">⧉ Clonar</button>`:""}
        </div>
      </div>
-     <table style="margin-top:18px"><thead><tr style="background:#166534;color:#fff">
+     <table class="ped-tbl" style="margin-top:18px"><thead><tr style="background:#166534;color:#fff">
         <th style="background:#166534">CÓDIGO</th><th style="background:#166534;text-align:center">ARTÍCULO</th>
         <th style="background:#166534">UNIDAD</th><th style="background:#166534;text-align:center">CANT.</th>
         <th style="background:#166534;text-align:right">PRECIO</th><th style="background:#166534;text-align:right">TOTAL</th></tr></thead>
        <tbody>${filas}</tbody></table>
-     <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
+     <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px;flex-wrap:wrap">
        <div style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:8px 16px;font-weight:700">Total artículos: ${totalArts}</div>
        ${hayPrecios?`<div style="background:#f0fdf4;border:1px solid #86efac;color:#166534;border-radius:8px;padding:8px 16px;font-weight:700">Total compra: ${money(totalPlata)}</div>`:""}
      </div>
      <div style="border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-top:16px">
        <div style="font-weight:700;color:#1e3a8a">📄 DATOS DE FACTURA</div>
-       <div class="row" style="gap:40px;margin-top:8px;align-items:flex-start">
+       <div class="row ped-datos" style="gap:40px;margin-top:8px;align-items:flex-start">
          <div><div class="mut" style="font-weight:700">N. FACTURA</div><div>${numFacturaDe(p)||"—"}</div></div>
          <div><div class="mut" style="font-weight:700">FECHA RECIBIDO</div><div>${p.fecha_recibido?FechaRecibido.mostrar(p.fecha_recibido):(p.factura_cufe?"—":"")}</div></div>
          ${p.centro_costo||CentroCosto.requiere(centrosCosto,p.marca_id)?`<div><div class="mut" style="font-weight:700">CENTRO DE COSTO</div><div>${p.centro_costo?escAg(CentroCosto.etiqueta(p.centro_costo)):(p.factura_cufe?"—":"")}</div></div>`:""}
@@ -3608,8 +3660,8 @@ async function guardarNov(){
     </div>
     <div id="np_prov_sugeridos"></div>
     <div id="np_lineas" style="display:none"></div>
-    <div style="max-height:54vh;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:10px">
-      <table style="margin:0"><thead><tr style="background:#12306b;color:#fff;position:sticky;top:0">
+    <div class="np-tbl-caja" style="max-height:54vh;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:10px">
+      <table class="np-tbl" style="margin:0"><thead><tr style="background:#12306b;color:#fff;position:sticky;top:0">
         <th style="background:#12306b">CÓDIGO</th><th style="background:#12306b">ARTÍCULO</th>
         <th style="background:#12306b">UNIDAD</th>
         <th style="background:#12306b;text-align:center">MÍN.</th><th style="background:#12306b;text-align:center">MÁX.</th>
