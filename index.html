@@ -2315,8 +2315,11 @@ async function abrirPedido(id){
        </div>
      </div>
      <div id="env_${p.id}"></div>
+     <div id="docs_${p.id}"></div>
      <div class="row" style="margin-top:14px">
-       ${!p.factura_cufe&&bot.foto&&p.estado!=="anulado"&&typeof abrirFotoFactura==="function"?`<button class="s" title="Foto de la factura: el sistema la busca en el banco y la amarra a este pedido" onclick="abrirFotoFactura(${p.id})">📸 Foto de la factura</button>`:""}
+       ${!p.factura_cufe&&bot.foto&&p.estado!=="anulado"&&typeof abrirFotoFactura==="function"?`<button class="s" title="Foto de la factura (o nota crédito, devolución u otro documento): el sistema la busca en el banco y la amarra a este pedido" onclick="abrirFotoFactura(${p.id})">📸 Foto de la factura</button>`:""}
+       ${p.factura_cufe&&bot.foto&&p.estado!=="anulado"&&typeof abrirFotoFactura==="function"?`<button class="s" title="Foto de una nota crédito, devolución u otro documento de este pedido (y la novedad, si algo llegó mal)" onclick="abrirFotoFactura(${p.id})">📸 Nota crédito / devolución</button>`:""}
+       ${!bot.foto&&p.estado!=="anulado"&&typeof abrirFotoFactura==="function"?`<button title="Foto de una devolución u otro documento de este pedido (y la novedad, si algo llegó mal)" onclick="abrirFotoFactura(${p.id},true)">📎 Devolución / otro documento</button>`:""}
        ${!p.factura_cufe&&bot.amarrar?`<button class="s" onclick="abrirAmarre('pedido',${p.id})">🔗 Amarrar a factura</button>`:""}
        ${!p.factura_cufe&&bot.cuenta&&typeof abrirCuentaCobro==="function"?`<button class="s" title="Proveedor sin factura electrónica: foto de la cuenta de cobro + cantidades y precios" onclick="abrirCuentaCobro(${p.id})">📷 Cuenta de cobro</button>`:""}
        ${p.factura_cufe?`<span class="badge st-sellada">Amarrado a ${numFacturaDe(p)||"factura"}</span>`:""}
@@ -2328,6 +2331,7 @@ async function abrirPedido(id){
      </div>
    </div>`;
   if(typeof pintarEstadoEnvio==="function") pintarEstadoEnvio(p.id);   // panel "Envío al proveedor" (js/envio-pedido-ui.js)
+  if(typeof pintarDocsPedido==="function") pintarDocsPedido(p.id);     // (15/10/2026) fotos de factura / nota crédito / devolución / otro
 }
 // Poner el N° de ingreso ERP (factura de compra) desde el detalle del pedido.
 // Actualiza num_ingreso en la FACTURA amarrada al pedido y marca el pedido como facturado.

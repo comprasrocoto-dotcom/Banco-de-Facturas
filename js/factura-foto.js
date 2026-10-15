@@ -72,10 +72,12 @@
   // estado de la foto -> texto corto para el pedido
   function aviso(foto) {
     if (!foto) return '';
-    const n = foto.numero || '';
-    if (foto.estado === 'ESPERANDO') return '📸 Factura ' + n + ': esperando que llegue al banco (se amarra sola)';
-    if (foto.estado === 'NOVEDAD') return '⚠️ Factura ' + n + ': ' + (foto.motivo || 'revisar');
-    if (foto.estado === 'AMARRADA') return '✅ Factura ' + n + ' amarrada por foto';
+    const n = foto.numero && foto.numero !== 'SN' ? foto.numero : '';
+    const doc = foto.tipo_doc === 'nota_credito' ? 'Nota crédito' : foto.tipo_doc === 'devolucion' ? 'Devolución' : foto.tipo_doc === 'otro' ? 'Documento' : 'Factura';
+    if (foto.estado === 'ESPERANDO') return '📸 ' + doc + ' ' + n + ': ' + (foto.motivo || 'esperando que llegue al banco (se amarra sola)');
+    if (foto.estado === 'NOVEDAD') return '⚠️ ' + doc + ' ' + n + ': ' + (foto.motivo || 'revisar');
+    if (foto.estado === 'AMARRADA') return '✅ ' + doc + ' ' + n + ' amarrada por foto';
+    if (foto.estado === 'GUARDADA') return '📎 ' + doc + ' ' + n + ' guardada como soporte';
     return '';
   }
 
@@ -88,5 +90,34 @@
   }
   const DOCUMENTOS = [['', 'Sin definir (el pedido muestra todo)'], ['factura', 'Factura electrónica'], ['cuenta_cobro', 'Cuenta de cobro']];
 
-  return { leerQR, numeroLimpio, coincide, rutaFoto, aviso, alnum, botonesPedido, DOCUMENTOS };
+  // (15/10/2026) TIPO DE DOCUMENTO de la foto y NOVEDAD al recibir (supabase/factura_foto_documentos.sql)
+  const TIPOS_DOC = [['factura', 'Factura electrónica'], ['nota_credito', 'Nota crédito'], ['devolucion', 'Devolución'], ['otro', 'Otro documento']];
+  const NOVEDADES = [['', 'Sin novedad: llegó todo bien'], ['devolucion', 'Devolución'], ['faltante', 'Faltante (no llegó completo)'], ['danado', 'Producto dañado'], ['precio', 'Precio distinto'], ['otra', 'Otra']];
+  const nombreTipo = (t) => (TIPOS_DOC.find((x) => x[0] === t) || TIPOS_DOC[0])[1];
+  // que pide cada tipo: la factura se amarra al pedido (numero, fecha >= pedido y centro de costo); la nota credito se busca
+  // por numero; devolucion / otro son soporte (numero opcional)
+  function requisitos(tipo) {
+    if (tipo === 'nota_credito') return { numero: true, centro: false, fechaPedido: false, qr: true };
+    if (tipo === 'devolucion' || tipo === 'otro') return { numero: false, centro: false, fechaPedido: false, qr: false };
+    return { numero: true, centro: true, fechaPedido: true, qr: true };
+  }
+  // tipos que se ofrecen en el pedido: sin factura amarrada -> todos; con factura -> sin "factura"; proveedor de cuenta de cobro -> soportes
+  function tiposOfrecidos(pedido, soloSoportes) {
+    return TIPOS_DOC.filter(([t]) => {
+      if (soloSoportes) return t === 'devolucion' || t === 'otro';
+      if (pedido && pedido.factura_cufe && t === 'factura') return false;
+      return true;
+    });
+  }
+  // novedad escrita -> { ok, error?, tipo, texto }
+  function validarNovedad(tipo, texto) {
+    const t = NOVEDADES.some((x) => x[0] === tipo && tipo) ? tipo : null;
+    const tx = String(texto == null ? '' : texto).trim();
+    if (!t) return { ok: true, tipo: null, texto: null };
+    if (!tx) return { ok: false, error: 'Escribe qué pasó (la novedad).' };
+    if (tx.length > 1000) return { ok: false, error: 'La novedad es muy larga (máximo 1000 letras).' };
+    return { ok: true, tipo: t, texto: tx };
+  }
+
+  return { leerQR, numeroLimpio, coincide, rutaFoto, aviso, alnum, botonesPedido, DOCUMENTOS, TIPOS_DOC, NOVEDADES, nombreTipo, requisitos, tiposOfrecidos, validarNovedad };
 });
