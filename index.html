@@ -326,6 +326,8 @@ tr:hover td{background:#f1f5f9}
 <script src="js/articulo-marcas.js"></script>
 <script src="js/resumen-pedido.js"></script>
 <script src="js/unidad-proveedor.js"></script>
+<script src="js/factura-foto.js"></script>
+<script src="js/factura-foto-ui.js"></script>
 <script src="js/organizador-hiopos.js"></script>
 <script src="js/hoja-contable.js"></script>
 <script src="js/hoja-contable-ui.js"></script>
@@ -1753,7 +1755,9 @@ async function cargarPedidos(){
   else{ const sf=sedesFiltro(); if(sf.length) query=query.in("sede_id",sf); }   // (13/10/2026) varias sedes
   const {data,error}=await query;
   if(error){$("listaped").innerHTML='<div class="vacio">No pude cargar los pedidos: '+error.message+'</div>';return;}
-  pedidos=data||[]; pedidosCargados=true; pintarPedidos();
+  pedidos=data||[]; pedidosCargados=true;
+  if(typeof cargarFotosFactura==="function") await cargarFotosFactura();   // (14/10/2026) fotos de factura que esperan
+  pintarPedidos();
   await cargarOrdenes();   // estado del bot local (ordenes)
 }
 function pintarPedidos(){
@@ -1794,7 +1798,7 @@ function pintarPedidos(){
         <div><div class="emisor">${p.proveedor_texto||p.proveedor||"—"}</div>
           <div class="mut">${p.sede_texto||"—"} · ${fch(p.fecha)} · ${(p.lineas_n||"")?p.lineas_n+" art.":""}</div></div>
         <span class="sp"></span>
-        ${est} ${erp} ${am}
+        ${est} ${erp} ${am} ${typeof fotoFacturaBadge==="function"?fotoFacturaBadge(p):""}
         <span class="mut" style="font-weight:700">#${p.numero||""}</span>
         <span style="width:22px;height:22px;border-radius:50%;background:#15803d;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px">${p.estado==="facturado"?"✓":"●"}</span>
         <span class="mut" id="ch_${p.id}">⌄</span>
@@ -2223,6 +2227,7 @@ async function abrirPedido(id){
      </div>
      <div id="env_${p.id}"></div>
      <div class="row" style="margin-top:14px">
+       ${!p.factura_cufe&&p.estado!=="anulado"&&typeof abrirFotoFactura==="function"?`<button class="s" title="Foto de la factura: el sistema la busca en el banco y la amarra a este pedido" onclick="abrirFotoFactura(${p.id})">📸 Foto de la factura</button>`:""}
        ${!p.factura_cufe?`<button class="s" onclick="abrirAmarre('pedido',${p.id})">🔗 Amarrar a factura</button>`:""}
        ${!p.factura_cufe&&typeof abrirCuentaCobro==="function"?`<button class="s" title="Proveedor sin factura electrónica: foto de la cuenta de cobro + cantidades y precios" onclick="abrirCuentaCobro(${p.id})">📷 Cuenta de cobro</button>`:""}
        ${p.factura_cufe?`<span class="badge st-sellada">Amarrado a ${numFacturaDe(p)||"factura"}</span>`:""}
