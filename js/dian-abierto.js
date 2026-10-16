@@ -103,11 +103,22 @@ function dianRepintarBoton(span, cufe, abierta) {
 function dianResaltarFila(el, abierta) { const f = el && el.closest ? el.closest('.row') : null; if (f) f.style.background = abierta ? '#f0fdf4' : ''; }
 function dianMarcarAbierto(cufe, el) {
   DIAN_ABIERTO.marcar(cufe);
-  // datos para el favorito ⚡ DIAN BOT (si el navegador no deja copiar, el favorito pide el NIT)
+  // (16/10/2026) se copia SOLO el NIT de la empresa (la DIAN no acepta el NIT en la direccion, solo el CUFE): en la DIAN es
+  // clic en la casilla del NIT + Ctrl+V, sin instalar nada. El favorito ⚡ DIAN BOT tambien lo lee asi.
   const bf = el && el.getAttribute ? el.getAttribute('data-bf') : '';
-  if (bf && typeof navigator !== 'undefined' && navigator.clipboard) { try { navigator.clipboard.writeText(bf).catch(() => {}); } catch (e) { /* sin portapapeles */ } }
+  const nit = String(bf || '').split('|')[2] || '';
+  if (nit && typeof navigator !== 'undefined' && navigator.clipboard) { try { navigator.clipboard.writeText(nit).then(() => dianAvisoNit(nit), () => {}); } catch (e) { /* sin portapapeles */ } }
   const span = el && el.closest ? el.closest('.dian-abrir') : null;
   setTimeout(() => { dianResaltarFila(span, true); dianRepintarBoton(span, cufe, true); }, 60);
+}
+// aviso corto en el banco: que NIT quedo copiado y que hacer en la DIAN
+function dianAvisoNit(nit) {
+  if (typeof document === 'undefined') return;
+  let d = document.getElementById('dianAvisoNit');
+  if (!d) { d = document.createElement('div'); d.id = 'dianAvisoNit'; d.style.cssText = 'position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:60;background:#0f766e;color:#fff;padding:10px 16px;border-radius:10px;font-weight:600;box-shadow:0 8px 24px rgba(15,23,42,.25);max-width:92vw;text-align:center'; document.body.appendChild(d); }
+  d.textContent = '📋 NIT ' + nit + ' copiado. En la DIAN: clic en la casilla del NIT y Ctrl+V';
+  d.style.display = 'block';
+  clearTimeout(dianAvisoNit._t); dianAvisoNit._t = setTimeout(() => { d.style.display = 'none'; }, 7000);
 }
 function dianDesmarcar(cufe, el) {
   DIAN_ABIERTO.quitar(cufe);

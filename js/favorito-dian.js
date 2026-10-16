@@ -95,6 +95,8 @@
         try { sessionStorage.removeItem('bfdian_paginas'); } catch (e) { }
         var txt = await leerPortapapeles();
         var p = (txt || '').split('|');
+        /* (16/10/2026) "Abrir en DIAN" ahora copia SOLO el NIT de la empresa: tambien sirve */
+        if (/^\d{5,15}$/.test(String(txt || '').trim())) p = ['BFDIAN', '', String(txt).trim(), '', ''];
         if (p[0] !== 'BFDIAN' || p.length < 3) {
           var nit = prompt('No encontré los datos de la factura en el portapapeles.\nEn el banco da "Abrir en DIAN" a la factura (los copia solo) y vuelve a dar clic aquí,\no escribe el NIT del proveedor:', '');
           if (!nit) { aviso('Faltan los datos de la factura.<br>En el banco da <b>Abrir en DIAN</b> y vuelve a dar clic en ⚡ DIAN BOT.', '#c62828'); return; }
