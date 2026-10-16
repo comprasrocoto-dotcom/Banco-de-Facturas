@@ -194,6 +194,7 @@ tr:hover td{background:#f1f5f9}
     <button class="chip"  id="m-cruce" style="display:none" onclick="setModulo('cruce')">🧾 Cruce DIAN</button>
     <button class="chip"  id="m-precios" style="display:none" onclick="setModulo('precios')">💲 Precios</button>
     <button class="chip"  id="m-hiopos" style="display:none" onclick="setModulo('hiopos')">📊 Organizador Hiopos</button>
+    <button class="chip"  id="m-eval" style="display:none" onclick="setModulo('eval')">📈 Evaluación</button>
     <button class="chip"  id="m-admin" style="display:none" onclick="setModulo('admin')">⚙️ Admin</button>
     <span id="sede" class="badge"></span>
     <select id="fSede" style="width:auto;margin:0;display:none" onchange="cambiarFiltroSede()">
@@ -244,12 +245,14 @@ tr:hover td{background:#f1f5f9}
       </div>
     </div>
     <div id="avisoSinSellar"></div>
+    <div id="avisoEval"></div>
     <div id="panelEnvio"></div>
     <div id="lista"></div>
 
     <div id="vistaCruce" style="display:none"><div id="cruceRaiz"></div><input type="file" id="fileConcDian" accept=".csv,.xlsx,.xls" style="display:none" onchange="concLeerDian(event)"></div>
     <div id="vistaPrecios" style="display:none"><div id="preciosRaiz"></div></div>
     <div id="vistaHiopos" style="display:none"><div id="hioposRaiz"></div></div>
+    <div id="vistaEval" style="display:none"><div id="evalRaiz"></div></div>
     <div id="vistaAdmin" style="display:none">
       <div class="row" style="margin-bottom:14px">
         <button class="chip on" id="ad-prov" onclick="setAdmin('prov')">Proveedores</button>
@@ -387,6 +390,8 @@ tr:hover td{background:#f1f5f9}
 <script src="js/envio-contabilidad.js"></script>
 <script src="js/envio-contabilidad-ui.js"></script>
 <script src="js/un-pedido-factura.js"></script>
+<script src="js/evaluacion.js"></script>
+<script src="js/evaluacion-ui.js"></script>
 <script src="js/organizador-hiopos.js"></script>
 <script src="js/hoja-contable.js"></script>
 <script src="js/hoja-contable-ui.js"></script>
@@ -425,7 +430,7 @@ async function sesion(u){
   if(perfil.debe_cambiar_clave) await exigirCambioClave();     // contraseña temporal: hay que cambiarla antes de seguir
   const s=perfil.sedes; let sedeFija=null;
   if(perfil.rol==="admin"||perfil.rol==="pagos"){$("btnsubir").style.display="inline-block";$("barraDescarga").style.display="flex";$("m-hiopos").style.display="inline-block";$("m-cruce").style.display="inline-block";$("m-precios").style.display="inline-block";}
-  if(perfil.rol==="admin"){ $("m-admin").style.display="inline-block"; $("btnIngresos").style.display="inline-block"; }
+  if(perfil.rol==="admin"){ $("m-admin").style.display="inline-block"; $("btnIngresos").style.display="inline-block"; if($("m-eval")) $("m-eval").style.display="inline-block"; }
   const {data:ss}=await SB.from("sedes").select("id,nombre,marca_id,marcas(nombre)").order("nombre");
   sedes=ss||[];
   if(perfil.rol==="admin"||perfil.rol==="pagos"){
@@ -1877,6 +1882,10 @@ function setModulo(m){
   $("m-hiopos").classList.toggle("on",m=="hiopos");   // (09/10/2026) Organizador Hiopos: modulo propio (admin y analistas)
   $("vistaHiopos").style.display = (m=="hiopos")?"block":"none";
   if(m=="hiopos") orgHPintar();
+  // (16/10/2026) Evaluacion de analistas y auxiliares (solo administradores)
+  if($("m-eval")) $("m-eval").classList.toggle("on",m=="eval");
+  if($("vistaEval")) $("vistaEval").style.display = (m=="eval")?"block":"none";
+  if(m=="eval" && typeof evAbrir==="function") evAbrir();
 }
 function toggleFiltros(which){
   const panel=$("panelFiltros"+which), btn=$("btnFiltros"+which);
@@ -2976,6 +2985,7 @@ async function cargar(){
   await cargarNotaLinks();   // notas credito amarradas a sus facturas (si falla, todo sigue igual)
   if(typeof cargarEnvioContabilidad==="function") await cargarEnvioContabilidad();   // (16/10/2026) que ya se envio a contabilidad
   pintar();
+  if(typeof evAlertasCargar==="function") evAlertasCargar().catch(()=>{});   // (16/10/2026) alertas de la evaluacion (y el correo diario)
   if(!pedidosCargados && typeof cargarPedidos==="function") cargarPedidos().then(()=>pintar()).catch(()=>{});   // para saber la sede de las Sin asignar
 }
 async function cambiarFiltroSede(){
