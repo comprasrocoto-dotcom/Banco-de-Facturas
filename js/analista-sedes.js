@@ -41,6 +41,20 @@
     return (sedes || []).filter((s) => ids.has(s.id));
   }
 
+  // (16/10/2026) Lo que DESCARGA un analista restringido (Excel, CSV, ZIP): SOLO documentos de SUS sedes (la de la factura o, si
+  // la factura aun no tiene sede, la de su pedido). La base le deja VER los que no tienen sede (Sin asignar, de todas las marcas)
+  // para poder asignarlos, pero no salen en sus descargas (pedido del usuario). Admin / analista sin sedes: todo igual.
+  // sedeDePedido: Map(cufe -> sede_id) de los pedidos amarrados (opcional)
+  function paraExportar(lista, sedes, alcance, sedeDePedido) {
+    if (!alcance || !alcance.restringido) return lista || [];
+    const ids = new Set((alcance.sedes || []).map(Number));
+    return (lista || []).filter((f) => {
+      if (!f) return false;
+      const sid = f.sede_id != null ? f.sede_id : (sedeDePedido && typeof sedeDePedido.get === 'function' ? sedeDePedido.get(f.cufe) : null);
+      return sid != null && ids.has(Number(sid));
+    });
+  }
+
   // { user_id: [sede ids] } a partir de las filas de analista_sedes_listar
   function porUsuario(filas) { const o = {}; (filas || []).forEach((f) => { (o[f.user_id] = o[f.user_id] || []).push(f.sede_id); }); return o; }
   // ¿cambio algo? (para no llamar a la base sin necesidad)
@@ -57,5 +71,5 @@
   }
   const textoAvisos = (correo) => (correo ? correo + ' (con copia a ' + COMPRAS + ')' : 'solo a ' + COMPRAS);
 
-  return { COMPRAS, validarCorreos, textoAvisos, esc, etiqueta, esAnalista, casillas, marcadas, resumen, aviso, permitidas, porUsuario, cambio };
+  return { COMPRAS, validarCorreos, textoAvisos, esc, etiqueta, esAnalista, casillas, marcadas, resumen, aviso, permitidas, paraExportar, porUsuario, cambio };
 });

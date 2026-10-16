@@ -7,6 +7,9 @@
 // deshacer un lote marcado por error. Logica pura en js/envio-contabilidad.js; tablas en supabase/envio_contabilidad.sql.
 var CONT_ENV = new Map(), CONT_LOTES = [], CONT_OK = false;
 
+// documentos de la sede elegida; un analista con sedes asignadas, solo los de sus sedes (16/10/2026: el ZIP y el Excel salen de aqui)
+function contBase() { const l = facturas.filter((f) => sedeOk(f.sede_id)); return typeof listaParaBajar === 'function' ? listaParaBajar(l) : l; }
+
 function contEnvioPuede() { return typeof perfil !== 'undefined' && perfil && (perfil.rol === 'admin' || perfil.rol === 'pagos'); }
 
 async function cargarEnvioContabilidad() {
@@ -21,7 +24,7 @@ async function cargarEnvioContabilidad() {
   } catch (e) { CONT_OK = false; }
   ['v-envio', 'v-enviadas'].forEach((id) => { const b = $(id); if (b) b.style.display = CONT_OK ? '' : 'none'; });
   const n = $('nEnvio');
-  if (n && CONT_OK) { const p = EnvioContabilidad.pendientes(facturas.filter((f) => sedeOk(f.sede_id)), CONT_ENV, BancoUtils.esTerminada); const c = p.lista.length + p.sinPdf.length; n.textContent = c ? '(' + c + ')' : '(0)'; n.style.color = c ? '#b91c1c' : ''; }
+  if (n && CONT_OK) { const p = EnvioContabilidad.pendientes(contBase(), CONT_ENV, BancoUtils.esTerminada); const c = p.lista.length + p.sinPdf.length; n.textContent = c ? '(' + c + ')' : '(0)'; n.style.color = c ? '#b91c1c' : ''; }
 }
 
 function envioBadge(f) {
@@ -38,7 +41,7 @@ function envioBadge(f) {
 function pintarPanelEnvio(v) {
   const caja = $('panelEnvio'); if (!caja) return;
   if (!v || !CONT_OK) { caja.innerHTML = ''; return; }
-  const todas = facturas.filter((f) => sedeOk(f.sede_id));
+  const todas = contBase();
   if (v === 'envio') {
     const p = EnvioContabilidad.pendientes(todas, CONT_ENV, BancoUtils.esTerminada);
     const viejos = p.lista.filter((f) => EnvioContabilidad.diasSinEnviar(f, BancoUtils.hoyColombia()) >= 2).length;
@@ -63,7 +66,7 @@ function pintarPanelEnvio(v) {
 }
 
 async function enviarAContabilidad() {
-  const p = EnvioContabilidad.pendientes(facturas.filter((f) => sedeOk(f.sede_id)), CONT_ENV, BancoUtils.esTerminada);
+  const p = EnvioContabilidad.pendientes(contBase(), CONT_ENV, BancoUtils.esTerminada);
   const lista = p.lista; if (!lista.length) return;
   const res = $('envioRes') || $('resdesc'), b = $('btnEnviarCont'); if (b) b.disabled = true;
   try {

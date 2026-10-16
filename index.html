@@ -3028,6 +3028,8 @@ function novDe(c){return novedades.find(n=>n.cufe===c);}
 // La logica vive en js/sin-sellar.js (probada con node). Las sedes solo ven las suyas; admin y pagos ven todas.
 let listasSede=null;   // null = todas las sedes; un id o "none" = solo esa
 function mapaSedePorFactura(){ const m=new Map(); (pedidos||[]).forEach(p=>{ if(p.factura_cufe&&p.sede_id) m.set(p.factura_cufe,p.sede_id); }); return m; }
+// (16/10/2026) lo que DESCARGA un analista con sedes asignadas (Excel, CSV, ZIP): solo sus sedes (y de Sin asignar, solo sus marcas)
+function listaParaBajar(l){ return (typeof AnalistaSedes!=="undefined"&&AnalistaSedes.paraExportar)?AnalistaSedes.paraExportar(l,sedes,alcanceUsuario,mapaSedePorFactura()):l; }
 function sedeListaKey(f){ const s=SinSellar.sedeDe(f,mapaSedePorFactura()).id; return s==null?"none":s; }
 function sinSellarVisibles(base){
   const l=base.filter(SinSellar.esIngresadaSinSellar);
@@ -3102,7 +3104,7 @@ function pintar(){
   }
   const q=($("q").value||"").trim().toLowerCase();
   if(q) l=l.filter(f=>((f.numero||"")+" "+(f.prefijo||"")+(f.folio||"")+" "+(f.documento||"")+" "+(f.emisor||"")+" "+(f.cufe||"")+" "+(f.num_ingreso||"")).toLowerCase().includes(q));
-  EXPORTAR.actual.facturas=l;   // lo que se ve (con vista, filtros y búsqueda) es lo que baja en Excel/CSV
+  EXPORTAR.actual.facturas=(typeof listaParaBajar==="function")?listaParaBajar(l):l;   // lo que se ve (con vista, filtros y búsqueda) es lo que baja en Excel/CSV (un analista: solo sus sedes)
   const cont=$("lista");
   if(!l.length){cont.innerHTML='<div class="vacio">No hay documentos acá.</div>';return;}
   const mapaSF=mapaSedePorFactura();   // (14/10/2026) sede de cada factura (o la de su pedido) arriba en la tarjeta
@@ -3391,7 +3393,7 @@ async function descargarCicloCompleto(){
   const g=rangoDescarga(); if(g.error){ res.textContent=g.error; return; }
   // (05/10/2026) Ciclo completo = lo mismo que la vista "✅ Proceso terminado": con N° de ingreso ERP y sellada (o nota
   // credito, que no se sella), por FECHA DE INGRESO AL ERP (antes: solo selladas y por fecha de sello -> faltaban documentos)
-  const {lista,sinPdf,fueraDeRango}=BancoUtils.filtrarTerminadas(facturas,{desde:g.desde,hasta:g.hasta,sedeIds:sedesFiltro()});
+  const {lista,sinPdf,fueraDeRango}=BancoUtils.filtrarTerminadas(listaParaBajar(facturas),{desde:g.desde,hasta:g.hasta,sedeIds:sedesFiltro()});
   if(!lista.length){ res.textContent="No hay documentos con el proceso terminado"+textoRango(g.desde,g.hasta)+" (fecha de ingreso al ERP)."+(sinPdf?" ("+sinPdf+" sin PDF)":""); return; }
   const r=await bajarPdfsEnZip(lista,BancoUtils.nombreArchivoCiclo,"ciclo_completo_"+etiquetaRango(g.desde,g.hasta)+".zip",res);
   const nc=lista.filter(f=>f.tipo==="nota_credito").length;
@@ -3401,7 +3403,7 @@ async function descargarCicloCompleto(){
 async function descargarSelladas(){
   const res=$("resdesc"); res.textContent="";
   const g=rangoDescarga(); if(g.error){ res.textContent=g.error; return; }
-  const {lista,sinFechaSello}=BancoUtils.filtrarSelladas(facturas,{desde:g.desde,hasta:g.hasta,sedeIds:sedesFiltro()});
+  const {lista,sinFechaSello}=BancoUtils.filtrarSelladas(listaParaBajar(facturas),{desde:g.desde,hasta:g.hasta,sedeIds:sedesFiltro()});
   if(!lista.length){ res.textContent="No hay selladas"+textoRango(g.desde,g.hasta)+"."+(sinFechaSello?" ("+sinFechaSello+" sin fecha de sello)":""); return; }
   const nombreSellada=f=>{
     const num=((f.prefijo||"")+(f.folio||""))||f.cufe.slice(0,12);
@@ -3420,6 +3422,7 @@ async function descargarContabilidad(listaDada, nombreDado){
   const fd=dado?"":$("fdesde").value, fh=dado?"":$("fhasta").value;
   let l=dado?listaDada.slice():facturas.filter(f=>f.num_ingreso && f.archivo_pdf);
   if(!dado) l=l.filter(f=>sedeOk(f.sede_id));
+  if(typeof listaParaBajar==="function") l=listaParaBajar(l);   // (16/10/2026) un analista: solo sus sedes
   if(fd) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe>=fd;});
   if(fh) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe<=fh;});
   if(!l.length){res.textContent="No hay facturas con ingreso ERP en ese rango.";return;}
@@ -3563,7 +3566,7 @@ async function descargarPendientes(){
   let l=facturas.filter(f=>!f.num_ingreso&&(f.estado==="asignada"||f.estado==="sellada"));
   console.log("DEBUG descargarPendientes: pasan el filtro de num_ingreso/estado ->",
     l.map(f=>({cufe:f.cufe,num:(f.prefijo||"")+(f.folio||""),num_ingreso:f.num_ingreso||null,tiene_novedad:!!novDe(f.cufe),estado:f.estado})));
-  l=l.filter(f=>sedeOk(f.sede_id));
+  l=listaParaBajar(l.filter(f=>sedeOk(f.sede_id)));
   if(fd) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe>=fd;});
   if(fh) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe<=fh;});
   l=l.filter(f=>f.archivo_pdf);
