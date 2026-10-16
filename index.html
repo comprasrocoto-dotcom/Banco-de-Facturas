@@ -213,6 +213,8 @@ tr:hover td{background:#f1f5f9}
         <button class="chip"    id="v-selladas" onclick="setVista('selladas')">Selladas</button>
         <button class="chip"    id="v-hecho"    onclick="setVista('hecho')">✅ Proceso terminado</button>
         <button class="chip"    id="v-nov"      onclick="setVista('nov')">Con novedad</button>
+        <button class="chip"    id="v-envio"    style="display:none" onclick="setVista('envio')" title="Todo lo que tiene el proceso terminado y AÚN NO se ha enviado a contabilidad, sea de la fecha que sea">📤 Por enviar a contabilidad <b id="nEnvio"></b></button>
+        <button class="chip"    id="v-enviadas" style="display:none" onclick="setVista('enviadas')" title="Lotes ya enviados a contabilidad (se pueden volver a bajar)">📦 Enviadas a contabilidad</button>
         <button class="chip"    id="v-listas"   onclick="setVista('listas')" title="Facturas que ya tienen Ingreso ERP pero siguen sin sellar: a la sede se le olvidó tomarlas o sellarlas">⏳ Ingresadas sin sellar</button>
         <span class="sp"></span>
         <button class="chip" id="btnFiltrosFac" style="display:none" onclick="toggleFiltros('Fac')">Filtros ▾</button>
@@ -242,6 +244,7 @@ tr:hover td{background:#f1f5f9}
       </div>
     </div>
     <div id="avisoSinSellar"></div>
+    <div id="panelEnvio"></div>
     <div id="lista"></div>
 
     <div id="vistaCruce" style="display:none"><div id="cruceRaiz"></div><input type="file" id="fileConcDian" accept=".csv,.xlsx,.xls" style="display:none" onchange="concLeerDian(event)"></div>
@@ -381,6 +384,8 @@ tr:hover td{background:#f1f5f9}
 <script src="js/factura-foto.js"></script>
 <script src="js/factura-foto-ui.js"></script>
 <script src="js/codigo-marca.js"></script>
+<script src="js/envio-contabilidad.js"></script>
+<script src="js/envio-contabilidad-ui.js"></script>
 <script src="js/organizador-hiopos.js"></script>
 <script src="js/hoja-contable.js"></script>
 <script src="js/hoja-contable-ui.js"></script>
@@ -2956,6 +2961,7 @@ async function cargar(){
   const {data:n}=await SB.from("novedades").select("cufe,motivo,texto,created_at");
   novedades=n||[];
   await cargarNotaLinks();   // notas credito amarradas a sus facturas (si falla, todo sigue igual)
+  if(typeof cargarEnvioContabilidad==="function") await cargarEnvioContabilidad();   // (16/10/2026) que ya se envio a contabilidad
   pintar();
   if(!pedidosCargados && typeof cargarPedidos==="function") cargarPedidos().then(()=>pintar()).catch(()=>{});   // para saber la sede de las Sin asignar
 }
@@ -2993,7 +2999,7 @@ function sedesFiltro(){ return sedeFijaId?[Number(sedeFijaId)]:FM_SEL.fmSede.map
 function sedeOk(id){ const sf=sedesFiltro(); return !sf.length||sf.includes(Number(id)); }
 function setTipo(t){ FM_SEL.fmTipo=t?[t]:[]; fmPintar("fmTipo"); fmAlCambiar("fmTipo"); }
 fmPintar("fmTipo"); fmPintar("fmCat");
-function setVista(v){vista=v;if(v!=="listas") listasSede=null;["pool","mias","selladas","hecho","nov","listas"].forEach(x=>$("v-"+x).classList.toggle("on",x==v));pintar();}
+function setVista(v){vista=v;if(v!=="listas") listasSede=null;["pool","mias","selladas","hecho","nov","listas","envio","enviadas"].forEach(x=>{ const b=$("v-"+x); if(b) b.classList.toggle("on",x==v); });pintar();}
 function novDe(c){return novedades.find(n=>n.cufe===c);}
 // ── Ingresadas sin sellar (19/09/2026): ya tienen Ingreso ERP pero siguen en Sin asignar / Mías sin sellar ──
 // La logica vive en js/sin-sellar.js (probada con node). Las sedes solo ven las suyas; admin y pagos ven todas.
@@ -3050,9 +3056,17 @@ function pintar(){
   if(vista=="selladas") l=l.filter(f=>f.estado=="sellada"||f.estado=="pagada");
   if(vista=="hecho")    l=l.filter(f=>BancoUtils.esTerminada(f));   // (05/10/2026) con N° de ingreso y sellada, o nota credito (no se sellan)
   if(vista=="nov")      l=l.filter(f=>novDe(f.cufe));
+  // (16/10/2026) envio a contabilidad: SIN filtro de fecha ni de tipo (facturas, notas credito y cuentas de cobro terminadas)
+  const esEnvio=(vista=="envio"||vista=="enviadas") && typeof EnvioContabilidad!=="undefined";
+  if(esEnvio){
+    const todas=facturas.filter(f=>sedeOk(f.sede_id));
+    if(vista=="envio"){ const p=EnvioContabilidad.pendientes(todas,CONT_ENV,BancoUtils.esTerminada); l=p.lista.concat(p.sinPdf).sort((a,b)=>String(a.fecha_ingreso||"").localeCompare(String(b.fecha_ingreso||""))); }
+    else l=todas.filter(f=>CONT_ENV.has(f.cufe)).sort((a,b)=>CONT_ENV.get(b.cufe).lote-CONT_ENV.get(a.cufe).lote);
+  }
+  if(typeof pintarPanelEnvio==="function") pintarPanelEnvio(esEnvio?vista:null);
   // Filtro por fecha (usa fecha_ingreso si tiene, sino fecha_emision)
   const fd=$("fdesde").value, fh=$("fhasta").value;
-  if(fd||fh){
+  if((fd||fh)&&!esEnvio){
     const antes=l.length;
     l=l.filter(f=>{
       const fe=(f.fecha_ingreso && f.fecha_ingreso!=="null") ? f.fecha_ingreso : (f.fecha_emision||"");
@@ -3090,6 +3104,7 @@ function pintar(){
         ${(f.pedido_erp||f.pedido_num)?`<span class="badge st-asignada">🔗 Pedido ${f.pedido_erp||f.pedido_num}</span>`:""}
         ${f.tipo==="cuenta_cobro"?`<span class="badge" style="color:#92400e;background:#fffbeb;border-color:#fcd34d;font-weight:700">📷 Cuenta de cobro</span>`:""}
         ${chipsNotaCredito(f)}
+        ${(typeof envioBadge==="function")?envioBadge(f):""}
         <span class="sp"></span>
         ${(perfil.rol==="sede"&&f.estado=="pool")?`<button class="s" onclick="tomar('${f.cufe}')">Es mía</button>`:""}
         ${(f.tipo!=="cuenta_cobro"&&(f.estado==="asignada"||f.estado==="sellada")&&(perfil.rol==="sede"||perfil.rol==="admin"||perfil.rol==="pagos"))?`<button class="d" onclick="soltar('${f.cufe}')">↩ ${f.estado==="sellada"?"Quitar el sello":"No es mía"}</button>`:""}
@@ -3320,7 +3335,7 @@ async function comoPdf(blob, ruta){
   }catch(e){ console.warn("foto a PDF:",e); return {blob, ext:m[1]}; }
 }
 async function bajarPdfsEnZip(lista, nombreFn, nombreZip, res){
-  const zip=new JSZip(); const usados=new Set(); let ok=0; const fallidas=[];
+  const zip=new JSZip(); const usados=new Set(); let ok=0; const fallidas=[], fallCufes=[];   // fallCufes: los que NO entraron al ZIP (16/10/2026)
   for(const f of lista){
     res.textContent="Preparando "+(ok+fallidas.length+1)+" de "+lista.length+"...";
     let blob=null;
@@ -3328,7 +3343,7 @@ async function bajarPdfsEnZip(lista, nombreFn, nombreZip, res){
       const {data:sig}=await SB.storage.from("facturas").createSignedUrl(f.archivo_pdf_sellado||f.archivo_pdf,120);
       if(sig){ const r=await fetch(sig.signedUrl); if(r.ok) blob=await r.blob(); }
     }catch(e){ console.warn("descarga PDF:",e); }
-    if(!blob){ fallidas.push(nombreFn(f)); continue; }
+    if(!blob){ fallidas.push(nombreFn(f)); fallCufes.push(f.cufe); continue; }
     // (13/10/2026) las cuentas de cobro son una FOTO: se convierte a PDF de una pagina (si no se puede, va como .jpg, nunca como un .pdf que no abre)
     const conv=await comoPdf(blob,f.archivo_pdf_sellado||f.archivo_pdf); blob=conv.blob;
     let nombreArch=nombreFn(f); if(conv.ext) nombreArch=nombreArch.replace(/\.pdf$/i,"."+conv.ext);
@@ -3340,7 +3355,7 @@ async function bajarPdfsEnZip(lista, nombreFn, nombreZip, res){
     a.href=URL.createObjectURL(out); a.download=nombreZip;
     document.body.appendChild(a); a.click(); a.remove();
   }
-  return {ok,fallidas};
+  return {ok,fallidas,fallCufes};
 }
 const etiquetaRango=(desde,hasta)=>(desde||"inicio")+"_a_"+(hasta||BancoUtils.hoyColombia());
 const textoRango=(desde,hasta)=>desde||hasta?(" del "+(desde||"inicio")+" al "+(hasta||"hoy")):"";
@@ -3375,11 +3390,13 @@ async function descargarSelladas(){
 }
 // Exporta un Excel/CSV listo para contabilidad (SIIGO o cualquier ERP)
 // con centro de costo, cuenta contable, base, IVA y total por factura
-async function descargarContabilidad(){
+// (16/10/2026) listaDada / nombreDado: el Excel del ENVIO A CONTABILIDAD (exactamente los documentos del envio). Sin ellos, como siempre (por fechas).
+async function descargarContabilidad(listaDada, nombreDado){
   const res=$("resdesc"); res.textContent="";
-  const fd=$("fdesde").value, fh=$("fhasta").value;
-  let l=facturas.filter(f=>f.num_ingreso && f.archivo_pdf);
-  l=l.filter(f=>sedeOk(f.sede_id));
+  const dado=Array.isArray(listaDada);
+  const fd=dado?"":$("fdesde").value, fh=dado?"":$("fhasta").value;
+  let l=dado?listaDada.slice():facturas.filter(f=>f.num_ingreso && f.archivo_pdf);
+  if(!dado) l=l.filter(f=>sedeOk(f.sede_id));
   if(fd) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe>=fd;});
   if(fh) l=l.filter(f=>{const fe=f.fecha_ingreso?f.fecha_ingreso:f.fecha_emision;return fe&&fe<=fh;});
   if(!l.length){res.textContent="No hay facturas con ingreso ERP en ese rango.";return;}
@@ -3504,9 +3521,10 @@ async function descargarContabilidad(){
   const buf=await wb.xlsx.writeBuffer();
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
-  a.download="contabilidad_"+(fd||"inicio")+"_"+(fh||"hoy")+".xlsx";
+  a.download=nombreDado||("contabilidad_"+(fd||"inicio")+"_"+(fh||"hoy")+".xlsx");
   a.click();a.remove();
   res.textContent="✅ "+l.length+" factura(s) exportadas para contabilidad.";
+  return l.length;
 }
 async function descargarPendientes(){
   console.log("DEBUG descargarPendientes: facturas totales=",facturas.length,
