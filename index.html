@@ -386,6 +386,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/codigo-marca.js"></script>
 <script src="js/envio-contabilidad.js"></script>
 <script src="js/envio-contabilidad-ui.js"></script>
+<script src="js/un-pedido-factura.js"></script>
 <script src="js/organizador-hiopos.js"></script>
 <script src="js/hoja-contable.js"></script>
 <script src="js/hoja-contable-ui.js"></script>
@@ -2264,9 +2265,19 @@ function bloquearSiYaAmarrado(p){
   }
   return false;
 }
+// (16/10/2026) una factura = un pedido: la sede no puede amarrar una factura que ya tiene OTRO pedido; admin/pagos confirman
+function bloquearFacturaConOtroPedido(f,pid){
+  if(typeof UnPedidoFactura==="undefined" || !f) return false;
+  const otro=UnPedidoFactura.otroPedido(f,pedidos,pid);
+  const d=UnPedidoFactura.decidir(perfil&&perfil.rol,otro);
+  if(d==="bloquear"){ alert(UnPedidoFactura.textoBloqueo(otro)); return true; }
+  if(d==="preguntar") return !confirm(UnPedidoFactura.textoPregunta(otro));
+  return false;
+}
 async function amarrarConFactura(cufe){
   const pAntes=pedidos.find(x=>x.id===amId);
   if(bloquearSiYaAmarrado(pAntes)) return;
+  if(bloquearFacturaConOtroPedido(facturas.find(x=>x.cufe===cufe),amId)) return;
   const fRec=fechaRecibidoPara(pAntes); if(!fRec) return;   // (06/10/2026) Fecha Recibido obligatoria
   const cc=centroCostoPara(pAntes,"amCentro"); if(cc===undefined) return;   // (09/10/2026) centro de costo (solo marcas que lo usan)
   const f=facturas.find(x=>x.cufe===cufe)||{};
@@ -2281,6 +2292,7 @@ async function amarrarConFactura(cufe){
 async function amarrarConPedido(pid){
   const pAntes=pedidos.find(x=>x.id===pid);
   if(bloquearSiYaAmarrado(pAntes)) return;
+  if(bloquearFacturaConOtroPedido(facturas.find(x=>x.cufe===amId),pid)) return;
   const fRec=fechaRecibidoPara(pAntes); if(!fRec) return;   // (06/10/2026) Fecha Recibido obligatoria
   const cc=centroCostoPara(pAntes,"amCC_"+pid); if(cc===undefined) return;   // (09/10/2026) centro de costo (solo marcas que lo usan)
   const f=facturas.find(x=>x.cufe===amId);
@@ -2924,6 +2936,7 @@ async function amarrarPedido(id){
   const busc=(elegido||"").trim().toUpperCase();
   const f=facturas.find(x=>(((x.prefijo||"")+(x.folio||"")).toUpperCase()===busc) || (x.cufe||"").toUpperCase().startsWith(busc));
   if(!f){alert("No encontré esa factura.");return;}
+  if(typeof bloquearFacturaConOtroPedido==="function" && bloquearFacturaConOtroPedido(f,id)) return;
   const fTxt=prompt("📅 Fecha Recibido de la factura (DD/MM/AAAA): el día que llegó la mercancía. Igual o posterior a la fecha del pedido ("+FechaRecibido.mostrar(p.fecha)+") y no futura.","");
   if(fTxt===null) return;
   const vRec=FechaRecibido.validar(fTxt,p.fecha,FechaRecibido.hoyCO()); if(!vRec.ok){alert(vRec.error);return;}
@@ -3113,7 +3126,7 @@ function pintar(){
         ${f.archivo_pdf?(f.tipo==="cuenta_cobro"?`<button class="p" onclick="verPdf('${f.cufe}')">${/\.pdf$/i.test(f.archivo_pdf)?"📄 Ver PDF":"📷 Ver foto"}</button><button onclick="verLineasCuentaCobro('${f.cufe}',this)">📋 Ver artículos</button>`:`<button onclick="verPdf('${f.cufe}')">📄 Ver PDF</button>`):""}
         ${(f.archivo_pdf_sellado&&(f.estado==="sellada"||f.estado==="pagada"))?`<button class="p" onclick="verPdfArchivo('${f.archivo_pdf_sellado}')">✅ Ver sellada</button>`:""}
         ${f.archivo_recibo?`<button onclick="verPdfArchivo('${f.archivo_recibo}')">📸 Ver recibo</button>`:""}
-        ${(f.tipo=="factura")?`<button class="s" onclick="abrirAmarre('factura','${f.cufe}')">🔗 Buscar pedido</button>`:""}
+        ${((typeof UnPedidoFactura!=="undefined")?UnPedidoFactura.mostrarBuscar(perfil.rol,f):(f.tipo=="factura"))?`<button class="s" onclick="abrirAmarre('factura','${f.cufe}')">🔗 Buscar pedido</button>`:""}
         ${((f.pedido_num||f.pedido_erp)&&typeof Desamarrar!=="undefined"&&Desamarrar.puede(perfil))?`<button class="d" title="Suelta esta factura de su pedido sin borrar nada" onclick="desamarrarFactura('${f.cufe}')">⛓ Desamarrar pedido</button>`:""}
         ${botonNotaCredito(f)}
         ${can("facturas.borrar")?`<button class="d" title="Borrar factura" onclick="borrarFactura('${f.cufe}')">🗑</button>`:""}
@@ -3243,7 +3256,7 @@ function resumenHtml(f,R){
       <table style="margin:0;border:0;width:auto">${fila("Tipo",escAg(R.tipo))}${fila("NIT",escAg(R.nit||"—"))}${fila("Categoría",escAg(R.categoria))}${fila("Estado",`<span class="badge ${st}">${escAg(R.estado)}</span>`)}${fila("Sede",escAg(R.sede||"Sin sede"))}${fila("Ingreso ERP",R.ingreso?escAg(R.ingreso.numero)+(R.ingreso.fecha?" · "+fch(R.ingreso.fecha):""):"")}${fila("CUFE",`<span class="mut" title="${escAg(R.cufe||"")}">${escAg(R.cufeCorto||"—")}</span>`)}</table>
       ${ped}
       ${R.avisos.map(a=>`<div style="margin-top:8px;color:#b45309">⚠️ ${escAg(a)}</div>`).join("")}
-      <div class="row" style="margin-top:14px;gap:8px">${R.tienePdf?`<button onclick="verPdf('${escAg(R.cufe)}')">📄 Ver PDF completo</button>`:""}${f.tipo==="factura"?`<button class="s" onclick="cerrarResumen();abrirAmarre('factura','${escAg(R.cufe)}')">🔗 Buscar pedido</button>`:""}</div>
+      <div class="row" style="margin-top:14px;gap:8px">${R.tienePdf?`<button onclick="verPdf('${escAg(R.cufe)}')">📄 Ver PDF completo</button>`:""}${((typeof UnPedidoFactura!=="undefined")?UnPedidoFactura.mostrarBuscar(perfil&&perfil.rol,f):f.tipo==="factura")?`<button class="s" onclick="cerrarResumen();abrirAmarre('factura','${escAg(R.cufe)}')">🔗 Buscar pedido</button>`:""}</div>
     </div>
     <div style="flex:1 1 280px;min-width:0"><div id="resPrev" class="mut" style="text-align:center;padding:30px 0">${R.tienePdf?"⏳ cargando vista previa…":"Sin PDF para mostrar."}</div></div>
   </div>`;
