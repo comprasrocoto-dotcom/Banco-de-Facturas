@@ -56,5 +56,42 @@
     return '📤 Enviada a contabilidad' + (f ? ' ' + f : '') + ' · lote ' + e.lote;
   }
 
-  return { indexar, pendientes, diasSinEnviar, porLote, etiqueta };
+  // ---------------------------------------------------------------- ENVIO PREPARADO (16/10/2026, pedido del usuario)
+  // La lista del envio se CONGELA al prepararla: lo que el agente termine despues no se cuela (queda para el proximo envio).
+  // Cada documento tiene su casilla: lo que se desmarca no se envia y sigue pendiente. Solo se marca como enviado lo que se
+  // bajo en el ZIP + Excel con esa misma seleccion.
+  const firma = (cufes) => [...new Set(cufes || [])].sort().join('|');
+  function preparar(lista, ahora) {
+    const cufes = (lista || []).map((f) => f.cufe);
+    const marcados = {}; cufes.forEach((c) => { marcados[c] = true; });
+    return { cufes, marcados, creado: ahora || Date.now(), bajado: false, firmaBajada: '' };
+  }
+  // -> { docs: los del envio que siguen pendientes (en su orden), salieron: cuantos ya no estan (se enviaron por otro lado),
+  //      nuevos: pendientes que llegaron despues de preparar }
+  function vigentes(prep, pendientesLista) {
+    const pend = new Map((pendientesLista || []).map((f) => [f.cufe, f]));
+    const enPrep = new Set((prep && prep.cufes) || []);
+    const docs = ((prep && prep.cufes) || []).filter((c) => pend.has(c)).map((c) => pend.get(c));
+    return { docs, salieron: enPrep.size - docs.length, nuevos: (pendientesLista || []).filter((f) => !enPrep.has(f.cufe)) };
+  }
+  const seleccion = (prep, docs) => (docs || []).filter((f) => prep && prep.marcados && prep.marcados[f.cufe]);
+  function marcar(prep, cufe, valor) {
+    const p = Object.assign({}, prep, { marcados: Object.assign({}, prep.marcados) });
+    p.marcados[cufe] = !!valor;
+    return p;
+  }
+  function marcarTodos(prep, docs, valor) {
+    const p = Object.assign({}, prep, { marcados: Object.assign({}, prep.marcados) });
+    (docs || []).forEach((f) => { p.marcados[f.cufe] = !!valor; });
+    return p;
+  }
+  // ¿se puede marcar como enviado? solo si lo seleccionado es exactamente lo que se bajo
+  function puedeConfirmar(prep, sel) {
+    if (!sel || !sel.length) return { ok: false, motivo: 'No hay documentos marcados.' };
+    if (!prep || !prep.bajado) return { ok: false, motivo: 'Primero baja el ZIP + Excel de los documentos marcados.' };
+    if (prep.firmaBajada !== firma(sel.map((f) => f.cufe))) return { ok: false, motivo: 'Cambiaste la selección después de bajar: vuelve a bajar el ZIP + Excel para que coincida con lo que se va a marcar.' };
+    return { ok: true, motivo: '' };
+  }
+
+  return { indexar, pendientes, diasSinEnviar, porLote, etiqueta, firma, preparar, vigentes, seleccion, marcar, marcarTodos, puedeConfirmar };
 });

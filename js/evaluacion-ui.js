@@ -152,7 +152,7 @@ function evTarjeta(r) {
     cumplimiento: 'De lo procesado en sus sedes que YA debía estar enviado a contabilidad (venció el plazo o ya se envió), cuánto se envió. Lo que aún está en plazo no cuenta.',
     puntualidad: `De lo enviado, cuánto salió dentro del plazo: listo antes de las ${evHora(m.horaCorte)} → ese día; listo después → siguiente día hábil antes de las ${evHora(m.horaManana)}`,
     sinAsignar: `Días hábiles en que «Sin asignar» de sus marcas tuvo máximo ${m.maxSinAsignar} facturas (y 0 el primer día hábil del mes).`,
-    ingresos: 'Ingresos de sus sedes sin novedad del agente.',
+    ingresos: 'Ingresos de sus sedes que el agente terminó solo. Si el agente avisó pero lo logró en otro intento, NO cuenta como novedad; solo cuenta cuando lo tuvo que ingresar una persona.',
     usoWeb: 'Facturas de sus sedes que llegaron con el pedido hecho por el punto en la web (si el punto no hace el pedido, baja).',
     proceso: 'El analista NO debe crear pedidos, amarrar facturas ni asignarles sede: eso es del punto. Mide qué parte de eso hizo el punto y no esta persona.',
     correcciones: 'Desamarres, sellos quitados y borrados que hizo a mano, frente a los ingresos de sus sedes. (Escribir el N° de ingreso a mano NO resta: es trabajo extra por fallas del agente).',
@@ -170,6 +170,7 @@ function evTarjeta(r) {
         <div class="mut">${sedes.length ? '📍 ' + escAg(sedes.join(', ')) : '<span style="color:#b45309">Sin sedes a cargo: asígnalas en ⚙️ para calificarlo.</span>'}</div></div>
       <div style="text-align:center;min-width:96px"><div style="font-size:30px;font-weight:800;color:${evColor(n)}">${n == null ? '—' : n + '%'}</div><div class="mut" style="font-size:11px">promedio</div></div>
     </div>
+    ${n != null && r.pocoMovimiento ? `<div style="margin-top:6px;padding:6px 10px;border-radius:8px;background:#fffbeb;border:1px solid #fcd34d;color:#92400e;font-size:12.5px">⚠️ Poco movimiento en sus sedes (solo ${r.observaciones} cosas medidas): esta calificación es poco confiable y va al final de la lista.</div>` : ''}
     ${r.sedes.length ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">${Evaluacion.PUNTOS.map((k) => evCuadro(k, r.puntos[k], ayuda[k])).join('')}</div>` : ''}
     <div class="mut" style="margin-top:8px;display:flex;gap:4px 14px;flex-wrap:wrap">${vol.map((x) => '<span>' + x + '</span>').join('')}</div>
     <div style="margin-top:6px"><button onclick="evToggle('${r.user_id}')">${EV.abierto === r.user_id ? 'Ocultar detalle' : 'Ver detalle'}</button></div>
@@ -196,7 +197,7 @@ function evDetalle(r) {
     <div><b>🗂️ «Sin asignar» de sus marcas</b><div class="mut">Hoy: ${d.sinAsignar.marcasHoy.map((x) => escAg(evNombreMarca(x.marca_id)) + ' ' + x.pool).join(' · ') || '—'} (meta de hoy: máximo ${d.sinAsignar.metaHoy}).
       ${d.sinAsignar.diasMedidos ? 'En meta ' + d.sinAsignar.diasEnMeta + ' de ' + d.sinAsignar.diasMedidos + ' días hábiles medidos.' : 'Aún no hay días medidos: se califica con lo de hoy.'}
       ${d.sinAsignar.diasMal.length ? ' Fuera de la meta: ' + d.sinAsignar.diasMal.slice(-10).map((x) => evFecha(x.dia) + ' (' + x.pool + '/' + x.meta + ')').join(', ') + '.' : ''}</div></div>
-    <div><b>🧾 Ingresos de sus sedes</b><div class="mut">${d.ingresos.total} ingreso(s) · ${d.ingresos.conNovedad} con novedad del agente · ${d.ingresos.aMano} hechos a mano · ${d.ingresos.conPedido} de ${d.ingresos.facturas} factura(s) con pedido del punto.</div>
+    <div><b>🧾 Ingresos de sus sedes</b><div class="mut">${d.ingresos.total} ingreso(s) · ${d.ingresos.conNovedad} con novedad que tuvo que resolver una persona · ${d.ingresos.resueltasAgente} con aviso que el agente resolvió solo en otro intento · ${d.ingresos.aMano} hechos a mano · ${d.ingresos.conPedido} de ${d.ingresos.facturas} factura(s) con pedido del punto.</div>
       ${Object.keys(d.ingresos.motivos || {}).length ? '<div class="mut" style="margin-top:3px">Novedades por motivo: ' + Object.entries(d.ingresos.motivos).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([mo, nn]) => escAg(mo) + ' (' + nn + ')').join(' · ') + '</div>' : ''}</div>
     <div><b>✋ Correcciones a mano de esta persona</b><div class="mut">${porAccion.length ? porAccion.map(([a, nn]) => escAg(a) + ': ' + nn).join(' · ') : 'Ninguna en el período.'}</div></div>
     <div><b>🚫 Lo que le toca al punto y lo hizo esta persona</b><div class="mut">Creó ${yp.creados} pedido(s) · amarró ${yp.amarres} factura(s) · asignó sede a ${yp.asignaciones} factura(s). En sus sedes, el punto hizo ${d.proceso.delPunto} de ${d.proceso.eventos}.</div></div>

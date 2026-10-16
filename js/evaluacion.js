@@ -27,7 +27,7 @@
   const PUNTOS = ['cumplimiento', 'puntualidad', 'sinAsignar', 'ingresos', 'usoWeb', 'proceso', 'correcciones'];
   const NOMBRES = {
     cumplimiento: '📤 Cumplimiento del envío a contabilidad', puntualidad: '⏰ Puntualidad del envío', sinAsignar: '🗂️ «Sin asignar» dentro de la meta',
-    ingresos: '🧾 Ingresos sin novedad', usoWeb: '🌐 Uso de la web en sus sedes', proceso: '🚫 No hace lo que le toca al punto', correcciones: '✋ Pocas correcciones a mano',
+    ingresos: '🧾 Ingresos sin revisión humana', usoWeb: '🌐 Uso de la web en sus sedes', proceso: '🚫 No hace lo que le toca al punto', correcciones: '✋ Pocas correcciones a mano',
   };
   const PESOS = { envio: 30, sinAsignar: 20, ingresos: 20, correcciones: 15, proceso: 15 };   // (v2; solo para guardar la configuracion)
   const METAS = { horaCorte: 17, horaManana: 12, maxSinAsignar: 5 };
@@ -166,7 +166,10 @@
     const delPunto = (h) => h.accion === DEL_PUNTO.foto || h.accion === DEL_PUNTO.asignaPunto || rolDe(h.usuario) === 'sede';
     const eventosPunto = hist.filter((h) => [DEL_PUNTO.creado, DEL_PUNTO.amarre, DEL_PUNTO.foto, DEL_PUNTO.asignaPunto, DEL_PUNTO.asignaAdmin].includes(h.accion)).map((h) => Object.assign(h, { sede: sedeEvento(h), punto: delPunto(h) }));
     const tipoEvento = (h) => (h.accion === DEL_PUNTO.creado ? 'creados' : h.accion === DEL_PUNTO.amarre || h.accion === DEL_PUNTO.foto ? 'amarres' : 'asignaciones');
-    return { enRango, envio, pedsDeFactura, sedeDe, rolDe, listoEn, esManual, ingHumano, hist, eventosPunto, tipoEvento };
+    // (16/10/2026) ¿el ingreso lo termino el agente? (aunque haya fallado antes y lo lograra en otro intento): tiene su ingreso
+    // completado en la cola, o nadie escribio el N° a mano. Si lo termino el agente, sus avisos de intentos anteriores NO son novedad.
+    const agenteTermino = (f) => ingAgente.has(f.cufe) || !ingHumano.has(f.cufe);
+    return { enRango, envio, pedsDeFactura, sedeDe, rolDe, listoEn, esManual, agenteTermino, ingHumano, hist, eventosPunto, tipoEvento };
   }
 
   // ---------------------------------------------------------------- analistas
@@ -244,7 +247,9 @@
 
       // 3) ingresos sin novedad
       const ingresos = misFact.filter((f) => conIngreso(f) && X.enRango(fechaCO(f.fecha_ingreso)));
-      const conNovedad = ingresos.filter((f) => motivosDe(f).length);
+      // novedad = el agente avisó Y al final no pudo (lo tuvo que ingresar una persona); si lo logró en otro intento, no cuenta
+      const conNovedad = ingresos.filter((f) => motivosDe(f).length && !X.agenteTermino(f));
+      const resueltasAgente = ingresos.filter((f) => motivosDe(f).length && X.agenteTermino(f)).length;
       const motivos = {};
       conNovedad.forEach((f) => motivosDe(f).forEach((mo) => { motivos[mo] = (motivos[mo] || 0) + 1; }));
       const manualesIng = ingresos.filter((f) => X.esManual(f)).length;
@@ -280,22 +285,24 @@
       const puntos = {};
       PUNTOS.forEach((k) => { const [ok, t] = base[k]; puntos[k] = { ok, total: t, pct: t > 0 ? Math.max(0, Math.min(100, Math.round((ok * 100) / t))) : null }; });
       const conDatos = PUNTOS.filter((k) => puntos[k].pct != null);
+      // poco movimiento en sus sedes (menos de 20 cosas medidas, sin contar Sin asignar): la nota es poco confiable -> va al final
+      const observaciones = PUNTOS.filter((k) => k !== 'sinAsignar').reduce((a, k) => a + puntos[k].total, 0);
       const prom = conDatos.length ? conDatos.reduce((a, k) => a + puntos[k].pct, 0) / conDatos.length : null;
       return {
         user_id: p.user_id, nombre: p.nombre, rol: p.rol, sedes: [...S], marcas: [...M],
         puntaje: S.size && prom != null ? Math.min(100, Math.max(1, Math.round(prom))) : null,
-        puntos,
+        puntos, observaciones, pocoMovimiento: observaciones < 20,
         volumen: { enviados, ingresos: ingresos.length, ingresosAMano: yoIngreso, ordenes: ordenes.length, pendientes: pendientes.length },
         detalle: {
           envio: { total: eTot, enviados, aTiempo, enPlazo, tarde, vencidos, pendientes, porDia, diasConEnvio, diasHabiles: habiles.length },
           sinAsignar: { diasMedidos: diasMed.length, diasEnMeta: diasMed.length - diasMal.length, diasMal, poolHoy, marcasHoy, metaHoy },
-          ingresos: { total: ingresos.length, conNovedad: conNovedad.length, sinPedido: ingFact.length - conPedido, conPedido, facturas: ingFact.length, motivos, aMano: manualesIng },
+          ingresos: { total: ingresos.length, conNovedad: conNovedad.length, resueltasAgente, sinPedido: ingFact.length - conPedido, conPedido, facturas: ingFact.length, motivos, aMano: manualesIng },
           correcciones: { total: manuales.length, porAccion: manuales.reduce((m, h) => { m[h.accion] = (m[h.accion] || 0) + 1; return m; }, {}) },
           proceso: { eventos: enSusSedes.length, delPunto: enSusSedes.filter((h) => h.punto).length, yo: yo.length, yoPor },
           ordenes: ordenes.length,
         },
       };
-    }).sort((a, b) => (a.puntaje == null) - (b.puntaje == null) || (b.puntaje || 0) - (a.puntaje || 0) || String(a.nombre).localeCompare(String(b.nombre)));
+    }).sort((a, b) => (a.puntaje == null) - (b.puntaje == null) || (!!a.pocoMovimiento - !!b.pocoMovimiento) || (b.puntaje || 0) - (a.puntaje || 0) || String(a.nombre).localeCompare(String(b.nombre)));
   }
 
   // ---------------------------------------------------------------- sedes (puntos)
