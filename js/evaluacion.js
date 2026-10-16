@@ -21,12 +21,20 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const PESOS = { envio: 30, sinAsignar: 20, ingresos: 20, correcciones: 15, proceso: 15 };
-  const NOMBRES = { envio: 'Envío a contabilidad a diario', sinAsignar: '«Sin asignar» dentro de la meta', ingresos: 'Ingresos sin novedad', correcciones: 'Pocas correcciones a mano', proceso: 'No hace lo que le toca al punto' };
+  // (16/10/2026 v3, pedido del usuario: "cada punto deberia calificarse sobre 100, de manera individual") cada punto va de 0 a
+  // 100% por separado; la calificacion general es el PROMEDIO de los puntos que tienen datos (sin pesos). Un punto sin datos
+  // dice «Sin datos» y no cuenta (antes valia 100% y premiaba a quien tenia poco movimiento).
+  const PUNTOS = ['cumplimiento', 'puntualidad', 'sinAsignar', 'ingresos', 'usoWeb', 'proceso', 'correcciones'];
+  const NOMBRES = {
+    cumplimiento: '📤 Cumplimiento del envío a contabilidad', puntualidad: '⏰ Puntualidad del envío', sinAsignar: '🗂️ «Sin asignar» dentro de la meta',
+    ingresos: '🧾 Ingresos sin novedad', usoWeb: '🌐 Uso de la web en sus sedes', proceso: '🚫 No hace lo que le toca al punto', correcciones: '✋ Pocas correcciones a mano',
+  };
+  const PESOS = { envio: 30, sinAsignar: 20, ingresos: 20, correcciones: 15, proceso: 15 };   // (v2; solo para guardar la configuracion)
   const METAS = { horaCorte: 17, horaManana: 12, maxSinAsignar: 5 };
   const DIAS_ALERTA = 2;   // (v1; ya no se usa para calificar)
-  // acciones del historial que son correcciones a mano de la persona
-  const MANUALES = ['numero de ingreso ERP', 'numero de ingreso ERP (manual)', 'pedido desamarrado', 'sello quitado - devuelta al pool', 'pedido borrado', 'factura borrada'];
+  // correcciones a mano de la persona. Escribir el N° de ingreso a mano NO resta (es trabajo extra porque el agente no pudo:
+  // se mide aparte en «Ingresos hechos a mano» y se muestra como volumen de trabajo)
+  const MANUALES = ['pedido desamarrado', 'sello quitado - devuelta al pool', 'pedido borrado', 'factura borrada'];
   const INGRESO_HUMANO = ['numero de ingreso ERP', 'numero de ingreso ERP (manual)'];
   // lo que le toca al punto y no al analista
   const DEL_PUNTO = { creado: 'pedido creado desde la web', amarre: 'pedido amarrado', foto: 'pedido amarrado por foto', asignaPunto: 'asignada', asignaAdmin: 'asignada por admin' };
@@ -198,7 +206,9 @@
       const misFact = (D.facturas || []).filter((f) => S.has(Number(X.sedeDe(f))));
 
       // 1) envio a contabilidad a diario (antes de la hora de corte, o al dia siguiente en la mañana)
-      let eTot = 0, eOk = 0; const tarde = [], vencidos = [];
+      //    cumplimiento = de lo que YA debia estar enviado (plazo vencido o ya enviado), cuanto se envio
+      //    puntualidad  = de lo enviado, cuanto salio dentro del plazo. Lo que aun esta en plazo no cuenta en ninguno.
+      let enviados = 0, aTiempo = 0, enPlazo = 0; const tarde = [], vencidos = [];
       const doc = (f, listo, limite, extra) => Object.assign({ cufe: f.cufe, doc: (f.prefijo || '') + (f.folio || ''), emisor: f.emisor, listo: horaCO(listo), limite: horaCO(limite) }, extra || {});
       for (const f of misFact) {
         if (!terminada(f)) continue;
@@ -206,11 +216,11 @@
         const e = X.envio.get(f.cufe);
         if (e && e.arranque) continue;                         // dado por enviado al arrancar el control: no se puede medir
         const limite = limiteEnvio(listo, metas);
-        eTot++;
-        if (e) { if (e.t <= limite) eOk++; else tarde.push(doc(f, listo, limite, { enviado: horaCO(e.t) })); }
-        else if (ahora <= limite) eOk++;                     // aun esta en plazo
+        if (e) { enviados++; if (e.t <= limite) aTiempo++; else tarde.push(doc(f, listo, limite, { enviado: horaCO(e.t) })); }
+        else if (ahora <= limite) enPlazo++;
         else vencidos.push(doc(f, listo, limite));
       }
+      const eTot = enviados + vencidos.length + enPlazo;
       const pendientes = misFact.filter((f) => terminada(f) && !X.envio.has(f.cufe)).map((f) => { const l = X.listoEn(f), lim = limiteEnvio(l, metas); return doc(f, l, lim, { vencido: ahora > lim, t: l }); }).sort((a, b) => a.t - b.t);
       const porDia = {};
       for (const f of misFact) { const e = X.envio.get(f.cufe); if (e && !e.arranque && X.enRango(e.en)) porDia[e.en] = (porDia[e.en] || 0) + 1; }
@@ -229,7 +239,8 @@
       const marcasHoy = [...M].map((x) => ({ marca_id: x, pool: poolHoyMarca.get(x) || 0 }));
       const metaHoy = metaDelDia(hoy);
       const fueraHoy = marcasHoy.filter((x) => x.pool > metaHoy).length;
-      const sA = diasMed.length ? pct(diasMed.length - diasMal.length, diasMed.length) : (M.size ? (fueraHoy ? 0 : 1) : 1);
+      // sin fotos: se califica con lo de hoy (1 dia medido)
+      const sinAsig = diasMed.length ? [diasMed.length - diasMal.length, diasMed.length] : (M.size ? [fueraHoy ? 0 : 1, 1] : [0, 0]);
 
       // 3) ingresos sin novedad
       const ingresos = misFact.filter((f) => conIngreso(f) && X.enRango(fechaCO(f.fecha_ingreso)));
@@ -240,31 +251,45 @@
 
       // 4) correcciones a mano de la persona
       const manuales = X.hist.filter((h) => h.usuario === p.user_id && MANUALES.includes(h.accion));
-      const sCorr = ingresos.length ? Math.max(0, 1 - manuales.length / ingresos.length) : (manuales.length ? 0 : 1);
+      // trabajo extra: N° de ingreso que escribio a mano porque el agente no pudo (no resta; se muestra)
+      const yoIngreso = X.hist.filter((h) => h.usuario === p.user_id && INGRESO_HUMANO.includes(h.accion)).length;
 
       // 5) no hacer lo que le toca al punto (crear pedidos, amarrar, asignar sede)
       const enSusSedes = X.eventosPunto.filter((h) => S.has(h.sede));
       const yo = X.eventosPunto.filter((h) => h.usuario === p.user_id && !h.punto);
       const yoFuera = yo.filter((h) => !S.has(h.sede)).length;
       const den = enSusSedes.length + yoFuera;
-      const sProc = den ? Math.max(0, 1 - yo.length / den) : (yo.length ? 0 : 1);
       const yoPor = { creados: 0, amarres: 0, asignaciones: 0 };
       yo.forEach((h) => { yoPor[X.tipoEvento(h)]++; });
       const ordenes = (D.ordenes || []).filter((x) => x.pedida_por === p.user_id && X.enRango(fechaCO(x.pedida_en)));
 
-      const frac = { envio: pct(eOk, eTot), sinAsignar: sA, ingresos: pct(ingresos.length - conNovedad.length, ingresos.length), correcciones: sCorr, proceso: sProc };
-      const suma = Object.keys(PESOS).reduce((a, k) => a + Number(pesos[k] || 0), 0) || 100;
-      const comp = {}, compPct = {};
-      Object.keys(PESOS).forEach((k) => { comp[k] = redondo((Number(pesos[k] || 0) * frac[k] * 100) / suma); compPct[k] = Math.round(frac[k] * 100); });
-      const total = Object.values(comp).reduce((a, b) => a + b, 0);
+      // 6) uso de la web en sus sedes: facturas ingresadas que llegaron con pedido del punto
+      const ingFact = ingresos.filter((f) => f.tipo === 'factura');
+      const conPedido = ingFact.filter((f) => (X.pedsDeFactura.get(f.cufe) || []).length).length;
+
+      // cada punto: [bien, de cuantos] -> % de 0 a 100, o null = «Sin datos»
+      const base = {
+        cumplimiento: [enviados, enviados + vencidos.length],
+        puntualidad: [aTiempo, enviados],
+        sinAsignar: sinAsig,
+        ingresos: [ingresos.length - conNovedad.length, ingresos.length],
+        usoWeb: [conPedido, ingFact.length],
+        proceso: [Math.max(0, den - yo.length), den],
+        correcciones: [Math.max(0, ingresos.length - manuales.length), ingresos.length],
+      };
+      const puntos = {};
+      PUNTOS.forEach((k) => { const [ok, t] = base[k]; puntos[k] = { ok, total: t, pct: t > 0 ? Math.max(0, Math.min(100, Math.round((ok * 100) / t))) : null }; });
+      const conDatos = PUNTOS.filter((k) => puntos[k].pct != null);
+      const prom = conDatos.length ? conDatos.reduce((a, k) => a + puntos[k].pct, 0) / conDatos.length : null;
       return {
         user_id: p.user_id, nombre: p.nombre, rol: p.rol, sedes: [...S], marcas: [...M],
-        puntaje: S.size ? Math.min(100, Math.max(1, Math.round(total))) : null,
-        comp, compPct,
+        puntaje: S.size && prom != null ? Math.min(100, Math.max(1, Math.round(prom))) : null,
+        puntos,
+        volumen: { enviados, ingresos: ingresos.length, ingresosAMano: yoIngreso, ordenes: ordenes.length, pendientes: pendientes.length },
         detalle: {
-          envio: { total: eTot, aTiempo: eOk, tarde, vencidos, pendientes, porDia, diasConEnvio, diasHabiles: habiles.length },
+          envio: { total: eTot, enviados, aTiempo, enPlazo, tarde, vencidos, pendientes, porDia, diasConEnvio, diasHabiles: habiles.length },
           sinAsignar: { diasMedidos: diasMed.length, diasEnMeta: diasMed.length - diasMal.length, diasMal, poolHoy, marcasHoy, metaHoy },
-          ingresos: { total: ingresos.length, conNovedad: conNovedad.length, sinPedido: ingresos.filter((f) => f.tipo === 'factura' && !(X.pedsDeFactura.get(f.cufe) || []).length).length, motivos, aMano: manualesIng },
+          ingresos: { total: ingresos.length, conNovedad: conNovedad.length, sinPedido: ingFact.length - conPedido, conPedido, facturas: ingFact.length, motivos, aMano: manualesIng },
           correcciones: { total: manuales.length, porAccion: manuales.reduce((m, h) => { m[h.accion] = (m[h.accion] || 0) + 1; return m; }, {}) },
           proceso: { eventos: enSusSedes.length, delPunto: enSusSedes.filter((h) => h.punto).length, yo: yo.length, yoPor },
           ordenes: ordenes.length,
@@ -317,5 +342,5 @@
     return { desde: sumar(hoy, -29), hasta: hoy };
   }
 
-  return { PESOS, NOMBRES, METAS, DIAS_ALERTA, MANUALES, pascua, festivosColombia, esFestivo, esHabil, diasHabiles, habilesEntre, siguienteHabil, primerHabilDelMes, limiteEnvio, horaCO, fechaCO, fechaListo, terminada, numPed, calcular, calcularSedes, ingresosAMano, nivel, periodo, sumar };
+  return { PUNTOS, PESOS, NOMBRES, METAS, DIAS_ALERTA, MANUALES, pascua, festivosColombia, esFestivo, esHabil, diasHabiles, habilesEntre, siguienteHabil, primerHabilDelMes, limiteEnvio, horaCO, fechaCO, fechaListo, terminada, numPed, calcular, calcularSedes, ingresosAMano, nivel, periodo, sumar };
 });
