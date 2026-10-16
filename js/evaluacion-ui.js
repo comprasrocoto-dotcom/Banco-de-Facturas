@@ -76,6 +76,7 @@ async function evCargar() {
   EV.kpi = Evaluacion.ingresosAMano(EV.datos, o);
   if (!EV_ALERTAS) await evAlertasCargar(true);
   evPintar();
+  if (EV.tab === 'proveedores' && typeof evProvAbrir === 'function') evProvAbrir();   // otro periodo: se recargan sus datos
 }
 function evPeriodo(p) { EV.periodo = p; EV.abierto = null; evCargar(); }
 function evRango() {
@@ -85,7 +86,7 @@ function evRango() {
 }
 function evToggle(uid) { EV.abierto = EV.abierto === uid ? null : uid; evPintar(); }
 function evToggleConfig() { EV.config = !EV.config; evPintar(); }
-function evTab(t) { EV.tab = t; EV.abierto = null; evPintar(); }
+function evTab(t) { EV.tab = t; EV.abierto = null; evPintar(); if (t === 'proveedores' && typeof evProvAbrir === 'function') evProvAbrir(); }
 
 function evNombreSede(id) {
   const D = EV.datos || {}, s = (D.sedes || []).find((x) => Number(x.id) === Number(id));
@@ -131,8 +132,8 @@ function evPintar() {
       ${k.porSede.length ? '<div class="mut" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 14px">' + k.porSede.slice(0, 14).map((x) => `<span>${escAg(evNombreSede(x.sede_id))}: <b>${x.pct}%</b> (${x.aMano}/${x.total})</span>`).join('') + '</div>' : ''}
     </div>
     ${alertas.length ? `<div class="card" style="border-left:5px solid #b91c1c;margin-bottom:12px"><div style="font-weight:700;color:#991b1b">🚨 Pendientes de hoy</div>${alertas.map((a) => `<div style="margin-top:3px"><b>${escAg(a.persona || '')}</b> · ${evTextoAlerta(a)}</div>`).join('')}</div>` : '<div class="card" style="border-left:5px solid #15803d;margin-bottom:12px">✅ Hoy no hay pendientes fuera de la meta.</div>'}
-    <div class="row" style="gap:6px;margin-bottom:10px">${tab('analistas', '👤 Analistas y auxiliares')}${tab('sedes', '🏪 Sedes (puntos)')}</div>
-    ${EV.tab === 'sedes' ? evSedesHtml() : (EV.res.length ? EV.res.map((r) => evTarjeta(r)).join('') : '<div class="vacio">No hay administradores ni analistas activos.</div>')}`;
+    <div class="row" style="gap:6px;margin-bottom:10px">${tab('analistas', '👤 Analistas y auxiliares')}${tab('sedes', '🏪 Sedes (puntos)')}${typeof evProvHtml === 'function' ? tab('proveedores', '🚚 Proveedores') : ''}</div>
+    ${EV.tab === 'proveedores' && typeof evProvHtml === 'function' ? evProvHtml() : EV.tab === 'sedes' ? evSedesHtml() : (EV.res.length ? EV.res.map((r) => evTarjeta(r)).join('') : '<div class="vacio">No hay administradores ni analistas activos.</div>')}`;
 }
 
 // un punto: su % sobre 100 (o «Sin datos»), de cuantos, y la explicacion al pasar el mouse
@@ -253,7 +254,7 @@ function evConfigHtml() {
   return `<div class="card" style="margin-bottom:12px;border-left:5px solid #1e3a8a">
     <div style="font-weight:700">🎯 Metas</div>
     <div style="display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:6px">
-      ${num('evCorte', m.horaCorte, 6, 23, '⏰ Hora de corte del envío (0-23)')}${num('evManana', m.horaManana, 6, 23, '🌅 Al día siguiente, hasta las (0-23)')}${num('evMaxSA', m.maxSinAsignar, 0, 500, '🗂️ Máximo en «Sin asignar» por marca')}</div>
+      ${num('evCorte', m.horaCorte, 6, 23, '⏰ Hora de corte del envío (0-23)')}${num('evManana', m.horaManana, 6, 23, '🌅 Al día siguiente, hasta las (0-23)')}${num('evMaxSA', m.maxSinAsignar, 0, 500, '🗂️ Máximo en «Sin asignar» por marca')}${num('evDiasProv', (D.config || {}).dias_entrega_prov != null ? D.config.dias_entrega_prov : 2, 0, 30, '🚚 Proveedores: entrega en máximo (días)')}${num('evAlzaProv', (D.config || {}).alza_pct != null ? Number(D.config.alza_pct) : 5, 0, 100, '📈 Proveedores: alza de precio de más de (%)')}</div>
     <div class="mut" style="margin-top:4px">Ej.: corte 17 = 5 p. m.; al día siguiente hasta las 12 = 12 m. El primer día hábil de cada mes la meta de «Sin asignar» es 0. Cada punto se califica sobre 100 por separado.</div>
     <div style="margin-top:8px"><button class="p" onclick="evGuardarMetas()">💾 Guardar metas</button> <span class="mut" id="evCfgRes"></span></div>
     <div style="font-weight:700;margin-top:14px">👥 ¿Quién responde por cada sede?</div>
@@ -271,8 +272,10 @@ async function evGuardarMetas() {
   const res = $('evCfgRes');
   // la base aun guarda pesos (v2): se mandan los de siempre (suman 100); la calificacion ya no los usa
   const r = await SB.rpc('evaluacion_config_guardar', { p_pesos: Object.assign({}, Evaluacion.PESOS), p_dias: null, p_usuario: (perfil && perfil.nombre) || null,
-    p_hora_corte: Number(($('evCorte') || {}).value), p_hora_manana: Number(($('evManana') || {}).value), p_max_sin_asignar: Number(($('evMaxSA') || {}).value) });
+    p_hora_corte: Number(($('evCorte') || {}).value), p_hora_manana: Number(($('evManana') || {}).value), p_max_sin_asignar: Number(($('evMaxSA') || {}).value),
+    p_dias_entrega: $('evDiasProv') ? Number($('evDiasProv').value) : null, p_alza_pct: $('evAlzaProv') ? Number($('evAlzaProv').value) : null });
   if (r.error) { if (res) res.textContent = 'No se pudo: ' + r.error.message; return; }
+  if (typeof EV_PROV !== 'undefined') EV_PROV.clave = '';   // metas nuevas: se recalculan los proveedores
   await evCargar(); await evAlertasCargar(true);
   const r2 = $('evCfgRes'); if (r2) r2.textContent = '✅ Guardado.';
 }
