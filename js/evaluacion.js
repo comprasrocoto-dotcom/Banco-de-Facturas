@@ -24,10 +24,10 @@
   // (16/10/2026 v3, pedido del usuario: "cada punto deberia calificarse sobre 100, de manera individual") cada punto va de 0 a
   // 100% por separado; la calificacion general es el PROMEDIO de los puntos que tienen datos (sin pesos). Un punto sin datos
   // dice «Sin datos» y no cuenta (antes valia 100% y premiaba a quien tenia poco movimiento).
-  const PUNTOS = ['cumplimiento', 'puntualidad', 'sinAsignar', 'ingresos', 'usoWeb', 'proceso', 'correcciones'];
+  const PUNTOS = ['cumplimiento', 'puntualidad', 'sinAsignar', 'ingresos', 'sedes', 'proceso', 'correcciones'];
   const NOMBRES = {
     cumplimiento: '📤 Cumplimiento del envío a contabilidad', puntualidad: '⏰ Puntualidad del envío', sinAsignar: '🗂️ «Sin asignar» dentro de la meta',
-    ingresos: '🧾 Ingresos sin revisión humana', usoWeb: '🌐 Uso de la web en sus sedes', proceso: '🚫 No hace lo que le toca al punto', correcciones: '✋ Pocas correcciones a mano',
+    ingresos: '🧾 Ingresos sin revisión humana', sedes: '🏪 Sus sedes cumplen (pedidos y aceptación)', proceso: '🚫 No hace lo que le toca al punto', correcciones: '✋ Pocas correcciones a mano',
   };
   const PESOS = { envio: 30, sinAsignar: 20, ingresos: 20, correcciones: 15, proceso: 15 };   // (v2; solo para guardar la configuracion)
   const METAS = { horaCorte: 17, horaManana: 12, maxSinAsignar: 5 };
@@ -201,6 +201,7 @@
     (D.fotos || []).forEach((x) => { const d = fechaCO(x.dia); if (!X.enRango(d)) return; if (!fotos.has(d)) fotos.set(d, new Map()); fotos.get(d).set(Number(x.marca_id), Number(x.pool || 0)); });
     const poolHoyMarca = new Map();
     (D.facturas || []).forEach((f) => { if (f.estado === 'pool' && f.marca_id != null) poolHoyMarca.set(Number(f.marca_id), (poolHoyMarca.get(Number(f.marca_id)) || 0) + 1); });
+    const sedesEval = new Map(calcularSedes(D, o).map((x) => [x.sede_id, x]));   // evaluacion de cada sede (pedidos y aceptacion)
     const metaDelDia = (d) => (d === primerHabilDelMes(d) ? 0 : metas.maxSinAsignar);
 
     return personas.map((p) => {
@@ -278,20 +279,24 @@
         puntualidad: [aTiempo, enviados],
         sinAsignar: sinAsig,
         ingresos: [ingresos.length - conNovedad.length, ingresos.length],
-        usoWeb: [conPedido, ingFact.length],
+        sedes: [0, 0],   // se reemplaza abajo por el promedio de sus sedes
         proceso: [Math.max(0, den - yo.length), den],
         correcciones: [Math.max(0, ingresos.length - manuales.length), ingresos.length],
       };
       const puntos = {};
       PUNTOS.forEach((k) => { const [ok, t] = base[k]; puntos[k] = { ok, total: t, pct: t > 0 ? Math.max(0, Math.min(100, Math.round((ok * 100) / t))) : null }; });
+      // 🏪 sus sedes: promedio de la calificacion de cada sede suya (montar pedidos y aceptar facturas): el analista responde por el seguimiento
+      const misSedes = [...S].map((id) => sedesEval.get(id)).filter(Boolean);
+      const baseSedes = misSedes.reduce((a, x) => a + x.puntos.pedidos.total + x.puntos.aceptacion.total, 0);
+      puntos.sedes = { ok: misSedes.length, total: misSedes.length, pct: misSedes.length ? Math.round(misSedes.reduce((a, x) => a + x.puntaje, 0) / misSedes.length) : null, sedes: misSedes.length, base: baseSedes };
       const conDatos = PUNTOS.filter((k) => puntos[k].pct != null);
       // poco movimiento en sus sedes (menos de 20 cosas medidas, sin contar Sin asignar): la nota es poco confiable -> va al final
-      const observaciones = PUNTOS.filter((k) => k !== 'sinAsignar').reduce((a, k) => a + puntos[k].total, 0);
+      const observaciones = PUNTOS.filter((k) => k !== 'sinAsignar').reduce((a, k) => a + (k === 'sedes' ? puntos.sedes.base : puntos[k].total), 0);
       const prom = conDatos.length ? conDatos.reduce((a, k) => a + puntos[k].pct, 0) / conDatos.length : null;
       return {
         user_id: p.user_id, nombre: p.nombre, rol: p.rol, sedes: [...S], marcas: [...M],
         puntaje: S.size && prom != null ? Math.min(100, Math.max(1, Math.round(prom))) : null,
-        puntos, observaciones, pocoMovimiento: observaciones < 20,
+        puntos, observaciones, pocoMovimiento: observaciones < 20, sedesEval: misSedes,
         volumen: { enviados, ingresos: ingresos.length, ingresosAMano: yoIngreso, ordenes: ordenes.length, pendientes: pendientes.length },
         detalle: {
           envio: { total: eTot, enviados, aTiempo, enPlazo, tarde, vencidos, pendientes, porDia, diasConEnvio, diasHabiles: habiles.length },
@@ -306,25 +311,57 @@
   }
 
   // ---------------------------------------------------------------- sedes (puntos)
-  // por sede: pedidos creados por el punto, amarres por el punto o con foto, facturas asignadas por el punto, facturas
-  // ingresadas con pedido. Calificacion = promedio de los puntos que tuvieron movimiento (1 a 100%).
+  // (16/10/2026, pedido del usuario) cada sede se califica en SUS dos responsabilidades, cada una de 1 a 100%:
+  //   📋 Montar pedidos: de las facturas ingresadas de la sede, cuantas llegaron con un pedido que MONTO EL PUNTO
+  //      (sin pedido, o con pedido montado por un analista, no cuenta).
+  //   ✅ Aceptacion de facturas: de las facturas asignadas a la sede, cuantas se asigno y SELLO el propio punto. Las que lleven
+  //      mas de 1 dia habil asignadas sin sellar cuentan en contra; las recien asignadas todavia no cuentan.
+  // La calificacion de la sede es el promedio de los dos (solo los que tienen datos).
+  const PUNTOS_SEDE = ['pedidos', 'aceptacion'];
+  const NOMBRES_SEDE = { pedidos: '📋 Montar pedidos', aceptacion: '✅ Aceptación de facturas' };
   function calcularSedes(datos, o) {
     const D = datos || {};
     const X = preparar(D, o);
+    const hoy = o.hoy;
+    const perfil = new Map((D.perfiles || []).map((p) => [p.user_id, p]));
+    const esPunto = (u) => (perfil.get(u) || {}).rol === 'sede';
+    const nombre = (u) => (u ? (perfil.get(u) || {}).nombre || 'otra persona' : 'sin usuario');
+    const pedDe = (f) => (X.pedsDeFactura.get(f.cufe) || [])[0] || null;
     const out = [];
     for (const s of D.sedes || []) {
       const id = Number(s.id);
-      const ev = X.eventosPunto.filter((h) => h.sede === id);
-      const g = { creados: [0, 0], amarres: [0, 0], asignaciones: [0, 0] };
-      const porAnalista = {};
-      ev.forEach((h) => { const k = X.tipoEvento(h); g[k][1]++; if (h.punto) g[k][0]++; else { const n = h.usuario || 'sin usuario'; porAnalista[n] = (porAnalista[n] || 0) + 1; } });
-      const ing = (D.facturas || []).filter((f) => f.tipo === 'factura' && Number(X.sedeDe(f)) === id && conIngreso(f) && X.enRango(fechaCO(f.fecha_ingreso)));
-      const conPed = ing.filter((f) => (X.pedsDeFactura.get(f.cufe) || []).length).length;
-      const partes = { creados: g.creados, amarres: g.amarres, asignaciones: g.asignaciones, conPedido: [conPed, ing.length] };
-      const medidas = Object.values(partes).filter((x) => x[1] > 0);
-      if (!medidas.length) continue;
-      const prom = medidas.reduce((a, x) => a + x[0] / x[1], 0) / medidas.length;
-      out.push({ sede_id: id, nombre: s.nombre, marca_id: s.marca_id, puntaje: Math.min(100, Math.max(1, Math.round(prom * 100))), partes, porAnalista });
+      const deLaSede = (D.facturas || []).filter((f) => f.tipo === 'factura' && Number(f.sede_id) === id);
+      // 1) montar pedidos
+      const ing = deLaSede.filter((f) => conIngreso(f) && X.enRango(fechaCO(f.fecha_ingreso)));
+      let pOk = 0, sinPedido = 0; const pedAnalista = {};
+      ing.forEach((f) => {
+        const p = pedDe(f);
+        if (!p) { sinPedido++; return; }
+        if (p.subido_por == null || esPunto(p.subido_por)) { pOk++; return; }   // sin dato de quien lo monto: se le da al punto
+        const n = nombre(p.subido_por); pedAnalista[n] = (pedAnalista[n] || 0) + 1;
+      });
+      // 2) aceptacion: asignadas a la sede en el periodo
+      let aOk = 0, aTot = 0, sinSellar = 0; const aceptoOtro = {};
+      deLaSede.forEach((f) => {
+        const asig = fechaCO(f.asignada_en) || fechaCO(f.sellada_en);
+        if (!X.enRango(asig)) return;
+        const sellada = f.estado === 'sellada' || f.estado === 'pagada';
+        if (!sellada) { if (diasHabiles(asig, hoy) <= 1) return; aTot++; sinSellar++; return; }   // recien asignada: aun no cuenta
+        aTot++;
+        const porPunto = esPunto(f.sellada_por) && (f.asignada_por == null || esPunto(f.asignada_por));
+        if (porPunto) { aOk++; return; }
+        const u = !esPunto(f.sellada_por) ? f.sellada_por : f.asignada_por, n = nombre(u);
+        aceptoOtro[n] = (aceptoOtro[n] || 0) + 1;
+      });
+      const puntos = {
+        pedidos: { ok: pOk, total: ing.length, pct: ing.length ? Math.round((pOk * 100) / ing.length) : null },
+        aceptacion: { ok: aOk, total: aTot, pct: aTot ? Math.round((aOk * 100) / aTot) : null },
+      };
+      const con = PUNTOS_SEDE.filter((k) => puntos[k].pct != null);
+      if (!con.length) continue;
+      const prom = con.reduce((a, k) => a + puntos[k].pct, 0) / con.length;
+      out.push({ sede_id: id, nombre: s.nombre, marca_id: s.marca_id, puntaje: Math.min(100, Math.max(1, Math.round(prom))), puntos,
+        detalle: { sinPedido, pedAnalista, sinSellar, aceptoOtro } });
     }
     return out.sort((a, b) => a.puntaje - b.puntaje || String(a.nombre).localeCompare(String(b.nombre)));
   }
@@ -349,5 +386,5 @@
     return { desde: sumar(hoy, -29), hasta: hoy };
   }
 
-  return { PUNTOS, PESOS, NOMBRES, METAS, DIAS_ALERTA, MANUALES, pascua, festivosColombia, esFestivo, esHabil, diasHabiles, habilesEntre, siguienteHabil, primerHabilDelMes, limiteEnvio, horaCO, fechaCO, fechaListo, terminada, numPed, calcular, calcularSedes, ingresosAMano, nivel, periodo, sumar };
+  return { PUNTOS, PUNTOS_SEDE, NOMBRES_SEDE, PESOS, NOMBRES, METAS, DIAS_ALERTA, MANUALES, pascua, festivosColombia, esFestivo, esHabil, diasHabiles, habilesEntre, siguienteHabil, primerHabilDelMes, limiteEnvio, horaCO, fechaCO, fechaListo, terminada, numPed, calcular, calcularSedes, ingresosAMano, nivel, periodo, sumar };
 });

@@ -136,12 +136,13 @@ function evPintar() {
 }
 
 // un punto: su % sobre 100 (o «Sin datos»), de cuantos, y la explicacion al pasar el mouse
-function evCuadro(k, p, ayuda) {
+function evCuadro(k, p, ayuda, nombre) {
   const sin = p.pct == null, col = sin ? '#64748b' : evColor(p.pct);
+  const pie = sin ? 'no hubo movimiento' : (k === 'sedes' ? 'promedio de ' + p.sedes + ' sede(s)' : p.ok + ' de ' + p.total + (p.total < 5 ? ' · pocos datos' : ''));
   return `<div title="${escAg(ayuda || '')}" style="flex:1 1 150px;min-width:140px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:${sin ? '#f8fafc' : '#fff'}">
-    <div style="font-size:12px;line-height:1.3">${Evaluacion.NOMBRES[k]}</div>
+    <div style="font-size:12px;line-height:1.3">${nombre || Evaluacion.NOMBRES[k]}</div>
     <div style="font-size:22px;font-weight:800;color:${col};margin-top:2px">${sin ? 'Sin datos' : p.pct + '%'}</div>
-    <div class="mut" style="font-size:11px">${sin ? 'no hubo movimiento' : p.ok + ' de ' + p.total + (p.total < 5 ? ' · pocos datos' : '')}</div>
+    <div class="mut" style="font-size:11px">${pie}</div>
     ${sin ? '' : `<div style="height:6px;background:#e5e7eb;border-radius:6px;overflow:hidden;margin-top:4px"><div style="height:100%;width:${p.pct}%;background:${col}"></div></div>`}</div>`;
 }
 
@@ -153,7 +154,7 @@ function evTarjeta(r) {
     puntualidad: `De lo enviado, cuánto salió dentro del plazo: listo antes de las ${evHora(m.horaCorte)} → ese día; listo después → siguiente día hábil antes de las ${evHora(m.horaManana)}`,
     sinAsignar: `Días hábiles en que «Sin asignar» de sus marcas tuvo máximo ${m.maxSinAsignar} facturas (y 0 el primer día hábil del mes).`,
     ingresos: 'Ingresos de sus sedes que el agente terminó solo. Si el agente avisó pero lo logró en otro intento, NO cuenta como novedad; solo cuenta cuando lo tuvo que ingresar una persona.',
-    usoWeb: 'Facturas de sus sedes que llegaron con el pedido hecho por el punto en la web (si el punto no hace el pedido, baja).',
+    sedes: 'Promedio de sus sedes en lo que le toca al punto: 📋 montar los pedidos y ✅ aceptar (asignarse y sellar) sus facturas. El analista responde por hacerle seguimiento.',
     proceso: 'El analista NO debe crear pedidos, amarrar facturas ni asignarles sede: eso es del punto. Mide qué parte de eso hizo el punto y no esta persona.',
     correcciones: 'Desamarres, sellos quitados y borrados que hizo a mano, frente a los ingresos de sus sedes. (Escribir el N° de ingreso a mano NO resta: es trabajo extra por fallas del agente).',
   };
@@ -172,6 +173,8 @@ function evTarjeta(r) {
     </div>
     ${n != null && r.pocoMovimiento ? `<div style="margin-top:6px;padding:6px 10px;border-radius:8px;background:#fffbeb;border:1px solid #fcd34d;color:#92400e;font-size:12.5px">⚠️ Poco movimiento en sus sedes (solo ${r.observaciones} cosas medidas): esta calificación es poco confiable y va al final de la lista.</div>` : ''}
     ${r.sedes.length ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">${Evaluacion.PUNTOS.map((k) => evCuadro(k, r.puntos[k], ayuda[k])).join('')}</div>` : ''}
+    ${(r.sedesEval || []).length ? `<div style="margin-top:10px"><b style="font-size:13px">🏪 Sus sedes (lo que le toca al punto; el analista les hace seguimiento)</b>
+      <div style="display:grid;gap:6px;margin-top:6px">${r.sedesEval.map(evSedeFila).join('')}</div></div>` : ''}
     <div class="mut" style="margin-top:8px;display:flex;gap:4px 14px;flex-wrap:wrap">${vol.map((x) => '<span>' + x + '</span>').join('')}</div>
     <div style="margin-top:6px"><button onclick="evToggle('${r.user_id}')">${EV.abierto === r.user_id ? 'Ocultar detalle' : 'Ver detalle'}</button></div>
     ${EV.abierto === r.user_id ? evDetalle(r) : ''}
@@ -205,21 +208,33 @@ function evDetalle(r) {
 }
 
 // ---------------------------------------------------------------- sedes
+const EV_AYUDA_SEDE = {
+  pedidos: 'De las facturas ingresadas de la sede, cuántas llegaron con un pedido que MONTÓ EL PUNTO en la web (sin pedido, o con pedido montado por un analista, no cuenta).',
+  aceptacion: 'De las facturas asignadas a la sede, cuántas se asignó («Es mía») y SELLÓ el propio punto. Las que llevan más de 1 día hábil sin sellar cuentan en contra.',
+};
+// una sede: sus dos puntos de 1 a 100% y que falto (lo usan la tarjeta del analista y la pestaña Sedes)
+function evSedeFila(s) {
+  const d = s.detalle || {};
+  const quien = (o) => Object.entries(o || {}).sort((a, b) => b[1] - a[1]).map(([n, k]) => escAg(n) + ' (' + k + ')').join(' · ');
+  const faltas = [
+    d.sinPedido ? `${d.sinPedido} factura(s) llegaron SIN pedido del punto` : '',
+    Object.keys(d.pedAnalista || {}).length ? 'pedidos montados por analistas: ' + quien(d.pedAnalista) : '',
+    d.sinSellar ? `<b style="color:#b91c1c">${d.sinSellar} asignada(s) sin sellar hace más de 1 día hábil</b>` : '',
+    Object.keys(d.aceptoOtro || {}).length ? 'aceptadas por analistas: ' + quien(d.aceptoOtro) : '',
+  ].filter(Boolean);
+  return `<div style="border:1px solid var(--line);border-radius:10px;padding:8px 10px">
+    <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><b>🏪 ${escAg(evNombreSede(s.sede_id))}</b><span class="mut">${escAg(evNombreMarca(s.marca_id))}</span><span class="sp"></span>
+      <b style="font-size:18px;color:${evColor(s.puntaje)}">${s.puntaje}%</b></div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">${Evaluacion.PUNTOS_SEDE.map((k) => evCuadro(k, s.puntos[k], EV_AYUDA_SEDE[k], Evaluacion.NOMBRES_SEDE[k])).join('')}</div>
+    ${faltas.length ? '<div class="mut" style="margin-top:4px;font-size:12.5px">' + faltas.join(' · ') + '</div>' : ''}</div>`;
+}
 function evSedesHtml() {
   const l = EV.sedesRes || [];
   if (!l.length) return '<div class="vacio">No hubo movimiento de las sedes en el período.</div>';
-  const parte = (t, x) => (x[1] ? `<span>${t}: <b>${Math.round((x[0] * 100) / x[1])}%</b> <span class="mut">(${x[0]}/${x[1]})</span></span>` : `<span class="mut">${t}: —</span>`);
-  return `<div class="mut" style="margin-bottom:8px">Crear los pedidos, amarrar la factura (o tomarle la foto) y asignarse las facturas («Es mía») le toca al PUNTO, no al analista. Calificación = promedio de lo que tuvo movimiento.</div>` +
-    l.map((s) => `<div class="card" style="margin-bottom:8px">
-      <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">
-        <div style="flex:1 1 240px"><b>🏪 ${escAg(evNombreSede(s.sede_id))}</b> <span class="mut">${escAg(evNombreMarca(s.marca_id))}</span></div>
-        <div style="font-size:24px;font-weight:800;color:${evColor(s.puntaje)}">${s.puntaje}%</div>
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:4px 16px;font-size:13px;margin-top:4px">
-        ${parte('📋 Pedidos creados por el punto', s.partes.creados)}${parte('🔗 Amarres por el punto o con foto', s.partes.amarres)}
-        ${parte('🙋 Facturas asignadas por el punto', s.partes.asignaciones)}${parte('🧾 Facturas con pedido del punto', s.partes.conPedido)}</div>
-      ${Object.keys(s.porAnalista).length ? '<div class="mut" style="margin-top:4px">Lo hicieron analistas: ' + Object.entries(s.porAnalista).sort((a, b) => b[1] - a[1]).map(([u, nn]) => escAg(evNombrePersona(u)) + ' (' + nn + ')').join(' · ') + '</div>' : ''}
-    </div>`).join('');
+  const resp = new Map();
+  (((EV.datos || {}).responsables) || []).forEach((x) => { const n = evNombrePersona(x.user_id); if (!resp.has(Number(x.sede_id))) resp.set(Number(x.sede_id), []); resp.get(Number(x.sede_id)).push(n); });
+  return `<div class="mut" style="margin-bottom:8px">Cada sede se califica en sus dos responsabilidades, cada una de 1 a 100%: <b>📋 montar los pedidos</b> y <b>✅ aceptar sus facturas</b> (asignárselas y sellarlas). La calificación de la sede es el promedio de las dos.</div>` +
+    l.map((s) => `<div style="margin-bottom:8px">${evSedeFila(s)}${resp.has(s.sede_id) ? '<div class="mut" style="font-size:12px;margin:2px 4px 0">👤 Seguimiento: ' + escAg(resp.get(s.sede_id).join(', ')) + '</div>' : ''}</div>`).join('');
 }
 
 // ---------------------------------------------------------------- configuracion (metas y responsables; v3: sin pesos, cada punto va sobre 100)
