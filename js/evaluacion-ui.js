@@ -1,17 +1,21 @@
 // ============================================================
-//  evaluacion-ui.js  -  modulo «📈 Evaluacion» (solo administradores) + aviso de alertas en Facturas (16/10/2026)
+//  evaluacion-ui.js  -  modulo «📈 Evaluacion» (solo administradores) + aviso de alertas en Facturas (16/10/2026; v2 el mismo dia)
 // ============================================================
-// Calificacion de 1 a 100 por persona (calculo en js/evaluacion.js), detalle de cada punto, responsables por sede, pesos y
-// dias de alerta. Las alertas (mas de N dias habiles sin enviar a contabilidad / facturas viejas en «Sin asignar») las genera la
-// base al cargar la web (evaluacion_alertas_generar): una vez al dia manda el correo a cada responsable con copia a compras.
-// Datos: RPC evaluacion_datos (supabase/evaluacion.sql). Todos los nombres globales empiezan por ev / EV_ (no chocar con otros).
-var EV = { datos: null, res: [], periodo: '30', desde: null, hasta: null, abierto: null, config: false };
+// Pestañas: 👤 Analistas (calificacion de 1 a 100% con detalle) y 🏪 Sedes (que el punto haga lo suyo). Arriba, el % de ingresos
+// hechos a mano porque el agente no pudo. Configuracion: responsables por sede, pesos en % (suman 100) y metas (hora de corte,
+// hora de la mañana siguiente, maximo de «Sin asignar»). Las alertas las genera la base al cargar la web (evaluacion_alertas_generar):
+// una vez al dia habil manda el correo a cada responsable con copia a compras. Calculo en js/evaluacion.js.
+// Todos los nombres globales empiezan por ev / EV_ (no chocar con otros archivos).
+var EV = { datos: null, res: [], sedesRes: [], kpi: null, periodo: '30', desde: null, hasta: null, abierto: null, config: false, tab: 'analistas' };
 var EV_ALERTAS = null, EV_ALERTAS_T = 0;
 
 function evPuedeVer() { return typeof perfil !== 'undefined' && perfil && perfil.rol === 'admin'; }
 function evRolAnalista() { return typeof perfil !== 'undefined' && perfil && (perfil.rol === 'admin' || perfil.rol === 'pagos'); }
 function evFecha(d) { return d ? d.slice(8, 10) + '/' + d.slice(5, 7) : ''; }
 function evColor(n) { const v = Evaluacion.nivel(n); return v === 'bien' ? '#15803d' : v === 'medio' ? '#b45309' : v === 'mal' ? '#b91c1c' : '#64748b'; }
+function evHora(h) { h = Number(h); return (h % 12 || 12) + ':00 ' + (h < 12 ? 'a. m.' : h === 12 ? 'm.' : 'p. m.'); }
+function evMetas() { const c = (EV.datos && EV.datos.config) || {}; return { horaCorte: c.hora_corte || 17, horaManana: c.hora_manana || 12, maxSinAsignar: c.max_sin_asignar != null ? c.max_sin_asignar : 5 }; }
+function evNombrePersona(uid) { const p = (((EV.datos || {}).perfiles) || []).find((x) => x.user_id === uid); return p ? p.nombre : 'otra persona'; }
 
 // ---------------------------------------------------------------- alertas (Facturas)
 async function evAlertasCargar(forzar) {
@@ -30,23 +34,27 @@ function evMisAlertas() {
   const yo = (typeof usuario !== 'undefined' && usuario && usuario.id) || null;
   return l.filter((a) => a.user_id === yo);
 }
-function evTextoAlerta(a, dias) {
+function evTextoAlerta(a) {
+  const meta = EV_ALERTAS && EV_ALERTAS.meta_hoy != null ? EV_ALERTAS.meta_hoy : 5;
   return a.tipo === 'por_enviar'
-    ? `${escAg(a.nombre)}: <b>${a.cantidad}</b> sin enviar a contabilidad (el más viejo lleva ${a.max_dias} días hábiles)`
-    : `${escAg(a.nombre)}: <b>${a.cantidad}</b> en «Sin asignar» con más de ${dias} días hábiles (la más vieja, ${a.max_dias})`;
+    ? `📤 ${escAg(a.nombre)}: <b>${a.cantidad}</b> procesado(s) sin enviar a contabilidad${a.desde ? ' (listos desde el ' + escAg(Evaluacion.horaCO(Date.parse(a.desde))) + ')' : ''}`
+    : `🗂️ ${escAg(a.nombre)}: <b>${a.cantidad}</b> en «Sin asignar» (meta de hoy: máximo ${meta})`;
+}
+function evReglaTexto() {
+  const a = EV_ALERTAS || {}, m = EV.datos ? evMetas() : { horaCorte: a.hora_corte || 17, horaManana: a.hora_manana || 12, maxSinAsignar: a.max_sin_asignar != null ? a.max_sin_asignar : 5 };
+  return `Lo que el agente deja listo antes de las ${evHora(m.horaCorte)} se envía ese mismo día; lo que queda después, el siguiente día hábil antes de las ${evHora(m.horaManana)} «Sin asignar»: máximo ${m.maxSinAsignar} por marca y en 0 el primer día hábil del mes.`;
 }
 function evPintarAviso() {
   const caja = $('avisoEval'); if (!caja) return;
   const l = evMisAlertas();
   if (!l.length) { caja.innerHTML = ''; return; }
-  const dias = (EV_ALERTAS && EV_ALERTAS.dias_alerta) || 2;
   const porPersona = new Map();
   l.forEach((a) => { if (!porPersona.has(a.persona)) porPersona.set(a.persona, []); porPersona.get(a.persona).push(a); });
   caja.innerHTML = `<div class="card" style="border-left:5px solid #b91c1c;background:#fef2f2;margin-bottom:12px">
     <div class="row" style="gap:10px;align-items:flex-start"><div style="flex:1 1 320px">
-      <div style="font-weight:700;color:#991b1b">🚨 Alertas de hoy (más de ${dias} días hábiles, sin contar fines de semana ni festivos)</div>
-      ${[...porPersona.entries()].map(([p, as]) => `<div style="margin-top:4px">${evPuedeVer() ? '<b>' + escAg(p || '') + ':</b> ' : ''}${as.map((a) => evTextoAlerta(a, dias)).join(' · ')}</div>`).join('')}
-      <div class="mut" style="margin-top:4px">A cada responsable le llega un correo al día con esto (copia a compras).</div></div>
+      <div style="font-weight:700;color:#991b1b">🚨 Pendientes de hoy</div>
+      ${[...porPersona.entries()].map(([p, as]) => `<div style="margin-top:4px">${evPuedeVer() ? '<b>' + escAg(p || '') + ':</b> ' : ''}${as.map(evTextoAlerta).join(' · ')}</div>`).join('')}
+      <div class="mut" style="margin-top:4px">⏰ ${escAg(evReglaTexto())} A cada responsable le llega un correo al día con esto (copia a compras).</div></div>
       ${evPuedeVer() ? '<button class="s" onclick="setModulo(\'eval\')">📈 Ver evaluación</button>' : ''}</div></div>`;
 }
 
@@ -62,7 +70,10 @@ async function evCargar() {
   if (r.error) { raiz.innerHTML = '<div class="vacio">No pude cargar la evaluación: ' + escAg(r.error.message) + '</div>'; return; }
   EV.datos = r.data || {};
   const cfg = EV.datos.config || {};
-  EV.res = Evaluacion.calcular(EV.datos, { desde: EV.desde, hasta: EV.hasta, hoy, pesos: cfg.pesos, diasAlerta: cfg.dias_alerta });
+  const o = { desde: EV.desde, hasta: EV.hasta, hoy, ahora: Date.now(), pesos: cfg.pesos, metas: evMetas() };
+  EV.res = Evaluacion.calcular(EV.datos, o);
+  EV.sedesRes = Evaluacion.calcularSedes(EV.datos, o);
+  EV.kpi = Evaluacion.ingresosAMano(EV.datos, o);
   if (!EV_ALERTAS) await evAlertasCargar(true);
   evPintar();
 }
@@ -74,122 +85,168 @@ function evRango() {
 }
 function evToggle(uid) { EV.abierto = EV.abierto === uid ? null : uid; evPintar(); }
 function evToggleConfig() { EV.config = !EV.config; evPintar(); }
+function evTab(t) { EV.tab = t; EV.abierto = null; evPintar(); }
 
 function evNombreSede(id) {
   const D = EV.datos || {}, s = (D.sedes || []).find((x) => Number(x.id) === Number(id));
-  if (!s) return '#' + id;
+  if (!s) return id == null ? 'Sin sede' : '#' + id;
   const repetido = (D.sedes || []).filter((x) => x.nombre === s.nombre).length > 1;
   const m = (D.marcas || []).find((x) => Number(x.id) === Number(s.marca_id));
   return s.nombre + (repetido && m ? ' (' + m.nombre + ')' : '');
 }
+function evNombreMarca(id) { const m = (((EV.datos || {}).marcas) || []).find((x) => Number(x.id) === Number(id)); return m ? m.nombre : '#' + id; }
 
 function evPintar() {
   const raiz = $('evalRaiz'); if (!raiz) return;
   const D = EV.datos || {}, cfg = D.config || {}, pesos = Object.assign({}, Evaluacion.PESOS, cfg.pesos || {});
-  const dias = cfg.dias_alerta || Evaluacion.DIAS_ALERTA;
   const hoy = BancoUtils.hoyColombia();
   const habiles = Evaluacion.habilesEntre(EV.desde, EV.hasta > hoy ? hoy : EV.hasta).length;
   const fest = [];
   for (let y = Number(EV.desde.slice(0, 4)); y <= Number(EV.hasta.slice(0, 4)); y++) Evaluacion.festivosColombia(y).forEach((f) => { if (f.fecha >= EV.desde && f.fecha <= EV.hasta) fest.push(evFecha(f.fecha) + ' ' + f.nombre); });
   const chip = (p, t) => `<button class="chip${EV.periodo === p ? ' on' : ''}" onclick="evPeriodo('${p}')">${t}</button>`;
+  const tab = (t, txt) => `<button class="chip${EV.tab === t ? ' on' : ''}" onclick="evTab('${t}')">${txt}</button>`;
   const alertas = evMisAlertas();
+  const k = EV.kpi || { total: 0, aMano: 0, pct: 0, porSede: [] };
   raiz.innerHTML = `
     <div class="card" style="margin-bottom:12px">
       <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
-        <b style="font-size:16px">📈 Evaluación de analistas y auxiliares</b><span class="sp"></span>
+        <b style="font-size:16px">📈 Evaluación</b><span class="sp"></span>
         ${chip('semana', 'Esta semana')}${chip('mes', 'Este mes')}${chip('30', 'Últimos 30 días')}
         <input type="date" id="evDesde" value="${EV.desde}" style="width:auto;margin:0"> → <input type="date" id="evHasta" value="${EV.hasta}" style="width:auto;margin:0">
         <button class="s" onclick="evRango()">Ver</button>
-        <button onclick="evToggleConfig()">⚙️ Responsables y pesos</button>
+        <button onclick="evToggleConfig()">⚙️ Responsables, pesos y metas</button>
       </div>
-      <div class="mut" style="margin-top:6px">Del ${evFecha(EV.desde)} al ${evFecha(EV.hasta)} · ${habiles} días hábiles${fest.length ? ' · festivos: ' + escAg(fest.join(', ')) : ''} · alerta a los ${dias} días hábiles.
-        El envío a contabilidad se mide desde el 16/10/2026 (lo anterior se dio por enviado al arrancar el control).</div>
+      <div class="mut" style="margin-top:6px">Del ${evFecha(EV.desde)} al ${evFecha(EV.hasta)} · ${habiles} días hábiles${fest.length ? ' · festivos: ' + escAg(fest.join(', ')) : ''}.
+        ⏰ ${escAg(evReglaTexto())} El envío a contabilidad se mide desde el 16/10/2026.</div>
     </div>
-    ${EV.config ? evConfigHtml(pesos, dias) : ''}
-    ${alertas.length ? `<div class="card" style="border-left:5px solid #b91c1c;margin-bottom:12px"><div style="font-weight:700;color:#991b1b">🚨 Alertas de hoy</div>${alertas.map((a) => `<div style="margin-top:3px"><b>${escAg(a.persona || '')}</b> · ${evTextoAlerta(a, dias)}</div>`).join('')}</div>` : '<div class="card" style="border-left:5px solid #15803d;margin-bottom:12px">✅ Hoy no hay alertas.</div>'}
-    ${EV.res.length ? EV.res.map((r) => evTarjeta(r, pesos, dias)).join('') : '<div class="vacio">No hay administradores ni analistas activos.</div>'}`;
+    ${EV.config ? evConfigHtml(pesos) : ''}
+    <div class="card" style="margin-bottom:12px;border-left:5px solid #7c3aed">
+      <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">
+        <div style="flex:1 1 280px"><div style="font-weight:700">🤖 Ingresos hechos a mano (el agente no pudo)</div>
+          <div class="mut">${k.aMano} de ${k.total} factura(s) ingresadas en el período: el N° de ingreso lo escribió una persona y no el agente.</div></div>
+        <div style="font-size:28px;font-weight:800;color:${k.pct <= 10 ? '#15803d' : k.pct <= 25 ? '#b45309' : '#b91c1c'}">${k.pct}%</div>
+      </div>
+      ${k.porSede.length ? '<div class="mut" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 14px">' + k.porSede.slice(0, 14).map((x) => `<span>${escAg(evNombreSede(x.sede_id))}: <b>${x.pct}%</b> (${x.aMano}/${x.total})</span>`).join('') + '</div>' : ''}
+    </div>
+    ${alertas.length ? `<div class="card" style="border-left:5px solid #b91c1c;margin-bottom:12px"><div style="font-weight:700;color:#991b1b">🚨 Pendientes de hoy</div>${alertas.map((a) => `<div style="margin-top:3px"><b>${escAg(a.persona || '')}</b> · ${evTextoAlerta(a)}</div>`).join('')}</div>` : '<div class="card" style="border-left:5px solid #15803d;margin-bottom:12px">✅ Hoy no hay pendientes fuera de la meta.</div>'}
+    <div class="row" style="gap:6px;margin-bottom:10px">${tab('analistas', '👤 Analistas y auxiliares')}${tab('sedes', '🏪 Sedes (puntos)')}</div>
+    ${EV.tab === 'sedes' ? evSedesHtml() : (EV.res.length ? EV.res.map((r) => evTarjeta(r, pesos)).join('') : '<div class="vacio">No hay administradores ni analistas activos.</div>')}`;
+  if (EV.config) evSumaPesos();
 }
 
-function evBarra(nombre, val, peso, ayuda) {
-  const pct = peso > 0 ? Math.max(0, Math.min(100, (val / peso) * 100)) : 0;
+function evBarra(nombre, pct, vale, peso, ayuda) {
   const col = pct >= 85 ? '#15803d' : pct >= 70 ? '#d97706' : '#dc2626';
-  return `<div title="${escAg(ayuda || '')}" style="margin:3px 0"><div class="row" style="gap:6px;font-size:12.5px"><span>${nombre}</span><span class="sp"></span><b>${val} / ${peso}</b></div>
-    <div style="height:8px;background:#e5e7eb;border-radius:6px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${col}"></div></div></div>`;
+  return `<div title="${escAg(ayuda || '')}" style="margin:3px 0"><div class="row" style="gap:6px;font-size:12.5px"><span>${nombre}</span><span class="sp"></span><b>${pct}%</b><span class="mut">· vale ${vale} de ${peso}</span></div>
+    <div style="height:8px;background:#e5e7eb;border-radius:6px;overflow:hidden"><div style="height:100%;width:${Math.max(0, Math.min(100, pct))}%;background:${col}"></div></div></div>`;
 }
 
-function evTarjeta(r, pesos, dias) {
-  const d = r.detalle, sedes = r.sedes.map(evNombreSede);
+function evTarjeta(r, pesos) {
+  const d = r.detalle, sedes = r.sedes.map(evNombreSede), m = evMetas();
   const n = r.puntaje;
+  const suma = Object.keys(Evaluacion.PESOS).reduce((a, k) => a + Number(pesos[k] || 0), 0) || 100;
   const ayuda = {
-    envio: `De lo que quedó listo en sus sedes (ingresado y sellado), cuánto salió a contabilidad en ${dias} días hábiles o menos. Lo pendiente que ya pasó el plazo cuenta como tarde.`,
-    sinAsignar: `Días hábiles en que «Sin asignar» de sus marcas estuvo sin facturas de más de ${dias} días hábiles.`,
+    envio: `Lo procesado en sus sedes se envía a contabilidad a diario: antes de las ${evHora(m.horaCorte)} lo listo ese día; lo listo después, el siguiente día hábil antes de las ${evHora(m.horaManana)}`,
+    sinAsignar: `Días hábiles en que «Sin asignar» de sus marcas tuvo máximo ${m.maxSinAsignar} facturas (y 0 el primer día hábil del mes).`,
     ingresos: 'Ingresos de sus sedes sin novedad del agente.',
-    correcciones: 'Correcciones que hizo a mano (ingreso ERP manual, desamarres, sellos quitados, borrados) frente a los ingresos de sus sedes.',
-    proceso: 'Pedidos de sus sedes creados por el punto y amarres hechos por el punto o por la foto de la factura (no a mano por un analista).',
+    correcciones: 'Correcciones que hizo a mano (N° de ingreso escrito a mano, desamarres, sellos quitados, borrados) frente a los ingresos de sus sedes.',
+    proceso: 'El analista NO debe crear pedidos, amarrar facturas ni asignarles sede: eso es del punto. Cada vez que lo hace le resta.',
   };
   const datos = [
     `📤 Por enviar ahora: <b>${d.envio.pendientes.length}</b>${d.envio.vencidos.length ? ` (<span style="color:#b91c1c">${d.envio.vencidos.length} vencidos</span>)` : ''}`,
-    `📅 Hubo envío ${d.envio.diasConEnvio} de ${d.envio.diasHabiles} días hábiles`,
-    `🗂️ Sin asignar hoy: ${d.sinAsignar.poolHoy}${d.sinAsignar.viejasHoy ? ` (<span style="color:#b91c1c">${d.sinAsignar.viejasHoy} viejas</span>)` : ''}`,
-    `✋ Hizo a mano: ${d.proceso.yoCreo} pedido(s), ${d.proceso.yoAmarro} amarre(s), ${d.correcciones.total} corrección(es)`,
+    `📅 Envió ${d.envio.diasConEnvio} de ${d.envio.diasHabiles} días hábiles`,
+    `🗂️ Sin asignar hoy: ${d.sinAsignar.poolHoy}${d.sinAsignar.poolHoy > d.sinAsignar.metaHoy ? ' <span style="color:#b91c1c">(meta ' + d.sinAsignar.metaHoy + ')</span>' : ''}`,
+    `✋ Hizo lo del punto: ${d.proceso.yo} vez/veces`,
   ];
   return `<div class="card" style="margin-bottom:10px">
     <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">
       <div style="flex:1 1 260px"><div style="font-weight:700;font-size:15px">${escAg(r.nombre || '')} <span class="badge">${r.rol === 'pagos' ? 'Analista' : 'Administrador'}</span></div>
         <div class="mut">${sedes.length ? '📍 ' + escAg(sedes.join(', ')) : '<span style="color:#b45309">Sin sedes a cargo: asígnalas en ⚙️ para calificarlo.</span>'}</div></div>
-      <div style="text-align:center;min-width:86px"><div style="font-size:30px;font-weight:800;color:${evColor(n)}">${n == null ? '—' : n}</div><div class="mut" style="font-size:11px">de 100</div></div>
+      <div style="text-align:center;min-width:86px"><div style="font-size:30px;font-weight:800;color:${evColor(n)}">${n == null ? '—' : n + '%'}</div><div class="mut" style="font-size:11px">calificación</div></div>
     </div>
-    ${n == null ? '' : `<div style="margin-top:6px">${Object.keys(Evaluacion.PESOS).map((k) => evBarra(Evaluacion.NOMBRES[k], r.comp[k], Number(pesos[k] || 0), ayuda[k])).join('')}</div>`}
+    ${n == null ? '' : `<div style="margin-top:6px">${Object.keys(Evaluacion.PESOS).map((k) => evBarra(Evaluacion.NOMBRES[k], r.compPct[k], r.comp[k], Math.round((Number(pesos[k] || 0) * 1000) / suma) / 10, ayuda[k])).join('')}</div>`}
     <div class="mut" style="margin-top:6px;display:flex;gap:4px 14px;flex-wrap:wrap">${datos.map((x) => '<span>' + x + '</span>').join('')}</div>
     <div style="margin-top:6px"><button onclick="evToggle('${r.user_id}')">${EV.abierto === r.user_id ? 'Ocultar detalle' : 'Ver detalle'}</button></div>
-    ${EV.abierto === r.user_id ? evDetalle(r, dias) : ''}
+    ${EV.abierto === r.user_id ? evDetalle(r) : ''}
   </div>`;
 }
 
-function evDetalle(r, dias) {
-  const d = r.detalle;
-  const lista = (l, vacio) => (l.length ? '<table style="width:100%;font-size:12.5px;border-collapse:collapse">' + l.slice(0, 60).map((x) => `<tr style="border-bottom:1px solid var(--line)"><td>${escAg(x.doc || '')}</td><td>${escAg(x.emisor || '')}</td><td>listo ${evFecha(x.listo)}</td><td style="text-align:right"><b>${x.dias}</b> días háb.</td></tr>`).join('') + '</table>' + (l.length > 60 ? `<div class="mut">…y ${l.length - 60} más</div>` : '') : `<div class="mut">${vacio}</div>`);
-  const dh = Evaluacion.habilesEntre(EV.desde, EV.hasta > BancoUtils.hoyColombia() ? BancoUtils.hoyColombia() : EV.hasta);
+function evDetalle(r) {
+  const d = r.detalle, m = evMetas();
+  const fila = (x, extra) => `<tr style="border-bottom:1px solid var(--line)"><td>${escAg(x.doc || '')}</td><td>${escAg(x.emisor || '')}</td><td>listo ${escAg(x.listo)}</td><td>límite ${escAg(x.limite)}</td><td style="text-align:right">${extra || ''}</td></tr>`;
+  const tabla = (l, extra, vacio) => (l.length ? '<div style="overflow-x:auto"><table style="width:100%;font-size:12.5px;border-collapse:collapse">' + l.slice(0, 60).map((x) => fila(x, extra(x))).join('') + '</table></div>' + (l.length > 60 ? `<div class="mut">…y ${l.length - 60} más</div>` : '') : `<div class="mut">${vacio}</div>`);
+  const hoy = BancoUtils.hoyColombia();
+  const dh = Evaluacion.habilesEntre(EV.desde, EV.hasta > hoy ? hoy : EV.hasta);
   const max = Math.max(1, ...dh.map((x) => d.envio.porDia[x] || 0));
   const barras = dh.map((x) => { const v = d.envio.porDia[x] || 0; return `<div title="${evFecha(x)}: ${v} documento(s)" style="flex:1 1 0;min-width:6px;display:flex;flex-direction:column;justify-content:flex-end;height:60px"><div style="height:${Math.round((v / max) * 56) + (v ? 4 : 0)}px;background:${v ? '#1e3a8a' : '#e5e7eb'};border-radius:3px 3px 0 0;min-height:2px"></div></div>`; }).join('');
-  const alertasDias = new Set(((EV.datos || {}).alertas || []).filter((a) => a.user_id === r.user_id).map((a) => a.dia)).size;
   const porAccion = Object.entries(d.correcciones.porAccion);
+  const yp = d.proceso.yoPor;
   return `<div style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px;display:grid;gap:12px">
     <div><b>📤 Envíos a contabilidad por día hábil</b> <span class="mut">(${d.envio.aTiempo} de ${d.envio.total} a tiempo · ${d.envio.tarde.length} tarde · ${d.envio.vencidos.length} vencidos sin enviar)</span>
       <div style="display:flex;gap:2px;align-items:flex-end;margin-top:6px">${barras || '<span class="mut">Sin días hábiles en el período.</span>'}</div>
       <div class="row mut" style="font-size:11px"><span>${evFecha(dh[0])}</span><span class="sp"></span><span>${evFecha(dh[dh.length - 1])}</span></div></div>
-    <div><b>⏰ Pendientes por enviar ahora</b>${lista(d.envio.pendientes.slice().sort((a, b) => b.dias - a.dias), 'Nada pendiente.')}</div>
-    ${d.envio.tarde.length ? `<div><b>🐢 Enviados tarde (más de ${dias} días hábiles)</b>${lista(d.envio.tarde, '')}</div>` : ''}
-    <div><b>🗂️ «Sin asignar» de sus marcas</b><div class="mut">Hoy: ${d.sinAsignar.poolHoy} factura(s), ${d.sinAsignar.viejasHoy} con más de ${dias} días hábiles${d.sinAsignar.masVieja ? ' (la más vieja lleva ' + d.sinAsignar.masVieja + ')' : ''}. ${d.sinAsignar.diasMedidos ? 'Limpio ' + d.sinAsignar.diasLimpios + ' de ' + d.sinAsignar.diasMedidos + ' días medidos.' : 'Aún no hay días medidos: se califica con lo de hoy (cada factura vieja resta 2 puntos).'} Días con alerta en el período: ${alertasDias}.</div></div>
-    <div><b>🧾 Ingresos de sus sedes</b><div class="mut">${d.ingresos.total} ingreso(s) · ${d.ingresos.conNovedad} con novedad del agente · ${d.ingresos.sinPedido} factura(s) ingresadas SIN pedido del punto · ${d.ordenes} orden(es) de ingreso lanzadas por esta persona.</div>
-      ${Object.keys(d.ingresos.motivos || {}).length ? '<div class="mut" style="margin-top:3px">Novedades por motivo: ' + Object.entries(d.ingresos.motivos).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([m, n]) => escAg(m) + ' (' + n + ')').join(' · ') + '</div>' : ''}</div>
-    <div><b>✋ Correcciones a mano de esta persona</b><div class="mut">${porAccion.length ? porAccion.map(([a, n]) => escAg(a) + ': ' + n).join(' · ') : 'Ninguna en el período.'}</div></div>
-    <div><b>📋 Debido proceso en sus sedes</b><div class="mut">Pedidos creados por el punto: ${d.proceso.creadosPunto} de ${d.proceso.creados} · Amarres por el punto o por foto: ${d.proceso.amarresPunto} de ${d.proceso.amarres}. Esta persona creó ${d.proceso.yoCreo} pedido(s) y amarró a mano ${d.proceso.yoAmarro} (en cualquier sede).</div></div>
+    <div><b>⏰ Por enviar ahora</b>${tabla(d.envio.pendientes, (x) => (x.vencido ? '<b style="color:#b91c1c">VENCIDO</b>' : '<span class="mut">en plazo</span>'), 'Nada pendiente.')}</div>
+    ${d.envio.tarde.length ? `<div><b>🐢 Enviados tarde</b>${tabla(d.envio.tarde, (x) => 'enviado ' + escAg(x.enviado), '')}</div>` : ''}
+    <div><b>🗂️ «Sin asignar» de sus marcas</b><div class="mut">Hoy: ${d.sinAsignar.marcasHoy.map((x) => escAg(evNombreMarca(x.marca_id)) + ' ' + x.pool).join(' · ') || '—'} (meta de hoy: máximo ${d.sinAsignar.metaHoy}).
+      ${d.sinAsignar.diasMedidos ? 'En meta ' + d.sinAsignar.diasEnMeta + ' de ' + d.sinAsignar.diasMedidos + ' días hábiles medidos.' : 'Aún no hay días medidos: se califica con lo de hoy.'}
+      ${d.sinAsignar.diasMal.length ? ' Fuera de la meta: ' + d.sinAsignar.diasMal.slice(-10).map((x) => evFecha(x.dia) + ' (' + x.pool + '/' + x.meta + ')').join(', ') + '.' : ''}</div></div>
+    <div><b>🧾 Ingresos de sus sedes</b><div class="mut">${d.ingresos.total} ingreso(s) · ${d.ingresos.conNovedad} con novedad del agente · ${d.ingresos.aMano} hechos a mano · ${d.ingresos.sinPedido} factura(s) sin pedido del punto · ${d.ordenes} orden(es) de ingreso lanzadas por esta persona.</div>
+      ${Object.keys(d.ingresos.motivos || {}).length ? '<div class="mut" style="margin-top:3px">Novedades por motivo: ' + Object.entries(d.ingresos.motivos).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([mo, nn]) => escAg(mo) + ' (' + nn + ')').join(' · ') + '</div>' : ''}</div>
+    <div><b>✋ Correcciones a mano de esta persona</b><div class="mut">${porAccion.length ? porAccion.map(([a, nn]) => escAg(a) + ': ' + nn).join(' · ') : 'Ninguna en el período.'}</div></div>
+    <div><b>🚫 Lo que le toca al punto y lo hizo esta persona</b><div class="mut">Creó ${yp.creados} pedido(s) · amarró ${yp.amarres} factura(s) · asignó sede a ${yp.asignaciones} factura(s). En sus sedes, el punto hizo ${d.proceso.delPunto} de ${d.proceso.eventos}.</div></div>
   </div>`;
 }
 
+// ---------------------------------------------------------------- sedes
+function evSedesHtml() {
+  const l = EV.sedesRes || [];
+  if (!l.length) return '<div class="vacio">No hubo movimiento de las sedes en el período.</div>';
+  const parte = (t, x) => (x[1] ? `<span>${t}: <b>${Math.round((x[0] * 100) / x[1])}%</b> <span class="mut">(${x[0]}/${x[1]})</span></span>` : `<span class="mut">${t}: —</span>`);
+  return `<div class="mut" style="margin-bottom:8px">Crear los pedidos, amarrar la factura (o tomarle la foto) y asignarse las facturas («Es mía») le toca al PUNTO, no al analista. Calificación = promedio de lo que tuvo movimiento.</div>` +
+    l.map((s) => `<div class="card" style="margin-bottom:8px">
+      <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">
+        <div style="flex:1 1 240px"><b>🏪 ${escAg(evNombreSede(s.sede_id))}</b> <span class="mut">${escAg(evNombreMarca(s.marca_id))}</span></div>
+        <div style="font-size:24px;font-weight:800;color:${evColor(s.puntaje)}">${s.puntaje}%</div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px 16px;font-size:13px;margin-top:4px">
+        ${parte('📋 Pedidos creados por el punto', s.partes.creados)}${parte('🔗 Amarres por el punto o con foto', s.partes.amarres)}
+        ${parte('🙋 Facturas asignadas por el punto', s.partes.asignaciones)}${parte('🧾 Facturas con pedido del punto', s.partes.conPedido)}</div>
+      ${Object.keys(s.porAnalista).length ? '<div class="mut" style="margin-top:4px">Lo hicieron analistas: ' + Object.entries(s.porAnalista).sort((a, b) => b[1] - a[1]).map(([u, nn]) => escAg(evNombrePersona(u)) + ' (' + nn + ')').join(' · ') + '</div>' : ''}
+    </div>`).join('');
+}
+
 // ---------------------------------------------------------------- configuracion
-function evConfigHtml(pesos, dias) {
-  const D = EV.datos || {};
+function evConfigHtml(pesos) {
+  const D = EV.datos || {}, m = evMetas();
   const personas = (D.perfiles || []).filter((p) => p.activo !== false && (p.rol === 'admin' || p.rol === 'pagos')).sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
   const marcas = (D.marcas || []).slice().sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
   const resp = new Set((D.responsables || []).map((x) => x.user_id + '|' + x.sede_id));
   const filas = personas.map((p) => `<div style="padding:8px 0;border-bottom:1px solid var(--line)">
       <div class="row" style="gap:8px"><b>${escAg(p.nombre || '')}</b><span class="mut">${p.rol === 'pagos' ? 'Analista' : 'Administrador'}</span><span class="sp"></span><button class="s" onclick="evGuardarResp('${p.user_id}')">Guardar</button></div>
-      <div style="display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:4px">${marcas.map((m) => {
-        const ss = (D.sedes || []).filter((s) => Number(s.marca_id) === Number(m.id)).sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
-        return ss.length ? `<span><span class="mut">${escAg(m.nombre)}:</span> ${ss.map((s) => `<label style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;margin-right:8px"><input type="checkbox" data-u="${p.user_id}" data-s="${s.id}"${resp.has(p.user_id + '|' + s.id) ? ' checked' : ''} style="width:auto;margin:0">${escAg(s.nombre)}</label>`).join('')}</span>` : '';
+      <div style="display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:4px">${marcas.map((mm) => {
+        const ss = (D.sedes || []).filter((s) => Number(s.marca_id) === Number(mm.id)).sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
+        return ss.length ? `<span><span class="mut">${escAg(mm.nombre)}:</span> ${ss.map((s) => `<label style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;margin-right:8px"><input type="checkbox" data-u="${p.user_id}" data-s="${s.id}"${resp.has(p.user_id + '|' + s.id) ? ' checked' : ''} style="width:auto;margin:0">${escAg(s.nombre)}</label>`).join('')}</span>` : '';
       }).join('')}</div></div>`).join('');
-  const inp = (k) => `<label style="white-space:nowrap">${Evaluacion.NOMBRES[k]} <input type="number" min="0" max="100" id="evP_${k}" value="${Number(pesos[k] || 0)}" style="width:70px;margin:0"></label>`;
+  const inp = (k) => `<label style="white-space:nowrap">${Evaluacion.NOMBRES[k]} <input type="number" min="0" max="100" id="evP_${k}" value="${Number(pesos[k] || 0)}" oninput="evSumaPesos()" style="width:70px;margin:0"> %</label>`;
+  const num = (id, v, min, max, txt) => `<label style="white-space:nowrap">${txt} <input type="number" min="${min}" max="${max}" id="${id}" value="${v}" style="width:70px;margin:0"></label>`;
   return `<div class="card" style="margin-bottom:12px;border-left:5px solid #1e3a8a">
-    <div style="font-weight:700">👥 ¿Quién responde por cada sede?</div>
-    <div class="mut">Solo para la evaluación y las alertas: no cambia lo que cada persona puede ver. Las marcas de sus sedes son las que cuentan para «Sin asignar».</div>
-    ${filas || '<div class="mut">No hay administradores ni analistas activos.</div>'}
-    <div style="font-weight:700;margin-top:12px">⚖️ Pesos de la calificación (se reparten sobre 100)</div>
+    <div style="font-weight:700">🎯 Metas</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:6px">
+      ${num('evCorte', m.horaCorte, 6, 23, '⏰ Hora de corte del envío (0-23)')}${num('evManana', m.horaManana, 6, 23, '🌅 Al día siguiente, hasta las (0-23)')}${num('evMaxSA', m.maxSinAsignar, 0, 500, '🗂️ Máximo en «Sin asignar» por marca')}</div>
+    <div class="mut" style="margin-top:4px">Ej.: corte 17 = 5 p. m.; al día siguiente hasta las 12 = 12 m. El primer día hábil de cada mes la meta de «Sin asignar» es 0.</div>
+    <div style="font-weight:700;margin-top:12px">⚖️ Cuánto vale cada punto de la calificación (tienen que sumar 100%)</div>
     <div style="display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:6px">${Object.keys(Evaluacion.PESOS).map(inp).join('')}
-      <label style="white-space:nowrap">Alerta a los <input type="number" min="1" max="15" id="evDias" value="${dias}" style="width:60px;margin:0"> días hábiles</label>
-      <button class="p" onclick="evGuardarPesos()">Guardar pesos</button></div>
-    <div class="mut" id="evCfgRes" style="margin-top:6px"></div></div>`;
+      <b id="evSuma"></b></div>
+    <div style="margin-top:8px"><button class="p" onclick="evGuardarPesos()">💾 Guardar metas y pesos</button> <span class="mut" id="evCfgRes"></span></div>
+    <div style="font-weight:700;margin-top:14px">👥 ¿Quién responde por cada sede?</div>
+    <div class="mut">Solo para la evaluación y las alertas: no cambia lo que cada persona puede ver. Las marcas de sus sedes cuentan para «Sin asignar».</div>
+    ${filas || '<div class="mut">No hay administradores ni analistas activos.</div>'}
+  </div>`;
+}
+function evLeerPesos() { const p = {}; Object.keys(Evaluacion.PESOS).forEach((k) => { p[k] = Number(($('evP_' + k) || {}).value || 0); }); return p; }
+function evSumaPesos() {
+  const s = Object.values(evLeerPesos()).reduce((a, b) => a + b, 0), el = $('evSuma');
+  if (el) { el.textContent = 'Suma: ' + s + '%' + (s === 100 ? ' ✅' : ' ⚠️ debe ser 100%'); el.style.color = s === 100 ? '#15803d' : '#b91c1c'; }
+  return s;
 }
 async function evGuardarResp(uid) {
   const sedes = [...document.querySelectorAll('#evalRaiz input[data-u="' + uid + '"]')].filter((x) => x.checked).map((x) => Number(x.getAttribute('data-s')));
@@ -198,9 +255,12 @@ async function evGuardarResp(uid) {
   await evCargar(); await evAlertasCargar(true);
 }
 async function evGuardarPesos() {
-  const p = {}; Object.keys(Evaluacion.PESOS).forEach((k) => { p[k] = Number(($('evP_' + k) || {}).value || 0); });
-  const dias = Number(($('evDias') || {}).value || 0);
-  const r = await SB.rpc('evaluacion_config_guardar', { p_pesos: p, p_dias: dias, p_usuario: (perfil && perfil.nombre) || null });
-  if (r.error) { const c = $('evCfgRes'); if (c) c.textContent = 'No se pudo: ' + r.error.message; return; }
+  const p = evLeerPesos(), res = $('evCfgRes');
+  const suma = Object.values(p).reduce((a, b) => a + b, 0);
+  if (suma !== 100) { if (res) res.textContent = '⚠️ Los pesos suman ' + suma + '%: tienen que sumar 100%.'; alert('Los pesos suman ' + suma + '%: tienen que sumar 100%.'); return; }
+  const r = await SB.rpc('evaluacion_config_guardar', { p_pesos: p, p_dias: null, p_usuario: (perfil && perfil.nombre) || null,
+    p_hora_corte: Number(($('evCorte') || {}).value), p_hora_manana: Number(($('evManana') || {}).value), p_max_sin_asignar: Number(($('evMaxSA') || {}).value) });
+  if (r.error) { if (res) res.textContent = 'No se pudo: ' + r.error.message; return; }
   await evCargar(); await evAlertasCargar(true);
+  const r2 = $('evCfgRes'); if (r2) r2.textContent = '✅ Guardado.';
 }
