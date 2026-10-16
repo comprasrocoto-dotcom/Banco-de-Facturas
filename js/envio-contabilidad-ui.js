@@ -7,10 +7,10 @@
 // deshacer un lote marcado por error. Logica pura en js/envio-contabilidad.js; tablas en supabase/envio_contabilidad.sql.
 var CONT_ENV = new Map(), CONT_LOTES = [], CONT_OK = false;
 
-function envioPuede() { return typeof perfil !== 'undefined' && perfil && (perfil.rol === 'admin' || perfil.rol === 'pagos'); }
+function contEnvioPuede() { return typeof perfil !== 'undefined' && perfil && (perfil.rol === 'admin' || perfil.rol === 'pagos'); }
 
 async function cargarEnvioContabilidad() {
-  if (!envioPuede() || typeof EnvioContabilidad === 'undefined') return;
+  if (!contEnvioPuede() || typeof EnvioContabilidad === 'undefined') return;
   try {
     const r = await SB.from('contabilidad_envio').select('factura_cufe,lote_id,enviada_en').limit(20000);
     if (r.error) { CONT_OK = false; return; }   // base sin las tablas: no se muestra nada
