@@ -333,25 +333,26 @@
       const deLaSede = (D.facturas || []).filter((f) => f.tipo === 'factura' && Number(f.sede_id) === id);
       // 1) montar pedidos
       const ing = deLaSede.filter((f) => conIngreso(f) && X.enRango(fechaCO(f.fecha_ingreso)));
-      let pOk = 0, sinPedido = 0; const pedAnalista = {};
+      let pOk = 0, sinPedido = 0; const pedAnalista = {}, docsSinPedido = [], docsPedAnalista = [];
+      const docF = (f) => ({ doc: ((f.prefijo || '') + (f.folio || '')) || String(f.cufe || '').slice(0, 10), emisor: f.emisor || '', fecha: fechaCO(f.fecha_ingreso) || fechaCO(f.sellada_en) || '' });
       ing.forEach((f) => {
         const p = pedDe(f);
-        if (!p) { sinPedido++; return; }
+        if (!p) { sinPedido++; docsSinPedido.push(docF(f)); return; }
         if (p.subido_por == null || esPunto(p.subido_por)) { pOk++; return; }   // sin dato de quien lo monto: se le da al punto
-        const n = nombre(p.subido_por); pedAnalista[n] = (pedAnalista[n] || 0) + 1;
+        const n = nombre(p.subido_por); pedAnalista[n] = (pedAnalista[n] || 0) + 1; docsPedAnalista.push(Object.assign(docF(f), { quien: n, pedido: p.numero }));
       });
       // 2) aceptacion: asignadas a la sede en el periodo
-      let aOk = 0, aTot = 0, sinSellar = 0; const aceptoOtro = {};
+      let aOk = 0, aTot = 0, sinSellar = 0; const aceptoOtro = {}, docsSinSellar = [], docsAceptoOtro = [];
       deLaSede.forEach((f) => {
         const asig = fechaCO(f.asignada_en) || fechaCO(f.sellada_en);
         if (!X.enRango(asig)) return;
         const sellada = f.estado === 'sellada' || f.estado === 'pagada';
-        if (!sellada) { if (diasHabiles(asig, hoy) <= 1) return; aTot++; sinSellar++; return; }   // recien asignada: aun no cuenta
+        if (!sellada) { if (diasHabiles(asig, hoy) <= 1) return; aTot++; sinSellar++; docsSinSellar.push(Object.assign(docF(f), { asignada: asig, dias: diasHabiles(asig, hoy) })); return; }   // recien asignada: aun no cuenta
         aTot++;
         const porPunto = esPunto(f.sellada_por) && (f.asignada_por == null || esPunto(f.asignada_por));
         if (porPunto) { aOk++; return; }
         const u = !esPunto(f.sellada_por) ? f.sellada_por : f.asignada_por, n = nombre(u);
-        aceptoOtro[n] = (aceptoOtro[n] || 0) + 1;
+        aceptoOtro[n] = (aceptoOtro[n] || 0) + 1; docsAceptoOtro.push(Object.assign(docF(f), { quien: n }));
       });
       const puntos = {
         pedidos: { ok: pOk, total: ing.length, pct: ing.length ? Math.round((pOk * 100) / ing.length) : null },
@@ -361,7 +362,7 @@
       if (!con.length) continue;
       const prom = con.reduce((a, k) => a + puntos[k].pct, 0) / con.length;
       out.push({ sede_id: id, nombre: s.nombre, marca_id: s.marca_id, puntaje: Math.min(100, Math.max(1, Math.round(prom))), puntos,
-        detalle: { sinPedido, pedAnalista, sinSellar, aceptoOtro } });
+        detalle: { sinPedido, pedAnalista, sinSellar, aceptoOtro, docsSinPedido, docsPedAnalista, docsSinSellar: docsSinSellar.sort((a, b) => b.dias - a.dias), docsAceptoOtro } });
     }
     return out.sort((a, b) => a.puntaje - b.puntaje || String(a.nombre).localeCompare(String(b.nombre)));
   }
