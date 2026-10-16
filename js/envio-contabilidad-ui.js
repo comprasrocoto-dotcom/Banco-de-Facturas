@@ -110,6 +110,7 @@ function contPrepHtml(p) {
 }
 
 function contPrepIniciar() {
+  if (!CONT_OK) { alert('Aún se está cargando lo que ya se envió a contabilidad. Espera un momento y vuelve a intentar.'); return; }   // sin eso, saldrian tambien los ya enviados
   const p = contPendientes(); if (!p.lista.length) return;
   CONT_PREP = EnvioContabilidad.preparar(p.lista); contPrepGuardar(); contPrepRefrescar();
 }
