@@ -35,6 +35,12 @@
     return out;
   }
 
+  // (15/10/2026) destinos donde el articulo AUN NO esta (los que ya lo tienen no se ofrecen en «Copiar a»)
+  function faltantes(destinosLista, ya) {
+    const tiene = new Set((ya || []).map((y) => Number(y.id)));
+    return (destinosLista || []).filter((d) => !tiene.has(Number(d.id)));
+  }
+
   // valida el codigo en la lista destino -> { ok, codigo, error }
   function validar(codigo, destino, general, marcaArts) {
     const c = codigoNorm(codigo), d = Number(destino) || 0;
@@ -54,5 +60,5 @@
     return { tabla: 'marca_articulo', datos: { marca_id: d, codigo_barras: codigo, articulo: nombre, unidad_compra: unidad, subfamilia: sub ? sub.toUpperCase() : null } };
   }
 
-  return { esGeneral, nombreNorm, codigoNorm, destinos, dondeEsta, validar, fila };
+  return { esGeneral, nombreNorm, codigoNorm, destinos, dondeEsta, faltantes, validar, fila };
 });
