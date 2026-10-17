@@ -195,6 +195,7 @@ tr:hover td{background:#f1f5f9}
     <button class="chip"  id="m-precios" style="display:none" onclick="setModulo('precios')">💲 Precios</button>
     <button class="chip"  id="m-hiopos" style="display:none" onclick="setModulo('hiopos')">📊 Organizador Hiopos</button>
     <button class="chip"  id="m-eval" style="display:none" onclick="setModulo('eval')">📈 Evaluación</button>
+    <button class="chip"  id="m-tareas" style="display:none" onclick="setModulo('tareas')">📝 Tareas</button>
     <button class="chip"  id="m-admin" style="display:none" onclick="setModulo('admin')">⚙️ Admin</button>
     <span id="sede" class="badge"></span>
     <select id="fSede" style="width:auto;margin:0;display:none" onchange="cambiarFiltroSede()">
@@ -253,6 +254,7 @@ tr:hover td{background:#f1f5f9}
     <div id="vistaPrecios" style="display:none"><div id="preciosRaiz"></div></div>
     <div id="vistaHiopos" style="display:none"><div id="hioposRaiz"></div></div>
     <div id="vistaEval" style="display:none"><div id="evalRaiz"></div></div>
+    <div id="vistaTareas" style="display:none"><div id="tareasRaiz"></div></div>
     <div id="vistaAdmin" style="display:none">
       <div class="row" style="margin-bottom:14px">
         <button class="chip on" id="ad-prov" onclick="setAdmin('prov')">Proveedores</button>
@@ -395,6 +397,8 @@ tr:hover td{background:#f1f5f9}
 <script src="js/evaluacion-proveedores.js"></script>
 <script src="js/evaluacion-proveedores-ui.js"></script>
 <script src="js/evaluacion-informe-sede.js"></script>
+<script src="js/tareas.js"></script>
+<script src="js/tareas-ui.js"></script>
 <script src="js/organizador-hiopos.js"></script>
 <script src="js/hoja-contable.js"></script>
 <script src="js/hoja-contable-ui.js"></script>
@@ -432,7 +436,7 @@ async function sesion(u){
   try{ pintarBotonManual(); }catch(e){}     // 📖 Manual: solo si su perfil tiene algun manual habilitado
   if(perfil.debe_cambiar_clave) await exigirCambioClave();     // contraseña temporal: hay que cambiarla antes de seguir
   const s=perfil.sedes; let sedeFija=null;
-  if(perfil.rol==="admin"||perfil.rol==="pagos"){$("btnsubir").style.display="inline-block";$("barraDescarga").style.display="flex";$("m-hiopos").style.display="inline-block";$("m-cruce").style.display="inline-block";$("m-precios").style.display="inline-block";}
+  if(perfil.rol==="admin"||perfil.rol==="pagos"){if($("m-tareas")) $("m-tareas").style.display="inline-block";$("btnsubir").style.display="inline-block";$("barraDescarga").style.display="flex";$("m-hiopos").style.display="inline-block";$("m-cruce").style.display="inline-block";$("m-precios").style.display="inline-block";}
   if(perfil.rol==="admin"){ $("m-admin").style.display="inline-block"; $("btnIngresos").style.display="inline-block"; if($("m-eval")) $("m-eval").style.display="inline-block"; }
   const {data:ss}=await SB.from("sedes").select("id,nombre,marca_id,marcas(nombre)").order("nombre");
   sedes=ss||[];
@@ -1889,6 +1893,10 @@ function setModulo(m){
   if($("m-eval")) $("m-eval").classList.toggle("on",m=="eval");
   if($("vistaEval")) $("vistaEval").style.display = (m=="eval")?"block":"none";
   if(m=="eval" && typeof evAbrir==="function") evAbrir();
+  // (16/10/2026) Tareas de los analistas (administrador y analistas)
+  if($("m-tareas")) $("m-tareas").classList.toggle("on",m=="tareas");
+  if($("vistaTareas")) $("vistaTareas").style.display = (m=="tareas")?"block":"none";
+  if(m=="tareas" && typeof tarAbrir==="function") tarAbrir();
 }
 function toggleFiltros(which){
   const panel=$("panelFiltros"+which), btn=$("btnFiltros"+which);
@@ -2988,7 +2996,8 @@ async function cargar(){
   await cargarNotaLinks();   // notas credito amarradas a sus facturas (si falla, todo sigue igual)
   if(typeof cargarEnvioContabilidad==="function") await cargarEnvioContabilidad();   // (16/10/2026) que ya se envio a contabilidad
   pintar();
-  if(typeof evAlertasCargar==="function") evAlertasCargar().catch(()=>{});   // (16/10/2026) alertas de la evaluacion (y el correo diario)
+  if(typeof evAlertasCargar==="function") evAlertasCargar().catch(()=>{});
+  if(typeof tarContarAlEntrar==="function" && typeof TAR!=="undefined" && !TAR.cargado) tarContarAlEntrar().catch(()=>{});   // (16/10/2026) numero de tareas abiertas en el menu   // (16/10/2026) alertas de la evaluacion (y el correo diario)
   if(!pedidosCargados && typeof cargarPedidos==="function") cargarPedidos().then(()=>pintar()).catch(()=>{});   // para saber la sede de las Sin asignar
 }
 async function cambiarFiltroSede(){

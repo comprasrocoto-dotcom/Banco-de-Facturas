@@ -69,6 +69,7 @@ async function evCargar() {
   const r = await SB.rpc('evaluacion_datos', { p_desde: EV.desde, p_hasta: EV.hasta });
   if (r.error) { raiz.innerHTML = '<div class="vacio">No pude cargar la evaluación: ' + escAg(r.error.message) + '</div>'; return; }
   EV.datos = r.data || {};
+  try { const t = await SB.from('tarea').select('asignada_a,titulo,tipo,fecha_limite,estado,terminada_en,sede_id').limit(5000); EV.datos.tareas = (t && t.data) || []; } catch (e) { EV.datos.tareas = []; }   // (16/10/2026) tareas asignadas
   const cfg = EV.datos.config || {};
   const o = { desde: EV.desde, hasta: EV.hasta, hoy, ahora: Date.now(), pesos: cfg.pesos, metas: evMetas() };
   EV.res = Evaluacion.calcular(EV.datos, o);
@@ -157,6 +158,7 @@ function evTarjeta(r) {
     ingresos: 'Ingresos de sus sedes que el agente terminó solo. Si el agente avisó pero lo logró en otro intento, NO cuenta como novedad; solo cuenta cuando lo tuvo que ingresar una persona.',
     sedes: 'Promedio de sus sedes en lo que le toca al punto: 📋 montar los pedidos y ✅ aceptar (asignarse y sellar) sus facturas. El analista responde por hacerle seguimiento.',
     proceso: 'El analista NO debe crear pedidos, amarrar facturas ni asignarles sede: eso es del punto. Mide qué parte de eso hizo el punto y no esta persona.',
+    tareas: 'De las tareas asignadas que vencían en el período (inventarios, visitas, capacitaciones…), cuántas terminó a más tardar en su fecha de cumplimiento.',
     correcciones: 'Desamarres, sellos quitados y borrados que hizo a mano, frente a los ingresos de sus sedes. (Escribir el N° de ingreso a mano NO resta: es trabajo extra por fallas del agente).',
   };
   const vol = [
@@ -203,6 +205,7 @@ function evDetalle(r) {
       ${d.sinAsignar.diasMal.length ? ' Fuera de la meta: ' + d.sinAsignar.diasMal.slice(-10).map((x) => evFecha(x.dia) + ' (' + x.pool + '/' + x.meta + ')').join(', ') + '.' : ''}</div></div>
     <div><b>🧾 Ingresos de sus sedes</b><div class="mut">${d.ingresos.total} ingreso(s) · ${d.ingresos.conNovedad} con novedad que tuvo que resolver una persona · ${d.ingresos.resueltasAgente} con aviso que el agente resolvió solo en otro intento · ${d.ingresos.aMano} hechos a mano · ${d.ingresos.conPedido} de ${d.ingresos.facturas} factura(s) con pedido del punto.</div>
       ${Object.keys(d.ingresos.motivos || {}).length ? '<div class="mut" style="margin-top:3px">Novedades por motivo: ' + Object.entries(d.ingresos.motivos).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([mo, nn]) => escAg(mo) + ' (' + nn + ')').join(' · ') + '</div>' : ''}</div>
+    ${(d.tareas && d.tareas.total) ? `<div><b>📝 Tareas asignadas</b><div class="mut">${d.tareas.aTiempo} de ${d.tareas.total} a tiempo${d.tareas.tarde.length ? ' · terminadas tarde: ' + d.tareas.tarde.map((x) => escAg(x.titulo) + ' (vencía ' + evFecha(x.fecha) + ')').join(', ') : ''}${d.tareas.vencidas.length ? ' · <span style="color:#b91c1c">vencidas sin terminar: ' + d.tareas.vencidas.map((x) => escAg(x.titulo) + ' (' + evFecha(x.fecha) + ')').join(', ') + '</span>' : ''}</div></div>` : ''}
     <div><b>✋ Correcciones a mano de esta persona</b><div class="mut">${porAccion.length ? porAccion.map(([a, nn]) => escAg(a) + ': ' + nn).join(' · ') : 'Ninguna en el período.'}</div></div>
     <div><b>🚫 Lo que le toca al punto y lo hizo esta persona</b><div class="mut">Creó ${yp.creados} pedido(s) · amarró ${yp.amarres} factura(s) · asignó sede a ${yp.asignaciones} factura(s). En sus sedes, el punto hizo ${d.proceso.delPunto} de ${d.proceso.eventos}.</div></div>
   </div>`;

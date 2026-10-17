@@ -24,10 +24,10 @@
   // (16/10/2026 v3, pedido del usuario: "cada punto deberia calificarse sobre 100, de manera individual") cada punto va de 0 a
   // 100% por separado; la calificacion general es el PROMEDIO de los puntos que tienen datos (sin pesos). Un punto sin datos
   // dice «Sin datos» y no cuenta (antes valia 100% y premiaba a quien tenia poco movimiento).
-  const PUNTOS = ['cumplimiento', 'puntualidad', 'sinAsignar', 'ingresos', 'sedes', 'proceso', 'correcciones'];
+  const PUNTOS = ['cumplimiento', 'puntualidad', 'sinAsignar', 'ingresos', 'sedes', 'proceso', 'correcciones', 'tareas'];
   const NOMBRES = {
     cumplimiento: '📤 Cumplimiento del envío a contabilidad', puntualidad: '⏰ Puntualidad del envío', sinAsignar: '🗂️ «Sin asignar» dentro de la meta',
-    ingresos: '🧾 Ingresos sin revisión humana', sedes: '🏪 Sus sedes cumplen (pedidos y aceptación)', proceso: '🚫 No hace lo que le toca al punto', correcciones: '✋ Pocas correcciones a mano',
+    ingresos: '🧾 Ingresos sin revisión humana', sedes: '🏪 Sus sedes cumplen (pedidos y aceptación)', proceso: '🚫 No hace lo que le toca al punto', correcciones: '✋ Pocas correcciones a mano', tareas: '📝 Tareas a tiempo',
   };
   const PESOS = { envio: 30, sinAsignar: 20, ingresos: 20, correcciones: 15, proceso: 15 };   // (v2; solo para guardar la configuracion)
   const METAS = { horaCorte: 17, horaManana: 12, maxSinAsignar: 5 };
@@ -273,6 +273,12 @@
       const ingFact = ingresos.filter((f) => f.tipo === 'factura');
       const conPedido = ingFact.filter((f) => (X.pedsDeFactura.get(f.cufe) || []).length).length;
 
+      // 7) tareas asignadas (16/10/2026): de las que vencian en el periodo (o ya se terminaron), cuantas termino a mas tardar en su fecha
+      const fechaT = (t) => String(t.fecha_limite || '').slice(0, 10);
+      const misTareas = (D.tareas || []).filter((t) => t.asignada_a === p.user_id && t.estado !== 'cancelada' && X.enRango(fechaT(t)) && (fechaT(t) < hoy || t.estado === 'terminada'));
+      const tATiempo = (t) => t.estado === 'terminada' && !!fechaCO(t.terminada_en) && fechaCO(t.terminada_en) <= fechaT(t);
+      const tOk = misTareas.filter(tATiempo).length;
+
       // cada punto: [bien, de cuantos] -> % de 0 a 100, o null = «Sin datos»
       const base = {
         cumplimiento: [enviados, enviados + vencidos.length],
@@ -282,6 +288,7 @@
         sedes: [0, 0],   // se reemplaza abajo por el promedio de sus sedes
         proceso: [Math.max(0, den - yo.length), den],
         correcciones: [Math.max(0, ingresos.length - manuales.length), ingresos.length],
+        tareas: [tOk, misTareas.length],
       };
       const puntos = {};
       PUNTOS.forEach((k) => { const [ok, t] = base[k]; puntos[k] = { ok, total: t, pct: t > 0 ? Math.max(0, Math.min(100, Math.round((ok * 100) / t))) : null }; });
@@ -305,6 +312,7 @@
           correcciones: { total: manuales.length, porAccion: manuales.reduce((m, h) => { m[h.accion] = (m[h.accion] || 0) + 1; return m; }, {}) },
           proceso: { eventos: enSusSedes.length, delPunto: enSusSedes.filter((h) => h.punto).length, yo: yo.length, yoPor },
           ordenes: ordenes.length,
+          tareas: { total: misTareas.length, aTiempo: tOk, tarde: misTareas.filter((t) => t.estado === 'terminada' && !tATiempo(t)).map((t) => ({ titulo: t.titulo, fecha: fechaT(t), terminada: fechaCO(t.terminada_en) })), vencidas: misTareas.filter((t) => t.estado !== 'terminada').map((t) => ({ titulo: t.titulo, fecha: fechaT(t), estado: t.estado })) },
         },
       };
     }).sort((a, b) => (a.puntaje == null) - (b.puntaje == null) || (!!a.pocoMovimiento - !!b.pocoMovimiento) || (b.puntaje || 0) - (a.puntaje || 0) || String(a.nombre).localeCompare(String(b.nombre)));
