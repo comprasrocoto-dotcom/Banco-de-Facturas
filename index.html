@@ -1879,6 +1879,7 @@ function setModulo(m){
   $("filtrosFacturas").style.display = (m=="banco")?"block":"none";
   $("barraDescarga").style.display = (m=="banco" && can("facturas.subir"))?"flex":"none";
   $("lista").style.display = (m=="banco")?"block":"none";
+  ["avisoSinSellar","avisoEval","panelEnvio"].forEach(id=>{ const e=$(id); if(e) e.style.display=(m=="banco")?"":"none"; });   // (16/10/2026) avisos de Facturas solo en Facturas
   $("vistaPedidos").style.display = (m=="pedidos")?"block":"none";
   if(m=="pedidos" && !pedidosCargados) cargarPedidos();
   $("vistaAdmin").style.display = (m=="admin")?"block":"none";
