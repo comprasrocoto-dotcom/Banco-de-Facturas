@@ -138,6 +138,7 @@ async function tarCrear() {
       p_sede: sede ? Number(sede) : null, p_fecha_limite: fecha, p_usuario: tarUsuario() });
     if (r.error) { if (res) res.textContent = 'No se pudo: ' + r.error.message; return; }
     TAR.form = false; await tarCargar(); tarPintar();
+    if (typeof csEnviarCola === 'function') csEnviarCola(true);   // el correo sale ya desde el servidor
     alert('✅ Tarea asignada a ' + r.data + ' persona(s). A cada una le llega un correo.');
   } finally { TAR.ocupado = false; }
 }

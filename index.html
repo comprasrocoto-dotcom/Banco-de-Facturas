@@ -399,6 +399,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/evaluacion-informe-sede.js"></script>
 <script src="js/tareas.js"></script>
 <script src="js/tareas-ui.js"></script>
+<script src="js/correo-servidor.js"></script>
 <script src="js/organizador-hiopos.js"></script>
 <script src="js/hoja-contable.js"></script>
 <script src="js/hoja-contable-ui.js"></script>
@@ -2997,6 +2998,7 @@ async function cargar(){
   await cargarNotaLinks();   // notas credito amarradas a sus facturas (si falla, todo sigue igual)
   if(typeof cargarEnvioContabilidad==="function") await cargarEnvioContabilidad();   // (16/10/2026) que ya se envio a contabilidad
   pintar();
+  if(typeof csIniciar==="function") csIniciar();   // (16/10/2026) el servidor manda los correos de la cola (sin depender del vigilante)
   if(typeof evAlertasCargar==="function") evAlertasCargar().catch(()=>{});
   if(typeof tarContarAlEntrar==="function" && typeof TAR!=="undefined" && !TAR.cargado) tarContarAlEntrar().catch(()=>{});   // (16/10/2026) numero de tareas abiertas en el menu   // (16/10/2026) alertas de la evaluacion (y el correo diario)
   if(!pedidosCargados && typeof cargarPedidos==="function") cargarPedidos().then(()=>pintar()).catch(()=>{});   // para saber la sede de las Sin asignar

@@ -25,6 +25,7 @@ async function evAlertasCargar(forzar) {
     const r = await SB.rpc('evaluacion_alertas_generar');
     if (r.error) return;   // base sin la funcion: no se muestra nada
     EV_ALERTAS = r.data || null; EV_ALERTAS_T = Date.now();
+    if (typeof csEnviarCola === 'function') csEnviarCola(true);   // si se encolo el correo de alertas, que salga ya
   } catch (e) { return; }
   evPintarAviso();
 }
