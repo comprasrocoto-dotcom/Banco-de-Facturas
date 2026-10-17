@@ -235,7 +235,8 @@ function evSedesHtml() {
   const resp = new Map();
   (((EV.datos || {}).responsables) || []).forEach((x) => { const n = evNombrePersona(x.user_id); if (!resp.has(Number(x.sede_id))) resp.set(Number(x.sede_id), []); resp.get(Number(x.sede_id)).push(n); });
   return `<div class="mut" style="margin-bottom:8px">Cada sede se califica en sus dos responsabilidades, cada una de 1 a 100%: <b>📋 montar los pedidos</b> y <b>✅ aceptar sus facturas</b> (asignárselas y sellarlas). La calificación de la sede es el promedio de las dos.</div>` +
-    l.map((s) => `<div style="margin-bottom:8px">${evSedeFila(s)}${resp.has(s.sede_id) ? '<div class="mut" style="font-size:12px;margin:2px 4px 0">👤 Seguimiento: ' + escAg(resp.get(s.sede_id).join(', ')) + '</div>' : ''}</div>`).join('');
+    (typeof evInfTodas === 'function' ? '<div style="margin-bottom:10px"><button class="p" id="btnInfTodas" onclick="evInfTodas()">⬇ Informes de todas las sedes (ZIP)</button> <span class="mut">un PDF por sede, para enviarle a cada una su cumplimiento</span></div>' : '') +
+    l.map((s) => `<div style="margin-bottom:8px">${evSedeFila(s)}<div class="row mut" style="font-size:12px;margin:3px 4px 0;gap:8px;align-items:center">${resp.has(s.sede_id) ? '<span>👤 Seguimiento: ' + escAg(resp.get(s.sede_id).join(', ')) + '</span>' : ''}<span class="sp"></span>${typeof evInfSede === 'function' ? '<button class="s" style="padding:3px 10px" onclick="evInfSede(' + s.sede_id + ')">⬇ Informe PDF</button>' : ''}</div></div>`).join('');
 }
 
 // ---------------------------------------------------------------- configuracion (metas y responsables; v3: sin pesos, cada punto va sobre 100)

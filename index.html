@@ -394,6 +394,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/evaluacion-ui.js"></script>
 <script src="js/evaluacion-proveedores.js"></script>
 <script src="js/evaluacion-proveedores-ui.js"></script>
+<script src="js/evaluacion-informe-sede.js"></script>
 <script src="js/organizador-hiopos.js"></script>
 <script src="js/hoja-contable.js"></script>
 <script src="js/hoja-contable-ui.js"></script>
@@ -3074,7 +3075,10 @@ function badgeSinSellar(f){
 function pintar(){
   // (13/10/2026) filtros MULTIPLES: tipo de documento, categoria y sede (vacio = todos). Por defecto Facturas + Cuentas de cobro
   const esDelTipo=f=>FiltroMultiple.permite(FM_SEL.fmTipo,f.tipo);
-  const base=facturas.filter(f=>esDelTipo(f)&&FiltroMultiple.permite(FM_SEL.fmCat,f.categoria)&&sedeOk(f.sede_id));
+  // (16/10/2026) en «Sin asignar» las facturas SIN sede se ven siempre (con filtro de sede o analista de una sola sede): los
+  // analistas les hacen seguimiento. Antes el filtro de sede las escondia porque no tienen sede.
+  const sinSedeVisible=f=>vista=="pool"&&(f.sede_id==null||f.sede_id==="");
+  const base=facturas.filter(f=>esDelTipo(f)&&FiltroMultiple.permite(FM_SEL.fmCat,f.categoria)&&(sedeOk(f.sede_id)||sinSedeVisible(f)));
   let l=base;
   panelSinSellar(base);
   if(vista=="listas")   l=SinSellar.ordenar(sinSellarVisibles(base).filter(f=>listasSede==null||sedeListaKey(f)===listasSede));
