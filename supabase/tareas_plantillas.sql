@@ -85,7 +85,7 @@ begin
                else v_cant || ' tareas nuevas: ' || btrim(p_titulo) || ' · del ' || to_char(v_fechas[1], 'DD/MM') || ' al ' || to_char(v_fechas[v_cant], 'DD/MM') end,
         '👋 Hola ' || v_nombre || E',\n\nTe asignaron ' || case when v_cant = 1 then 'una tarea' else v_cant || ' tareas' end || E' en el Banco de Facturas:\n\n' ||
         v_tipo || ': ' || btrim(p_titulo) ||
-        coalesce(E'\n🏪 Sede: ' || (select nombre from sedes where id = p_sede), '') ||
+        coalesce(E'\n🏪 Sede: ' || (select s.nombre || coalesce(' · ' || m.nombre, '') from sedes s left join marcas m on m.id = s.marca_id where s.id = p_sede), '') ||
         E'\n📅 ' || case when v_cant = 1 then 'Fecha de cumplimiento:' else 'Fechas de cumplimiento (una tarea por día):' end || E'\n' || v_lista ||
         coalesce(E'\n\n📋 Resumen:\n' || nullif(btrim(coalesce(p_descripcion, '')), ''), '') ||
         coalesce(E'\n\n✅ Actividades (márcalas en la web a medida que las hagas):\n' || v_acts_txt, '') ||
