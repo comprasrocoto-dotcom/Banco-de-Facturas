@@ -16,7 +16,14 @@ function tarHoy() { return typeof BancoUtils !== 'undefined' ? BancoUtils.hoyCol
 function tarFecha(d) { return d ? String(d).slice(8, 10) + '/' + String(d).slice(5, 7) + '/' + String(d).slice(0, 4) : ''; }
 function tarHora(ts) { if (!ts) return ''; const d = new Date(Date.parse(ts) - 5 * 3600000); const h = d.getUTCHours(); return String(d.getUTCDate()).padStart(2, '0') + '/' + String(d.getUTCMonth() + 1).padStart(2, '0') + ' ' + (h % 12 || 12) + ':' + String(d.getUTCMinutes()).padStart(2, '0') + (h < 12 ? ' a. m.' : ' p. m.'); }
 function tarNombre(uid) { const p = TAR.personas.find((x) => x.user_id === uid); return p ? p.nombre : (typeof perfil !== 'undefined' && perfil && typeof usuario !== 'undefined' && usuario && usuario.id === uid ? perfil.nombre : ''); }
-function tarSede(id) { const s = (typeof sedes !== 'undefined' ? sedes : []).find((x) => Number(x.id) === Number(id)); return s ? s.nombre : ''; }
+function tarSede(id) { const s = (typeof sedes !== 'undefined' ? sedes : []).find((x) => Number(x.id) === Number(id)); return s ? s.nombre + (s.marcas && s.marcas.nombre ? ' · ' + s.marcas.nombre : '') : ''; }
+// (18/10/2026) opciones de sede agrupadas por marca (hay sedes con el mismo nombre en marcas distintas, ej. Laureles)
+function tarSedeOpciones() {
+  const grupos = new Map();
+  (typeof sedes !== 'undefined' ? sedes : []).forEach((s) => { const m = (s.marcas && s.marcas.nombre) || 'Sin marca'; if (!grupos.has(m)) grupos.set(m, []); grupos.get(m).push(s); });
+  return [...grupos.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([m, l]) => `<optgroup label="${escAg(m)}">${l.slice().sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)))
+    .map((s) => `<option value="${s.id}">${escAg(s.nombre)} · ${escAg(m)}</option>`).join('')}</optgroup>`).join('');
+}
 
 async function tarCargar() {
   const r = await SB.from('tarea').select('*').order('fecha_limite', { ascending: true }).limit(2000);
@@ -252,7 +259,7 @@ function tarPlanFormHtml() {
     <div style="display:flex;flex-wrap:wrap;gap:4px 14px">${personas.map((p) => `<label style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap"><input type="checkbox" data-tpq="${p.user_id}" style="width:auto;margin:0">${escAg(p.nombre)}</label>`).join('')}</div>
     <div style="display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:8px">
       <label>Tipo <select id="tarPlanTipo" style="width:auto;margin:0" onchange="tarPlantillaCargar('tarPlanTipo','tarPlanDesc','tarPlanActs')">${Object.entries(Tareas.TIPOS).map(([k, v]) => `<option value="${k}"${k === 'inventario' ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
-      <label>Sede (opcional) <select id="tarPlanSede" style="width:auto;margin:0"><option value="">—</option>${(typeof sedes !== 'undefined' ? sedes : []).map((s) => `<option value="${s.id}">${escAg(s.nombre)}</option>`).join('')}</select></label>
+      <label>Sede (opcional) <select id="tarPlanSede" style="width:auto;margin:0"><option value="">—</option>${tarSedeOpciones()}</select></label>
     </div>
     <input id="tarPlanTitulo" placeholder="Título (ej. Inventario cíclico de bebidas)" style="margin-top:8px">
     ${tarPlantillaCamposHtml('tarPlanDesc', 'tarPlanActs', 'inventario')}
@@ -294,7 +301,7 @@ function tarFormHtml() {
     <div style="display:flex;flex-wrap:wrap;gap:4px 14px">${personas.map((p) => `<label style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap"><input type="checkbox" data-tq="${p.user_id}" style="width:auto;margin:0">${escAg(p.nombre)}</label>`).join('')}</div>
     <div style="display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:8px">
       <label>Tipo <select id="tarTipo" style="width:auto;margin:0" onchange="tarPlantillaCargar('tarTipo','tarDesc','tarActs')">${Object.entries(Tareas.TIPOS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
-      <label>Sede (opcional) <select id="tarSedeSel" style="width:auto;margin:0"><option value="">—</option>${(typeof sedes !== 'undefined' ? sedes : []).map((s) => `<option value="${s.id}">${escAg(s.nombre)}</option>`).join('')}</select></label>
+      <label>Sede (opcional) <select id="tarSedeSel" style="width:auto;margin:0"><option value="">—</option>${tarSedeOpciones()}</select></label>
       <label>📅 Fecha de cumplimiento <input type="date" id="tarFecha" min="${hoy}" value="${hoy}" style="width:auto;margin:0"></label>
     </div>
     <input id="tarTitulo" placeholder="Título (ej. Inventario cíclico de bebidas en Provenza)" style="margin-top:8px">
