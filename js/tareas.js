@@ -57,5 +57,50 @@
     return 'tareas/' + id + '/' + (ahora || Date.now()) + '_' + base + '.' + ext;
   }
 
-  return { TIPOS, ESTADOS, fechaCO, abierta, aTiempo, vencida, faltan, cuentan, cumplimiento, resumen, ordenar, rutaEvidencia };
+  // ---------- CALENDARIO (18/10/2026) ----------
+  const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  const DIAS_CORTO = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+  const iso = (d) => d.toISOString().slice(0, 10);
+  // dia de la semana de una fecha "AAAA-MM-DD": 1=lunes ... 7=domingo
+  const diaSemana = (f) => { const d = new Date(String(f).slice(0, 10) + 'T00:00:00Z').getUTCDay(); return d === 0 ? 7 : d; };
+  // "AAAA-MM" + n meses
+  function mesSumar(mes, n) { const [a, m] = String(mes).split('-').map(Number); const d = new Date(Date.UTC(a, m - 1 + n, 1)); return iso(d).slice(0, 7); }
+  function mesNombre(mes) { const [a, m] = String(mes).split('-').map(Number); return MESES[m - 1] + ' ' + a; }
+  // cuadricula del mes: semanas de lunes a domingo -> [[{fecha, delMes}], ...] (4 a 6 semanas)
+  function mesGrid(mes) {
+    const [a, m] = String(mes).split('-').map(Number);
+    const primero = new Date(Date.UTC(a, m - 1, 1)), ultimo = new Date(Date.UTC(a, m, 0));
+    const inicio = primero.getTime() - (diaSemana(iso(primero)) - 1) * 86400000;   // lunes de la primera semana
+    const fin = ultimo.getTime() + (7 - diaSemana(iso(ultimo))) * 86400000;         // domingo de la ultima semana
+    const semanas = [];
+    for (let t = inicio, i = 0; t <= fin; t += 86400000, i++) {
+      if (i % 7 === 0) semanas.push([]);
+      const f = iso(new Date(t));
+      semanas[semanas.length - 1].push({ fecha: f, delMes: f.slice(0, 7) === String(mes) });
+    }
+    return semanas;
+  }
+  // tareas agrupadas por su fecha de cumplimiento -> Map("AAAA-MM-DD" -> [tareas ordenadas])
+  function porDia(lista) {
+    const m = new Map();
+    ordenar(lista).forEach((t) => { const f = String(t.fecha_limite).slice(0, 10); if (!m.has(f)) m.set(f, []); m.get(f).push(t); });
+    return m;
+  }
+  // fechas del mes que caen en ciertos dias de la semana (1=lunes..7=domingo), desde una fecha minima (ej. hoy)
+  function fechasPatron(mes, diasSemana, desde) {
+    const quiero = new Set((diasSemana || []).map(Number));
+    const out = [];
+    mesGrid(mes).forEach((s) => s.forEach((c) => { if (c.delMes && quiero.has(diaSemana(c.fecha)) && (!desde || c.fecha >= desde)) out.push(c.fecha); }));
+    return out;
+  }
+  // color del estado en el calendario (vencida pesa mas que pendiente / en proceso)
+  function colorEstado(t, hoy) {
+    if (t.estado === 'cancelada') return 'cancelada';
+    if (t.estado === 'terminada') return aTiempo(t) ? 'terminada' : 'tarde';
+    if (vencida(t, hoy)) return 'vencida';
+    return t.estado;   // pendiente | en_proceso
+  }
+
+  return { TIPOS, ESTADOS, fechaCO, abierta, aTiempo, vencida, faltan, cuentan, cumplimiento, resumen, ordenar, rutaEvidencia,
+    MESES, DIAS_CORTO, diaSemana, mesSumar, mesNombre, mesGrid, porDia, fechasPatron, colorEstado };
 });
