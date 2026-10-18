@@ -10,7 +10,61 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const TIPOS = { inventario: '📦 Inventario cíclico', visita: '🚗 Visita', capacitacion: '🎓 Capacitación', otra: '📝 Otra' };
+  // (18/10/2026) + inventario general y auditoria de punto de venta (supabase/tareas_plantillas.sql amplia la lista en la base)
+  const TIPOS = { inventario: '📦 Inventario cíclico', inventario_general: '🗃️ Inventario general', auditoria: '🔍 Auditoría de punto de venta',
+    capacitacion: '🎓 Capacitación', visita: '🚗 Visita', otra: '📝 Otra' };
+
+  // ---------- PLANTILLAS (18/10/2026, pedido del usuario) ----------
+  // Al elegir el tipo se cargan el resumen y las actividades; se pueden editar antes de asignar y despues (solo esa tarea:
+  // la plantilla no cambia). Capacitacion, visita y otra van en blanco. Cada actividad queda en la tarea como { t, h }.
+  const PLANTILLAS = {
+    inventario: {
+      resumen: 'Realizar el conteo físico de las familias de productos asignadas al punto de venta, validar las referencias y las cantidades, identificar diferencias frente al sistema, socializar los hallazgos y dejar actualizada la información en el formato de inventarios correspondiente.',
+      actividades: ['Contar bebidas.', 'Contar gaseosas.', 'Contar licores.', 'Contar vinos.', 'Contar proteínas.',
+        'Revisar las proteínas e ingredientes utilizados en las recetas y preparaciones.',
+        'Revisar los productos cocinados y las fabricaciones o transformaciones correspondientes.',
+        'Verificar las referencias de los productos.', 'Validar cantidades y unidades de medida.',
+        'Comparar el inventario físico con los registros del sistema.', 'Identificar y documentar diferencias.',
+        'Revisar el estado, almacenamiento, rotación y vencimiento de las mercancías.',
+        'Socializar los hallazgos con el personal del punto de venta.', 'Registrar observaciones y pendientes.',
+        'Dejar cargada y actualizada la información en el formato de inventarios.'],
+    },
+    inventario_general: {
+      resumen: 'Realizar acompañamiento al inventario general del punto de venta asignado, verificando que todos los ingresos de compras y las fabricaciones estén registrados al día y que la información de cada punto de venta esté diligenciada y cargada en la base de datos mediante el formato de inventarios antes de iniciar el inventario final.',
+      actividades: ['Confirmar el punto de venta asignado.', 'Realizar acompañamiento durante el inventario general.',
+        'Verificar que los ingresos de compras estén registrados al día.',
+        'Verificar que las fabricaciones y transformaciones estén registradas al día.',
+        'Confirmar que los movimientos de inventario estén actualizados.',
+        'Verificar que toda la información del punto de venta esté diligenciada.',
+        'Confirmar que el formato de inventarios esté cargado en la base de datos antes de iniciar el inventario final.',
+        'Verificar referencias, cantidades y unidades de medida.', 'Registrar diferencias y novedades.',
+        'Socializar los hallazgos con los responsables del punto de venta.',
+        'Confirmar que la información final quede cargada y disponible para revisión.'],
+    },
+    auditoria: {
+      resumen: 'Realizar auditoría operativa y de inventarios en el punto de venta asignado, revisando las familias de productos, las referencias, los registros, las mercancías y el cumplimiento de los procedimientos establecidos. Documentar y socializar los hallazgos.',
+      actividades: ['Identificar las familias de productos que se deben auditar.', 'Revisar bebidas y gaseosas.', 'Revisar licores y vinos.',
+        'Revisar proteínas y productos utilizados en recetas.', 'Revisar productos cocinados y fabricaciones.',
+        'Verificar las referencias y unidades de medida.', 'Comparar cantidades físicas con registros.',
+        'Revisar los soportes de compras, ingresos y fabricaciones.',
+        'Verificar el almacenamiento, la rotación y el vencimiento de las mercancías.', 'Registrar diferencias e inconsistencias.',
+        'Documentar evidencias y observaciones.', 'Socializar los resultados con el responsable del punto de venta.',
+        'Registrar acciones correctivas y pendientes.'],
+    },
+    capacitacion: { resumen: '', actividades: [] },
+  };
+  // copia de la plantilla (nunca la original, para que editar una tarea no la cambie)
+  const plantilla = (tipo) => { const p = PLANTILLAS[tipo]; return { resumen: p ? p.resumen : '', actividades: p ? p.actividades.slice() : [] }; };
+  const MAX_ACTIVIDADES = 60;
+  // texto (una actividad por linea; se quitan viñetas «-», «•», «*» o casillas) -> [{ t, h:false }]
+  function actividadesDeTexto(texto, previas) {
+    const hechas = new Map((previas || []).filter((a) => a && a.h).map((a) => [String(a.t).trim().toLowerCase(), a]));
+    return String(texto || '').split(/\r?\n/).map((l) => l.replace(/^\s*(?:[-•*·]|\[[ xX]?\]|☐|☑|✅)\s*/, '').trim()).filter(Boolean)
+      .slice(0, MAX_ACTIVIDADES).map((t) => Object.assign({ t: t.slice(0, 300), h: false }, hechas.has(t.toLowerCase()) ? { h: true, por: hechas.get(t.toLowerCase()).por, en: hechas.get(t.toLowerCase()).en } : {}));
+  }
+  const actividadesTexto = (lista) => (Array.isArray(lista) ? lista : []).map((a) => (a && a.t) || '').filter(Boolean).join('\n');
+  const actividades = (t) => (t && Array.isArray(t.actividades) ? t.actividades.filter((a) => a && a.t) : []);
+  const avance = (t) => { const l = actividades(t); return { hechas: l.filter((a) => a.h).length, total: l.length }; };
   const ESTADOS = { pendiente: '⏳ Pendiente', en_proceso: '🔧 En proceso', terminada: '✅ Terminada', cancelada: '✖ Cancelada' };
   const fechaCO = (ts) => { if (!ts) return null; const s = String(ts); if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; const t = Date.parse(s); return isNaN(t) ? null : new Date(t - 5 * 3600000).toISOString().slice(0, 10); };
   const dias = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
@@ -102,5 +156,6 @@
   }
 
   return { TIPOS, ESTADOS, fechaCO, abierta, aTiempo, vencida, faltan, cuentan, cumplimiento, resumen, ordenar, rutaEvidencia,
-    MESES, DIAS_CORTO, diaSemana, mesSumar, mesNombre, mesGrid, porDia, fechasPatron, colorEstado };
+    MESES, DIAS_CORTO, diaSemana, mesSumar, mesNombre, mesGrid, porDia, fechasPatron, colorEstado,
+    PLANTILLAS, plantilla, MAX_ACTIVIDADES, actividadesDeTexto, actividadesTexto, actividades, avance };
 });

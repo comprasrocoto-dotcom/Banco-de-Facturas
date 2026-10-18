@@ -251,11 +251,11 @@ function tarPlanFormHtml() {
     <div class="mut" style="margin:4px 0">¿A quién? A cada persona le queda una tarea por cada día marcado y le llega <b>un solo correo</b> con todas las fechas.</div>
     <div style="display:flex;flex-wrap:wrap;gap:4px 14px">${personas.map((p) => `<label style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap"><input type="checkbox" data-tpq="${p.user_id}" style="width:auto;margin:0">${escAg(p.nombre)}</label>`).join('')}</div>
     <div style="display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:8px">
-      <label>Tipo <select id="tarPlanTipo" style="width:auto;margin:0">${Object.entries(Tareas.TIPOS).map(([k, v]) => `<option value="${k}"${k === 'inventario' ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
+      <label>Tipo <select id="tarPlanTipo" style="width:auto;margin:0" onchange="tarPlantillaCargar('tarPlanTipo','tarPlanDesc','tarPlanActs')">${Object.entries(Tareas.TIPOS).map(([k, v]) => `<option value="${k}"${k === 'inventario' ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
       <label>Sede (opcional) <select id="tarPlanSede" style="width:auto;margin:0"><option value="">—</option>${(typeof sedes !== 'undefined' ? sedes : []).map((s) => `<option value="${s.id}">${escAg(s.nombre)}</option>`).join('')}</select></label>
     </div>
     <input id="tarPlanTitulo" placeholder="Título (ej. Inventario cíclico de bebidas)" style="margin-top:8px">
-    <textarea id="tarPlanDesc" rows="3" placeholder="Qué hay que hacer y qué evidencia subir (opcional)" style="margin-top:6px;width:100%"></textarea>
+    ${tarPlantillaCamposHtml('tarPlanDesc', 'tarPlanActs', 'inventario')}
     <div style="margin-top:8px"><button class="p" onclick="tarCrearVarias()">📦 Asignar en los días marcados</button> <span class="mut" id="tarPlanRes"></span></div>
   </div>`;
 }
@@ -274,12 +274,10 @@ async function tarCrearVarias() {
   TAR.ocupado = true; msg('Asignando…');
   try {
     const sede = ($('tarPlanSede') || {}).value;
-    const r = await SB.rpc('tarea_crear_varias', { p_asignados: quienes, p_tipo: ($('tarPlanTipo') || {}).value || 'inventario', p_titulo: titulo,
-      p_descripcion: ($('tarPlanDesc') || {}).value || null, p_sede: sede ? Number(sede) : null, p_fechas: fechas, p_usuario: tarUsuario() });
-    if (r.error) {
-      const falta = /tarea_crear_varias/.test(r.error.message || '') && /(find|exist|encontr|schema cache)/i.test(r.error.message || '');
-      return msg(falta ? '⚠️ Falta activar el calendario en la base (supabase/tareas_calendario.sql). Avísale al administrador del sistema.' : 'No se pudo: ' + r.error.message);
-    }
+    const r = await tarAsignarRpc({ p_asignados: quienes, p_tipo: ($('tarPlanTipo') || {}).value || 'inventario', p_titulo: titulo,
+      p_descripcion: ($('tarPlanDesc') || {}).value || null, p_sede: sede ? Number(sede) : null, p_fechas: fechas,
+      p_actividades: Tareas.actividadesDeTexto(($('tarPlanActs') || {}).value), p_usuario: tarUsuario() });
+    if (r.error) return msg(r.error.aviso || 'No se pudo: ' + r.error.message);
     TAR.plan = false; TAR.sel = new Set(); TAR.dia = fechas[0];
     await tarCargar(); tarPintar();
     if (typeof csEnviarCola === 'function') csEnviarCola(true);   // el correo sale ya desde el servidor
@@ -295,12 +293,12 @@ function tarFormHtml() {
     <div class="mut" style="margin:4px 0">¿A quién? (puedes marcar varias personas: a cada una le queda su propia tarea y le llega un correo)</div>
     <div style="display:flex;flex-wrap:wrap;gap:4px 14px">${personas.map((p) => `<label style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap"><input type="checkbox" data-tq="${p.user_id}" style="width:auto;margin:0">${escAg(p.nombre)}</label>`).join('')}</div>
     <div style="display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:8px">
-      <label>Tipo <select id="tarTipo" style="width:auto;margin:0">${Object.entries(Tareas.TIPOS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
+      <label>Tipo <select id="tarTipo" style="width:auto;margin:0" onchange="tarPlantillaCargar('tarTipo','tarDesc','tarActs')">${Object.entries(Tareas.TIPOS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
       <label>Sede (opcional) <select id="tarSedeSel" style="width:auto;margin:0"><option value="">—</option>${(typeof sedes !== 'undefined' ? sedes : []).map((s) => `<option value="${s.id}">${escAg(s.nombre)}</option>`).join('')}</select></label>
       <label>📅 Fecha de cumplimiento <input type="date" id="tarFecha" min="${hoy}" value="${hoy}" style="width:auto;margin:0"></label>
     </div>
     <input id="tarTitulo" placeholder="Título (ej. Inventario cíclico de bebidas en Provenza)" style="margin-top:8px">
-    <textarea id="tarDesc" rows="3" placeholder="Qué hay que hacer y qué evidencia subir (opcional)" style="margin-top:6px;width:100%"></textarea>
+    ${tarPlantillaCamposHtml('tarDesc', 'tarActs', Object.keys(Tareas.TIPOS)[0])}
     <div style="margin-top:8px"><button class="p" id="tarBtnCrear" onclick="tarCrear()">📝 Asignar</button> <span class="mut" id="tarFormRes"></span></div>
   </div>`;
 }
@@ -321,6 +319,7 @@ function tarTarjetaHtml(t, hoy, adm) {
     if (Tareas.abierta(t)) acciones.push(`<button class="p" style="background:#15803d;border-color:#15803d" onclick="tarEstado(${t.id},'terminada')">✅ Terminar</button>`);
     if (t.estado === 'terminada' || (t.estado === 'cancelada' && adm)) acciones.push(`<button onclick="tarEstado(${t.id},'en_proceso')">↩ Reabrir</button>`);
     if (t.estado !== 'cancelada') acciones.push(`<button onclick="tarComentar(${t.id})">💬 Comentar</button>`);
+    if (adm && t.estado !== 'cancelada' && TAR.editando !== t.id) acciones.push(`<button onclick="tarEditarAbrir(${t.id})">📋 Editar resumen y actividades</button>`);
     if (adm && t.estado !== 'cancelada') acciones.push(`<button onclick="tarEditarFecha(${t.id})">✏️ Cambiar fecha</button>`, `<button class="d" onclick="tarEstado(${t.id},'cancelada')">✖ Cancelar</button>`);
     return `<div class="card" style="margin-bottom:8px${Tareas.vencida(t, hoy) ? ';border-left:5px solid #b91c1c' : ''}">
       <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
@@ -328,7 +327,7 @@ function tarTarjetaHtml(t, hoy, adm) {
           <div class="mut" style="font-size:12.5px">${escAg(Tareas.TIPOS[t.tipo] || '')}${adm ? ' · 👤 ' + escAg(tarNombre(t.asignada_a)) : ''}${t.sede_id ? ' · 🏪 ' + escAg(tarSede(t.sede_id)) : ''} · vence ${tarFecha(t.fecha_limite)}${t.terminada_en ? ' · terminada ' + tarHora(t.terminada_en) : ''}</div></div>
         <span class="badge">${Tareas.ESTADOS[t.estado] || t.estado}</span>${vence}
       </div>
-      ${t.descripcion ? `<div style="margin-top:6px;white-space:pre-wrap;font-size:13.5px">${escAg(t.descripcion)}</div>` : ''}
+      ${TAR.editando === t.id ? tarEditorHtml(t) : (t.descripcion ? `<div style="margin-top:6px;white-space:pre-wrap;font-size:13.5px">${escAg(t.descripcion)}</div>` : '') + tarActividadesHtml(t, adm)}
       ${ev.length ? `<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:6px;display:grid;gap:3px;font-size:12.5px">${ev.map((e) => `<div><span class="mut">${tarHora(e.en)}${e.usuario_nombre ? ' · ' + escAg(e.usuario_nombre) : ''}:</span> ${e.estado ? '<b>' + escAg(Tareas.ESTADOS[e.estado] || e.estado) + '</b> ' : ''}${e.comentario ? escAg(e.comentario) + ' ' : ''}${e.archivo ? `<a href="#" onclick="tarVer('${escAg(e.archivo)}');return false">📎 ${escAg(e.archivo_nombre || 'evidencia')}</a>` : ''}</div>`).join('')}</div>` : ''}
       ${t.estado !== 'cancelada' ? `<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center">
         <label class="s" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:5px 10px">📎 Subir evidencia<input type="file" accept="image/*,application/pdf" multiple style="display:none" onchange="tarSubir(${t.id},this)"></label>
@@ -348,9 +347,9 @@ async function tarCrear() {
   TAR.ocupado = true;
   try {
     const sede = ($('tarSedeSel') || {}).value;
-    const r = await SB.rpc('tarea_crear', { p_asignados: quienes, p_tipo: ($('tarTipo') || {}).value || 'otra', p_titulo: titulo, p_descripcion: ($('tarDesc') || {}).value || null,
-      p_sede: sede ? Number(sede) : null, p_fecha_limite: fecha, p_usuario: tarUsuario() });
-    if (r.error) { if (res) res.textContent = 'No se pudo: ' + r.error.message; return; }
+    const r = await tarAsignarRpc({ p_asignados: quienes, p_tipo: ($('tarTipo') || {}).value || 'otra', p_titulo: titulo, p_descripcion: ($('tarDesc') || {}).value || null,
+      p_sede: sede ? Number(sede) : null, p_fechas: [fecha], p_actividades: Tareas.actividadesDeTexto(($('tarActs') || {}).value), p_usuario: tarUsuario() });
+    if (r.error) { if (res) res.textContent = r.error.aviso || 'No se pudo: ' + r.error.message; return; }
     TAR.form = false; await tarCargar(); tarPintar();
     if (typeof csEnviarCola === 'function') csEnviarCola(true);   // el correo sale ya desde el servidor
     alert('✅ Tarea asignada a ' + r.data + ' persona(s). A cada una le llega un correo.');
@@ -402,4 +401,105 @@ async function tarVer(ruta) {
   const r = await SB.storage.from('facturas').createSignedUrl(ruta, 600);
   if (r.error || !r.data) { alert('No pude abrir la evidencia: ' + ((r.error && r.error.message) || '')); return; }
   window.open(r.data.signedUrl, '_blank');
+}
+
+// ============================================================
+//  📋 PLANTILLAS: resumen + lista de actividades (18/10/2026, pedido del usuario)
+// ============================================================
+// Al elegir el tipo en «➕ Asignar tarea» o en «📦 Planear el mes» se cargan el resumen y las actividades de la plantilla
+// (Tareas.PLANTILLAS en js/tareas.js). Se pueden editar antes de asignar; despues, el administrador las edita en cada tarea
+// («📋 Editar resumen y actividades») sin tocar la plantilla. Quien tiene la tarea marca cada actividad como hecha.
+// Base: supabase/tareas_plantillas.sql (tarea.actividades + tarea_asignar / tarea_actividad / tarea_actividades_editar).
+const TAR_AVISO_PLANTILLAS = '⚠️ Falta activar las plantillas en la base (supabase/tareas_plantillas.sql). Avísale al administrador del sistema.';
+function tarFaltaFuncion(err, nombre) { const m = (err && err.message) || ''; return m.includes(nombre) && /(find|exist|encontr|schema cache)/i.test(m); }
+
+function tarPlantillaCamposHtml(idDesc, idActs, tipo) {
+  const p = Tareas.plantilla(tipo);
+  return `<div class="mut" style="margin-top:8px;font-size:12.5px">📋 Resumen</div>
+    <textarea id="${idDesc}" rows="3" data-plantilla="${escAg(tipo)}" placeholder="Qué hay que hacer y qué evidencia subir (opcional)" style="margin-top:2px;width:100%">${escAg(p.resumen)}</textarea>
+    <div class="mut" style="margin-top:6px;font-size:12.5px">✅ Actividades (una por línea; quien tenga la tarea las marca a medida que las haga)</div>
+    <textarea id="${idActs}" rows="${Math.min(12, Math.max(3, p.actividades.length))}" placeholder="Escribe las actividades, una por línea (opcional)" style="margin-top:2px;width:100%">${escAg(p.actividades.join('\n'))}</textarea>`;
+}
+// cambia el tipo -> carga su plantilla (si ya habias cambiado el texto, pregunta antes de reemplazarlo)
+function tarPlantillaCargar(idTipo, idDesc, idActs) {
+  const sel = $(idTipo), d = $(idDesc), a = $(idActs); if (!sel || !d || !a) return;
+  const antes = Tareas.plantilla(d.getAttribute('data-plantilla') || ''), nueva = Tareas.plantilla(sel.value);
+  const tocado = (d.value.trim() && d.value.trim() !== antes.resumen) || (a.value.trim() && a.value.trim() !== antes.actividades.join('\n'));
+  if (tocado && !confirm('Ya cambiaste el resumen o las actividades.\n\n¿Reemplazarlos por los de «' + (Tareas.TIPOS[sel.value] || sel.value) + '»?')) return;
+  d.value = nueva.resumen; a.value = nueva.actividades.join('\n');
+  a.rows = Math.min(12, Math.max(3, nueva.actividades.length));
+  d.setAttribute('data-plantilla', sel.value);
+}
+// asigna con tarea_asignar; si la base todavia no la tiene y la tarea no usa nada nuevo, sigue como antes (tarea_crear / _varias)
+async function tarAsignarRpc(a) {
+  const r = await SB.rpc('tarea_asignar', a);
+  if (!r.error || !tarFaltaFuncion(r.error, 'tarea_asignar')) return r;
+  const viejo = ['inventario', 'visita', 'capacitacion', 'otra'].includes(a.p_tipo) && !(a.p_actividades || []).length;
+  if (!viejo) return { data: null, error: { message: r.error.message, aviso: TAR_AVISO_PLANTILLAS } };
+  const base = { p_asignados: a.p_asignados, p_tipo: a.p_tipo, p_titulo: a.p_titulo, p_descripcion: a.p_descripcion, p_sede: a.p_sede, p_usuario: a.p_usuario };
+  return a.p_fechas.length === 1 ? SB.rpc('tarea_crear', Object.assign(base, { p_fecha_limite: a.p_fechas[0] })) : SB.rpc('tarea_crear_varias', Object.assign(base, { p_fechas: a.p_fechas }));
+}
+
+// lista de verificacion de una tarea (abierta por defecto para quien la tiene; el administrador la abre cuando quiera)
+function tarActividadesHtml(t, adm) {
+  const l = Tareas.actividades(t); if (!l.length) return '';
+  const av = Tareas.avance(t), pct = Math.round((av.hechas * 100) / av.total), puede = t.estado !== 'cancelada';
+  if (!TAR.actsAbiertas) TAR.actsAbiertas = new Map();
+  const abierta = TAR.actsAbiertas.has(t.id) ? TAR.actsAbiertas.get(t.id) : !adm && Tareas.abierta(t);
+  const items = l.map((x, i) => `<label style="display:flex;gap:8px;align-items:flex-start;padding:3px 0;cursor:${puede ? 'pointer' : 'default'}">
+      <input type="checkbox" style="width:auto;margin:3px 0 0;flex:none" ${x.h ? 'checked' : ''} ${puede ? '' : 'disabled'} onchange="tarActividad(${t.id},${i},this)">
+      <span style="${x.h ? 'text-decoration:line-through;color:#64748b' : ''}">${escAg(x.t)}${x.h && (x.por || x.en) ? ` <span class="mut" style="font-size:11.5px;text-decoration:none;display:inline-block">· ${escAg(x.por || '')}${x.en ? ' ' + tarHora(x.en) : ''}</span>` : ''}</span></label>`).join('');
+  return `<details id="tarActs${t.id}" ${abierta ? 'open' : ''} ontoggle="TAR.actsAbiertas.set(${t.id},this.open)" style="margin-top:8px;border:1px solid var(--line);border-radius:8px;padding:6px 10px">
+      <summary style="cursor:pointer;font-weight:600;font-size:13.5px">✅ Actividades: ${av.hechas} de ${av.total}
+        <span style="display:inline-block;vertical-align:middle;width:90px;height:7px;background:#e2e8f0;border-radius:4px;margin-left:6px;overflow:hidden"><span style="display:block;height:100%;width:${pct}%;background:${av.hechas === av.total ? '#15803d' : '#0891b2'}"></span></span></summary>
+      <div style="font-size:13.5px;margin-top:4px">${items}</div>
+    </details>`;
+}
+async function tarActividad(id, idx, el) {
+  const t = TAR.lista.find((x) => x.id === id), l = Tareas.actividades(t); if (!t || !l[idx]) return;
+  el.disabled = true;
+  const r = await SB.rpc('tarea_actividad', { p_id: id, p_idx: idx, p_texto: l[idx].t, p_hecha: !!el.checked, p_usuario: tarUsuario() });
+  if (r.error) {
+    el.checked = !el.checked; el.disabled = false;
+    alert(tarFaltaFuncion(r.error, 'tarea_actividad') ? TAR_AVISO_PLANTILLAS : 'No se pudo: ' + r.error.message);
+    return;
+  }
+  t.actividades = r.data;
+  const caja = $('tarActs' + id); if (caja) caja.outerHTML = tarActividadesHtml(t, tarEsAdmin());
+}
+
+// ---------- editar resumen y actividades de UNA tarea (solo administrador) ----------
+function tarEditarAbrir(id) { TAR.editando = id; tarRefrescarCuerpo(); }
+function tarEditarCerrar() { TAR.editando = null; tarRefrescarCuerpo(); }
+function tarEditorHtml(t) {
+  const p = Tareas.plantilla(t.tipo), conPlantilla = p.resumen || p.actividades.length;
+  return `<div style="margin-top:8px;background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:8px 10px">
+      <div class="mut" style="font-size:12.5px">📋 Resumen (solo de esta tarea; la plantilla no cambia)</div>
+      <textarea id="tarEdDesc" rows="3" style="width:100%;margin-top:2px">${escAg(t.descripcion || '')}</textarea>
+      <div class="mut" style="font-size:12.5px;margin-top:6px">✅ Actividades, una por línea (las que ya están marcadas siguen marcadas si no cambias su texto)</div>
+      <textarea id="tarEdActs" rows="${Math.min(14, Math.max(4, Tareas.actividades(t).length + 1))}" style="width:100%;margin-top:2px">${escAg(Tareas.actividadesTexto(t.actividades))}</textarea>
+      <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center">
+        <button class="p" onclick="tarEditarGuardar(${t.id})">💾 Guardar</button><button onclick="tarEditarCerrar()">Cancelar</button>
+        ${conPlantilla ? `<button class="s" onclick="tarEditarPlantilla('${escAg(t.tipo)}')" title="Pone el texto de la plantilla en los cuadros (no guarda hasta que presiones Guardar)">↺ Poner la plantilla de ${escAg(Tareas.TIPOS[t.tipo] || t.tipo)}</button>` : ''}
+        <span class="mut" id="tarEdRes"></span>
+      </div>
+    </div>`;
+}
+function tarEditarPlantilla(tipo) {
+  const p = Tareas.plantilla(tipo), d = $('tarEdDesc'), a = $('tarEdActs'); if (!d || !a) return;
+  if ((d.value.trim() || a.value.trim()) && !confirm('¿Reemplazar el texto de los cuadros por la plantilla? (no se guarda hasta que presiones «💾 Guardar»)')) return;
+  d.value = p.resumen; a.value = p.actividades.join('\n');
+}
+async function tarEditarGuardar(id) {
+  if (TAR.ocupado) return;
+  const t = TAR.lista.find((x) => x.id === id); if (!t) return;
+  const res = $('tarEdRes');
+  TAR.ocupado = true;
+  try {
+    const acts = Tareas.actividadesDeTexto(($('tarEdActs') || {}).value, Tareas.actividades(t));
+    const r = await SB.rpc('tarea_actividades_editar', { p_id: id, p_descripcion: ($('tarEdDesc') || {}).value || null, p_actividades: acts, p_usuario: tarUsuario() });
+    if (r.error) { if (res) res.textContent = tarFaltaFuncion(r.error, 'tarea_actividades_editar') ? TAR_AVISO_PLANTILLAS : 'No se pudo: ' + r.error.message; return; }
+    TAR.editando = null;
+    await tarCargar(); tarPintar();
+  } finally { TAR.ocupado = false; }
 }
