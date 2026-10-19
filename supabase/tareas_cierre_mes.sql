@@ -3,17 +3,18 @@
 -- ============================================================
 -- Subir el token a la DIAN; al cerrar el mes el Banco de Facturas debe quedar sin facturas «Sin asignar» y todo conciliado.
 -- La plantilla (resumen y actividades) vive en js/tareas.js. Aqui solo:
---   1. se agrega 'cierre_mes' a la lista de tipos permitidos (la lista anterior queda igual: no se quita nada);
+--   1. se agregan 'cierre_mes', 'ingreso_facturas' y 'envio_contabilidad' (19/10/2026) a la lista de tipos permitidos (la lista anterior queda igual: no se quita nada);
 --   2. el nombre bonito del tipo para los correos.
 -- No toca ninguna tarea existente. Se puede correr varias veces.
 
 alter table tarea drop constraint if exists tarea_tipo_check;
 alter table tarea add constraint tarea_tipo_check
-  check (tipo in ('inventario', 'inventario_general', 'auditoria', 'cierre_mes', 'capacitacion', 'visita', 'otra'));
+  check (tipo in ('inventario', 'inventario_general', 'auditoria', 'cierre_mes', 'ingreso_facturas', 'envio_contabilidad', 'capacitacion', 'visita', 'otra'));
 
 create or replace function tarea_tipo_nombre(p_tipo text) returns text language sql immutable as $$
   select case p_tipo when 'inventario' then '📦 Inventario cíclico' when 'inventario_general' then '🗃️ Inventario general'
                      when 'auditoria' then '🔍 Auditoría de punto de venta' when 'cierre_mes' then '🗓️ Token DIAN diario y cierre de mes'
+                     when 'ingreso_facturas' then '🧾 Ingreso de facturas al ERP (diario)' when 'envio_contabilidad' then '📤 Envío a contabilidad (diario)'
                      when 'visita' then '🚗 Visita' when 'capacitacion' then '🎓 Capacitación' else '📝 Tarea' end
 $$;
 
