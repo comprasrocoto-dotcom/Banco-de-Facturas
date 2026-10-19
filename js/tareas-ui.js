@@ -357,7 +357,8 @@ function tarListaHtml() {
 
 // tarjeta de UNA tarea (la usan la lista y el calendario: mismos botones de estado, comentario y evidencias)
 function tarTarjetaHtml(t, hoy, adm) {
-    const fal = Tareas.faltan(t, hoy), ev = TAR.eventos.get(t.id) || [];
+    const fal = Tareas.faltan(t, hoy), evTodos = TAR.eventos.get(t.id) || [];
+    const seg = Tareas.seguimiento(t, evTodos, hoy), ev = seg ? evTodos.filter((e) => !/^📆 Día \d{2}\/\d{2}\/\d{4}: /.test(String(e.comentario || ''))) : evTodos;
     const vence = t.estado === 'terminada' ? (Tareas.aTiempo(t) ? '<span class="badge st-sellada">✅ a tiempo</span>' : '<span class="badge" style="color:#991b1b;background:#fee2e2;border-color:#fca5a5">⏰ terminada tarde</span>')
       : t.estado === 'cancelada' ? '' : fal < 0 ? `<span class="badge" style="color:#991b1b;background:#fee2e2;border-color:#fca5a5;font-weight:700">⚠️ vencida hace ${-fal} día(s)</span>` : fal === 0 ? '<span class="badge" style="color:#92400e;background:#fffbeb;border-color:#fcd34d;font-weight:700">📅 vence HOY</span>' : `<span class="badge">📅 faltan ${fal} día(s)</span>`;
     const acciones = [];
@@ -371,14 +372,61 @@ function tarTarjetaHtml(t, hoy, adm) {
       <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
         <div style="flex:1 1 260px"><b>${escAg((Tareas.TIPOS[t.tipo] || '📝').split(' ')[0])} ${escAg(t.titulo)}</b>
           <div class="mut" style="font-size:12.5px">${escAg(Tareas.TIPOS[t.tipo] || '')}${adm ? ' · 👤 ' + escAg(tarNombre(t.asignada_a)) : ''}${t.sede_id ? ' · 🏪 ' + escAg(tarSede(t.sede_id)) : ''}${Tareas.inicio(t) ? ' · 🟢 inicia ' + tarFecha(Tareas.inicio(t)) : ''} · 🏁 vence ${tarFecha(t.fecha_limite)}${t.terminada_en ? ' · terminada ' + tarHora(t.terminada_en) : ''}</div></div>
-        <span class="badge">${Tareas.ESTADOS[t.estado] || t.estado}</span>${vence}
+        <span class="badge">${Tareas.ESTADOS[t.estado] || t.estado}</span>${vence}${seg && Tareas.abierta(t) && seg.dias.some((d) => d.estado === 'hoy') ? '<span class="badge" style="color:#1e40af;background:#eff6ff;border-color:#93c5fd;font-weight:700">📆 falta validar HOY</span>' : ''}
       </div>
       ${TAR.editando === t.id ? tarEditorHtml(t) : (t.descripcion ? `<div style="margin-top:6px;white-space:pre-wrap;font-size:13.5px">${escAg(t.descripcion)}</div>` : '') + tarActividadesHtml(t, adm)}
+      ${seg ? tarSeguimientoHtml(t, seg) : ''}
       ${ev.length ? `<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:6px;display:grid;gap:3px;font-size:12.5px">${ev.map((e) => `<div><span class="mut">${tarHora(e.en)}${e.usuario_nombre ? ' · ' + escAg(e.usuario_nombre) : ''}:</span> ${e.estado ? '<b>' + escAg(Tareas.ESTADOS[e.estado] || e.estado) + '</b> ' : ''}${e.comentario ? escAg(e.comentario) + ' ' : ''}${e.archivo ? `<a href="#" onclick="tarVer('${escAg(e.archivo)}');return false">📎 ${escAg(e.archivo_nombre || 'evidencia')}</a>` : ''}</div>`).join('')}</div>` : ''}
       ${t.estado !== 'cancelada' ? `<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center">
         <label class="s" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:5px 10px">📎 Subir evidencia<input type="file" accept="image/*,application/pdf" multiple style="display:none" onchange="tarSubir(${t.id},this)"></label>
         ${acciones.join('')}</div>` : ''}
     </div>`;
+}
+
+// (19/10/2026) VALIDACION DIARIA de las tareas de varios dias (ej. «Token DIAN diario»: todo el mes, la misma persona).
+// Un cuadrito por dia: ✅ OK · ❌ NO OK · ⚠️ ya paso y nadie lo valido · azul = hoy, falta validar · gris = todavia no llega.
+// Clic en un dia (hoy o pasado) para validarlo; queda en el historial con fecha, hora y quien lo hizo (si se corrige, vale el ultimo).
+const TAR_DIA = { ok: ['#dcfce7', '#16a34a', '#166534', '✅ OK'], no: ['#fee2e2', '#dc2626', '#991b1b', '❌ NO OK'], falta: ['#fffbeb', '#f59e0b', '#92400e', '⚠️ sin validar'],
+  hoy: ['#eff6ff', '#2563eb', '#1e40af', '📆 hoy: falta validar'], futuro: ['#f8fafc', '#e2e8f0', '#94a3b8', 'todavía no llega'] };
+function tarSeguimientoHtml(t, seg) {
+  const puede = t.estado !== 'cancelada';
+  const celdas = seg.dias.map((d) => {
+    const c = TAR_DIA[d.estado], clic = puede && d.estado !== 'futuro';
+    const tip = Tareas.DIAS_CORTO[Tareas.diaSemana(d.fecha) - 1] + ' ' + tarFecha(d.fecha) + ': ' + c[3] + (d.nota ? ' — ' + d.nota : '') + (d.por ? ' (' + d.por + ')' : '') + (clic ? '\nClic para validar este día' : '');
+    return `<div title="${escAg(tip)}" ${clic ? `onclick="tarValidarDia(${t.id},'${d.fecha}')"` : ''} style="min-width:30px;padding:0 3px;box-sizing:border-box;height:30px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;background:${c[0]};border:${d.estado === 'hoy' ? 2 : 1}px solid ${c[1]};color:${c[2]};cursor:${clic ? 'pointer' : 'default'}">${Number(d.fecha.slice(8, 10))}${d.estado === 'ok' ? '✓' : d.estado === 'no' ? '✗' : ''}</div>`;
+  }).join('');
+  const hoyEnRango = seg.dias.some((d) => d.fecha === tarHoy());
+  return `<div style="margin-top:8px;border:1px solid #bfdbfe;background:#f8fbff;border-radius:10px;padding:8px 10px">
+      <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+        <b style="color:#1e3a8a">📆 Validación diaria</b>
+        <span class="mut" style="font-size:12.5px">✅ ${seg.ok} OK · ❌ ${seg.no} NO OK${seg.falta ? ` · <b style="color:#b45309">⚠️ ${seg.falta} día(s) sin validar</b>` : ''}</span>
+        <span class="sp"></span>
+        ${puede && hoyEnRango ? `<button class="s" style="padding:3px 10px;background:#15803d;border-color:#15803d;color:#fff" onclick="tarValidarDia(${t.id},'${tarHoy()}',true)">✅ Hoy quedó OK</button>
+          <button class="d" style="padding:3px 10px" onclick="tarValidarDia(${t.id},'${tarHoy()}',false)">❌ Hoy NO quedó OK</button>` : ''}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">${celdas}</div>
+    </div>`;
+}
+async function tarValidarDia(id, fecha, ok) {
+  const t = TAR.lista.find((x) => x.id === id); if (!t || TAR.ocupado) return;
+  if (fecha > tarHoy()) { alert('Ese día todavía no llega.'); return; }
+  const dia = Tareas.DIAS_CORTO[Tareas.diaSemana(fecha) - 1] + ' ' + tarFecha(fecha);
+  if (ok === undefined) {
+    const r = prompt('📆 «' + t.titulo + '» — ' + dia + '\n\n¿Cómo quedó este día?\n  1 = ✅ OK\n  2 = ❌ NO OK', '1');
+    if (r === null) return;
+    if (!['1', '2'].includes(r.trim())) { alert('Escribe 1 (OK) o 2 (NO OK).'); return; }
+    ok = r.trim() === '1';
+  }
+  let nota = '';
+  if (!ok) { nota = prompt('❌ ' + dia + ' NO quedó OK.\n\n¿Qué pasó? (obligatorio)', ''); if (nota === null) return; if (!nota.trim()) { alert('Escribe qué pasó.'); return; } }
+  else if (fecha < tarHoy()) { nota = 'validado después, el ' + tarFecha(tarHoy()); }
+  TAR.ocupado = true;
+  try {
+    const r = await SB.rpc('tarea_evidencia', { p_id: id, p_archivo: null, p_nombre: null, p_comentario: Tareas.marcaDia(fecha, ok, nota), p_usuario: tarUsuario() });
+    if (r.error) { alert('No se pudo: ' + r.error.message); return; }
+    if (t.estado === 'pendiente') await SB.rpc('tarea_estado', { p_id: id, p_estado: 'en_proceso', p_comentario: null, p_usuario: tarUsuario() });   // validar un dia = ya empezo
+    await tarCargar(); tarPintar();
+  } finally { TAR.ocupado = false; }
 }
 
 const tarUsuario = () => (typeof perfil !== 'undefined' && perfil && perfil.nombre) || (typeof usuario !== 'undefined' && usuario && usuario.email) || null;
