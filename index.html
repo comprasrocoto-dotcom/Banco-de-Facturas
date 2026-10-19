@@ -3378,10 +3378,40 @@ async function comoPdf(blob, ruta){
     return {blob:new Blob([await doc.save()],{type:"application/pdf"}), ext:null};
   }catch(e){ console.warn("foto a PDF:",e); return {blob, ext:m[1]}; }
 }
-async function bajarPdfsEnZip(lista, nombreFn, nombreZip, res){
-  const zip=new JSZip(); const usados=new Set(); let ok=0; const fallidas=[], fallCufes=[];   // fallCufes: los que NO entraron al ZIP (16/10/2026)
+// (19/10/2026) pedido del usuario: para CONTABILIDAD va la FOTO de la factura que la sede subio en el pedido (archivo_recibo),
+// no el PDF de la DIAN. Se arma un PDF de una pagina con la foto y una franja con factura, proveedor, sede, recibido por e
+// ingreso ERP. Si la foto no se puede leer -> null y se usa el PDF de siempre (nunca se queda un documento por fuera).
+async function pdfDeFotoFactura(f){
+  if(!f||!f.archivo_recibo||typeof PDFLib==="undefined") return null;
+  try{
+    const {data:sig}=await SB.storage.from("facturas").createSignedUrl(f.archivo_recibo,120);
+    if(!sig) return null;
+    const r=await fetch(sig.signedUrl); if(!r.ok) return null;
+    const bytes=new Uint8Array(await r.arrayBuffer());
+    if(bytes[0]===0x25&&bytes[1]===0x50&&bytes[2]===0x44&&bytes[3]===0x46) return new Blob([bytes],{type:"application/pdf"});   // ya es PDF
+    const {PDFDocument,rgb,StandardFonts}=PDFLib, doc=await PDFDocument.create();
+    const esPng=bytes[0]===0x89&&bytes[1]===0x50, img=esPng?await doc.embedPng(bytes):await doc.embedJpg(bytes);
+    const bold=await doc.embedFont(StandardFonts.HelveticaBold), reg=await doc.embedFont(StandardFonts.Helvetica);
+    const W=595.28, H=841.89, banda=58, k=Math.min((W-40)/img.width,(H-banda-40)/img.height), w=img.width*k, h=img.height*k;
+    const pg=doc.addPage([W,H]);
+    pg.drawImage(img,{x:(W-w)/2,y:banda+20+(H-banda-40-h)/2,width:w,height:h});
+    const limpio=(t,n)=>{t=String(t||"").replace(/[^\x20-\x7E\u00A0-\u00FF]/g,"").replace(/\s+/g," ").trim(); return t.length>n?t.slice(0,n-1)+"…":t;};
+    const sedeN=(typeof sedes!=="undefined"?(sedes.find(x=>x.id===f.sede_id)||{}).nombre:"")||"";
+    pg.drawRectangle({x:16,y:10,width:W-32,height:banda-6,color:rgb(0.94,0.99,0.95),borderColor:rgb(0.13,0.53,0.21),borderWidth:1});
+    pg.drawText(limpio("Factura "+((typeof numeroFactura==="function"&&numeroFactura(f))||f.documento||"s/n")+"  ·  "+(f.emisor||""),80),{x:26,y:banda-14,size:10.5,font:bold,color:rgb(0.08,0.40,0.16)});
+    pg.drawText(limpio((sedeN?"Sede: "+sedeN+"  ·  ":"")+"Recibido por: "+(f.recibido_por||"—")+(f.num_ingreso?"  ·  Ingreso ERP: "+f.num_ingreso:""),95),{x:26,y:banda-29,size:9,font:reg,color:rgb(0.15,0.15,0.15)});
+    pg.drawText(limpio("Foto de la factura subida en el pedido (Banco de Facturas)",95),{x:26,y:banda-43,size:8,font:reg,color:rgb(0.4,0.4,0.4)});
+    return new Blob([await doc.save()],{type:"application/pdf"});
+  }catch(e){ console.warn("foto de la factura a PDF:",e); return null; }
+}
+async function bajarPdfsEnZip(lista, nombreFn, nombreZip, res, opc){
+  const zip=new JSZip(); const usados=new Set(); let ok=0, conFoto=0; const fallidas=[], fallCufes=[];   // fallCufes: los que NO entraron al ZIP (16/10/2026)
   for(const f of lista){
     res.textContent="Preparando "+(ok+fallidas.length+1)+" de "+lista.length+"...";
+    if(opc&&opc.foto&&f.archivo_recibo){   // (19/10/2026) contabilidad: la foto del pedido en vez del PDF de la DIAN
+      const pf=await pdfDeFotoFactura(f);
+      if(pf){ zip.file(BancoUtils.nombreUnico(nombreFn(f),usados), pf); ok++; conFoto++; continue; }
+    }
     let blob=null;
     try{
       const {data:sig}=await SB.storage.from("facturas").createSignedUrl(f.archivo_pdf_sellado||f.archivo_pdf,120);
@@ -3399,7 +3429,7 @@ async function bajarPdfsEnZip(lista, nombreFn, nombreZip, res){
     a.href=URL.createObjectURL(out); a.download=nombreZip;
     document.body.appendChild(a); a.click(); a.remove();
   }
-  return {ok,fallidas,fallCufes};
+  return {ok,fallidas,fallCufes,conFoto};
 }
 const etiquetaRango=(desde,hasta)=>(desde||"inicio")+"_a_"+(hasta||BancoUtils.hoyColombia());
 const textoRango=(desde,hasta)=>desde||hasta?(" del "+(desde||"inicio")+" al "+(hasta||"hoy")):"";
