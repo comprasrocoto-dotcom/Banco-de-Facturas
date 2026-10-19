@@ -12,7 +12,7 @@
 
   // (18/10/2026) + inventario general y auditoria de punto de venta (supabase/tareas_plantillas.sql amplia la lista en la base)
   const TIPOS = { inventario: '📦 Inventario cíclico', inventario_general: '🗃️ Inventario general', auditoria: '🔍 Auditoría de punto de venta',
-    cierre_mes: '🗓️ Cierre de mes (token DIAN)', capacitacion: '🎓 Capacitación', visita: '🚗 Visita', otra: '📝 Otra' };
+    cierre_mes: '🗓️ Token DIAN diario y cierre de mes', capacitacion: '🎓 Capacitación', visita: '🚗 Visita', otra: '📝 Otra' };
 
   // ---------- PLANTILLAS (18/10/2026, pedido del usuario) ----------
   // Al elegir el tipo se cargan el resumen y las actividades; se pueden editar antes de asignar y despues (solo esa tarea:
@@ -51,18 +51,19 @@
         'Documentar evidencias y observaciones.', 'Socializar los resultados con el responsable del punto de venta.',
         'Registrar acciones correctivas y pendientes.'],
     },
-    // (19/10/2026) pedido del usuario: subir el token a la DIAN y al cerrar el mes el banco queda sin facturas sin asignar y todo conciliado
+    // (19/10/2026) pedido del usuario: el token de la DIAN se sube TODOS LOS DIAS y a fin de mes todo debe quedar depurado e ingresado
     cierre_mes: {
-      resumen: 'Cerrar el mes en el Banco de Facturas: subir el token de la DIAN para traer todas las facturas recibidas del mes, dejar el banco sin facturas «Sin asignar» y dejar todo conciliado (DIAN, Banco de Facturas y Hiopos) antes del cierre.',
-      actividades: ['Pedir el token en la DIAN (llega al correo) y subirlo antes del cierre.',
-        'Traer de la DIAN las facturas recibidas del mes completo (del día 1 al último día del mes).',
-        'Hacer el Cruce DIAN y bajar los PDF que falten para que suban al banco.',
-        'Dejar en cero las facturas «Sin asignar»: cada una asignada a su sede y responsable.',
-        'Revisar las facturas sin sellar y dejarlas selladas.',
-        'Cargar en Conciliación el reporte «Documentos» de Hiopos del mes.',
-        'Conciliar: que no quede ninguna factura «PENDIENTE DE INGRESO», «POR REVISAR» ni «ERROR DE CONSULTA».',
-        'Revisar las notas crédito y las facturas anuladas del mes.',
-        'Enviar a contabilidad todo lo que esté «Por enviar» del mes.',
+      resumen: 'El token de la DIAN se debe subir TODOS LOS DÍAS (no solo al cierre), para que las facturas del día lleguen al Banco de Facturas y se trabajen a tiempo. Al FIN DEL MES todo debe quedar DEPURADO E INGRESADO: ninguna factura «Sin asignar», todas ingresadas al ERP y selladas, y todo conciliado (DIAN, Banco de Facturas y Hiopos).',
+      actividades: ['TODOS LOS DÍAS: pedir el token en la DIAN (llega al correo) y subirlo.',
+        'TODOS LOS DÍAS: hacer el Cruce DIAN y bajar los PDF que falten para que suban al banco.',
+        'TODOS LOS DÍAS: asignar las facturas nuevas a su sede y responsable (que no se acumulen en «Sin asignar»).',
+        'FIN DE MES: confirmar que se trajeron de la DIAN las facturas del mes completo (del día 1 al último día).',
+        'FIN DE MES: «Sin asignar» en CERO.',
+        'FIN DE MES: todas las facturas INGRESADAS al ERP (con N° de ingreso) y SELLADAS.',
+        'FIN DE MES: cargar en Conciliación el reporte «Documentos» de Hiopos del mes.',
+        'FIN DE MES: conciliar: que no quede ninguna factura «PENDIENTE DE INGRESO», «POR REVISAR» ni «ERROR DE CONSULTA».',
+        'FIN DE MES: depurar las notas crédito, las facturas anuladas y las duplicadas.',
+        'FIN DE MES: enviar a contabilidad todo lo que esté «Por enviar».',
         'Registrar las novedades que no se pudieron cerrar y avisar al administrador.',
         'Subir evidencia: pantallazo del banco con «Sin asignar» en 0 y de la conciliación al día.'],
     },
