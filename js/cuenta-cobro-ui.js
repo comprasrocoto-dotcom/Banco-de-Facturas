@@ -101,7 +101,14 @@ async function ccElegirFoto(input) {
     $('ccFotoVista').innerHTML = `<span class="badge" style="font-size:13px">📄 ${escAg(f.name || 'cuenta de cobro.pdf')} · ${Math.max(1, Math.round(f.size / 1024))} KB</span>`;
     $('ccErr').textContent = ''; return;
   }
-  try { CC.foto = await ccComprimir(f); } catch (e) { CC.foto = f; }
+  // (19/10/2026) ESCANEAR la foto (4 esquinas -> hoja derecha y en blanco y negro): js/escaner-ui.js
+  let escaneada = null;
+  if (typeof escanearFoto === 'function') {
+    const r = await escanearFoto(f);
+    if (r === null) { input.value = ''; return; }   // cancelo
+    if (r && r.blob) escaneada = r.blob;
+  }
+  try { CC.foto = escaneada || await ccComprimir(f); } catch (e) { CC.foto = f; }
   CC.fotoUrl = URL.createObjectURL(CC.foto);
   $('ccFotoVista').innerHTML = `<img src="${CC.fotoUrl}" alt="Foto de la cuenta de cobro" style="max-width:100%;max-height:220px;border:1px solid var(--line);border-radius:8px">`;
   $('ccErr').textContent = '';
