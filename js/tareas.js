@@ -53,10 +53,11 @@
     },
     // (19/10/2026) pedido del usuario: el token de la DIAN se sube TODOS LOS DIAS y a fin de mes todo debe quedar depurado e ingresado
     cierre_mes: {
-      resumen: 'El token de la DIAN se debe subir TODOS LOS DÍAS (no solo al cierre), para que las facturas del día lleguen al Banco de Facturas y se trabajen a tiempo. Al FIN DEL MES todo debe quedar DEPURADO E INGRESADO: ninguna factura «Sin asignar», todas ingresadas al ERP y selladas, y todo conciliado (DIAN, Banco de Facturas y Hiopos).',
+      resumen: 'El token de la DIAN se debe subir TODOS LOS DÍAS (no solo al cierre), para que las facturas del día lleguen al Banco de Facturas y se trabajen a tiempo. Cada día se valida en la web con «✅ Hoy quedó OK» (o «❌ Hoy NO quedó OK» y qué pasó). Al FIN DEL MES todo debe quedar DEPURADO E INGRESADO: ninguna factura «Sin asignar», todas ingresadas al ERP y selladas, y todo conciliado (DIAN, Banco de Facturas y Hiopos).',
       actividades: ['TODOS LOS DÍAS: pedir el token en la DIAN (llega al correo) y subirlo.',
         'TODOS LOS DÍAS: hacer el Cruce DIAN y bajar los PDF que falten para que suban al banco.',
         'TODOS LOS DÍAS: asignar las facturas nuevas a su sede y responsable (que no se acumulen en «Sin asignar»).',
+        'TODOS LOS DÍAS: marcar en la tarea «✅ Hoy quedó OK» (o «❌ Hoy NO quedó OK» y qué pasó).',
         'FIN DE MES: confirmar que se trajeron de la DIAN las facturas del mes completo (del día 1 al último día).',
         'FIN DE MES: «Sin asignar» en CERO.',
         'FIN DE MES: todas las facturas INGRESADAS al ERP (con N° de ingreso) y SELLADAS.',
@@ -155,6 +156,41 @@
     }
     return semanas;
   }
+  // ---------- VALIDACION DIARIA (19/10/2026, pedido del usuario) ----------
+  // Las tareas de varios dias (ej. «Token DIAN diario», todo el mes para la misma persona) se validan DIA POR DIA: «✅ OK» o
+  // «❌ NO OK» (+ nota). Cada validacion queda en el historial de la tarea (tarea_evento) como un comentario con esta marca;
+  // si un dia se valida dos veces, vale la ultima. No necesita nada nuevo en la base.
+  const RX_DIA = /^📆 Día (\d{2})\/(\d{2})\/(\d{4}): (✅ OK|❌ NO OK)/;
+  const fechaTxt = (f) => String(f).slice(8, 10) + '/' + String(f).slice(5, 7) + '/' + String(f).slice(0, 4);
+  // texto del comentario que guarda la validacion de un dia
+  const marcaDia = (fecha, ok, nota) => '📆 Día ' + fechaTxt(fecha) + ': ' + (ok ? '✅ OK' : '❌ NO OK') + (nota && String(nota).trim() ? ' — ' + String(nota).trim() : '');
+  // eventos de la tarea -> Map("AAAA-MM-DD" -> { ok, nota, en, por }) (la ultima validacion de cada dia)
+  function validaciones(eventos) {
+    const m = new Map();
+    (eventos || []).slice().sort((x, y) => String(x.en || '').localeCompare(String(y.en || ''))).forEach((e) => {
+      const r = RX_DIA.exec(String(e.comentario || '')); if (!r) return;
+      const resto = String(e.comentario).slice(r[0].length).replace(/^\s*—\s*/, '').trim();
+      m.set(r[3] + '-' + r[2] + '-' + r[1], { ok: r[4] === '✅ OK', nota: resto, en: e.en || null, por: e.usuario_nombre || null });
+    });
+    return m;
+  }
+  // la tarea se valida dia por dia? (tiene inicio antes del fin)
+  const esDiaria = (t) => !!inicio(t);
+  // -> { dias: [{ fecha, estado: 'ok'|'no'|'falta'|'hoy'|'futuro', nota, por }], ok, no, falta, hoyHecho }
+  //    'falta' = dia que ya paso sin validar; 'hoy' = hoy, aun sin validar; 'futuro' = todavia no llega
+  function seguimiento(t, eventos, hoy) {
+    const ini = inicio(t); if (!ini) return null;
+    const fin = String(t.fecha_limite).slice(0, 10), v = validaciones(eventos), out = { dias: [], ok: 0, no: 0, falta: 0, hoyHecho: false };
+    for (let f = ini, i = 0; f <= fin && i < 400; f = sumarDias(f, 1), i++) {
+      const x = v.get(f);
+      const estado = x ? (x.ok ? 'ok' : 'no') : f < hoy ? 'falta' : f === hoy ? 'hoy' : 'futuro';
+      if (estado === 'ok') out.ok++; else if (estado === 'no') out.no++; else if (estado === 'falta') out.falta++;
+      if (f === hoy && x) out.hoyHecho = true;
+      out.dias.push({ fecha: f, estado, nota: x ? x.nota : '', por: x ? x.por : null });
+    }
+    return out;
+  }
+
   // tareas agrupadas por su fecha de cumplimiento -> Map("AAAA-MM-DD" -> [tareas ordenadas])
   function porDia(lista) {
     const m = new Map();
@@ -178,5 +214,6 @@
 
   return { TIPOS, ESTADOS, fechaCO, abierta, aTiempo, vencida, faltan, cuentan, cumplimiento, resumen, ordenar, rutaEvidencia,
     MESES, DIAS_CORTO, diaSemana, mesSumar, mesNombre, mesGrid, porDia, fechasPatron, colorEstado,
-    PLANTILLAS, plantilla, MAX_ACTIVIDADES, actividadesDeTexto, actividadesTexto, actividades, avance, sumarDias, diasEntre, inicio };
+    PLANTILLAS, plantilla, MAX_ACTIVIDADES, actividadesDeTexto, actividadesTexto, actividades, avance, sumarDias, diasEntre, inicio,
+    marcaDia, validaciones, esDiaria, seguimiento };
 });
