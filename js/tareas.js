@@ -12,7 +12,7 @@
 
   // (18/10/2026) + inventario general y auditoria de punto de venta (supabase/tareas_plantillas.sql amplia la lista en la base)
   const TIPOS = { inventario: '📦 Inventario cíclico', inventario_general: '🗃️ Inventario general', auditoria: '🔍 Auditoría de punto de venta',
-    capacitacion: '🎓 Capacitación', visita: '🚗 Visita', otra: '📝 Otra' };
+    cierre_mes: '🗓️ Cierre de mes (token DIAN)', capacitacion: '🎓 Capacitación', visita: '🚗 Visita', otra: '📝 Otra' };
 
   // ---------- PLANTILLAS (18/10/2026, pedido del usuario) ----------
   // Al elegir el tipo se cargan el resumen y las actividades; se pueden editar antes de asignar y despues (solo esa tarea:
@@ -50,6 +50,21 @@
         'Verificar el almacenamiento, la rotación y el vencimiento de las mercancías.', 'Registrar diferencias e inconsistencias.',
         'Documentar evidencias y observaciones.', 'Socializar los resultados con el responsable del punto de venta.',
         'Registrar acciones correctivas y pendientes.'],
+    },
+    // (19/10/2026) pedido del usuario: subir el token a la DIAN y al cerrar el mes el banco queda sin facturas sin asignar y todo conciliado
+    cierre_mes: {
+      resumen: 'Cerrar el mes en el Banco de Facturas: subir el token de la DIAN para traer todas las facturas recibidas del mes, dejar el banco sin facturas «Sin asignar» y dejar todo conciliado (DIAN, Banco de Facturas y Hiopos) antes del cierre.',
+      actividades: ['Pedir el token en la DIAN (llega al correo) y subirlo antes del cierre.',
+        'Traer de la DIAN las facturas recibidas del mes completo (del día 1 al último día del mes).',
+        'Hacer el Cruce DIAN y bajar los PDF que falten para que suban al banco.',
+        'Dejar en cero las facturas «Sin asignar»: cada una asignada a su sede y responsable.',
+        'Revisar las facturas sin sellar y dejarlas selladas.',
+        'Cargar en Conciliación el reporte «Documentos» de Hiopos del mes.',
+        'Conciliar: que no quede ninguna factura «PENDIENTE DE INGRESO», «POR REVISAR» ni «ERROR DE CONSULTA».',
+        'Revisar las notas crédito y las facturas anuladas del mes.',
+        'Enviar a contabilidad todo lo que esté «Por enviar» del mes.',
+        'Registrar las novedades que no se pudieron cerrar y avisar al administrador.',
+        'Subir evidencia: pantallazo del banco con «Sin asignar» en 0 y de la conciliación al día.'],
     },
     capacitacion: { resumen: '', actividades: [] },
   };
