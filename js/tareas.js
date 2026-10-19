@@ -12,7 +12,8 @@
 
   // (18/10/2026) + inventario general y auditoria de punto de venta (supabase/tareas_plantillas.sql amplia la lista en la base)
   const TIPOS = { inventario: '📦 Inventario cíclico', inventario_general: '🗃️ Inventario general', auditoria: '🔍 Auditoría de punto de venta',
-    cierre_mes: '🗓️ Token DIAN diario y cierre de mes', capacitacion: '🎓 Capacitación', visita: '🚗 Visita', otra: '📝 Otra' };
+    cierre_mes: '🗓️ Token DIAN diario y cierre de mes', ingreso_facturas: '🧾 Ingreso de facturas al ERP (diario)', envio_contabilidad: '📤 Envío a contabilidad (diario)',
+    capacitacion: '🎓 Capacitación', visita: '🚗 Visita', otra: '📝 Otra' };
 
   // ---------- PLANTILLAS (18/10/2026, pedido del usuario) ----------
   // Al elegir el tipo se cargan el resumen y las actividades; se pueden editar antes de asignar y despues (solo esa tarea:
@@ -68,13 +69,36 @@
         'Registrar las novedades que no se pudieron cerrar y avisar al administrador.',
         'Subir evidencia: pantallazo del banco con «Sin asignar» en 0 y de la conciliación al día.'],
     },
+    // (19/10/2026) pedido del usuario: tareas diarias de ingreso de facturas y de envio (correo) a contabilidad
+    ingreso_facturas: {
+      resumen: 'TODOS LOS DÍAS las facturas que llegan al Banco de Facturas deben quedar INGRESADAS al ERP (con N° de ingreso) y SELLADAS por su sede. Cada día se valida en la web con «✅ Hoy quedó OK» (o «❌ Hoy NO quedó OK» y qué pasó). Al fin del mes no debe quedar ninguna factura pendiente de ingreso.',
+      actividades: ['TODOS LOS DÍAS: en Pedidos, revisar lo pendiente de ingreso y pulsar «🚀 Iniciar ingresos al ERP».',
+        'TODOS LOS DÍAS: revisar los documentos con novedad del agente y resolverlos («🔁 REINTENTAR ERRORES» o ingreso a mano con su N° de ingreso).',
+        'TODOS LOS DÍAS: revisar «⏳ Ingresadas sin sellar» y pedirle a cada sede que selle sus facturas.',
+        'TODOS LOS DÍAS: las facturas y cuentas de cobro sin pedido: ingresarlas o dejar registrada la novedad.',
+        'TODOS LOS DÍAS: marcar en la tarea «✅ Hoy quedó OK» (o «❌ Hoy NO quedó OK» y qué pasó).',
+        'FIN DE MES: ninguna factura del mes pendiente de ingreso al ERP.'],
+    },
+    envio_contabilidad: {
+      resumen: 'TODOS LOS DÍAS se envía por correo a contabilidad todo lo que tiene el proceso terminado (ingresado al ERP y sellado): lo que queda listo antes de las 5:00 p. m. se envía ese mismo día; lo de después, el siguiente día hábil en la mañana. El correo lleva el ZIP, el Excel y el Excel ORGANIZADO de Hiopos. Cada día se valida en la web con «✅ Hoy quedó OK».',
+      actividades: ['TODOS LOS DÍAS: entrar a Facturas → «📤 Por enviar a contabilidad» y pulsar «📋 Preparar envío».',
+        'Desmarcar lo que NO debe ir (sigue pendiente para otro envío).',
+        'Pulsar «⬇ 1. Bajar ZIP + Excel de los marcados» (baja también «… - ORGANIZADO HIOPOS.xlsx»).',
+        'Enviar el correo a contabilidad con el ZIP, el Excel y el Excel organizado de Hiopos.',
+        'Pulsar «✅ 2. Ya los envié: marcar como enviados».',
+        'Revisar el aviso rojo / correo 🚨 de alertas: no deben quedar documentos sin enviar fuera de plazo.',
+        'TODOS LOS DÍAS: marcar en la tarea «✅ Hoy quedó OK» (o «❌ Hoy NO quedó OK» y qué pasó).'],
+    },
     capacitacion: { resumen: '', actividades: [] },
   };
   // copia de la plantilla (nunca la original, para que editar una tarea no la cambie)
   const plantilla = (tipo) => { const p = PLANTILLAS[tipo]; return { resumen: p ? p.resumen : '', actividades: p ? p.actividades.slice() : [] }; };
   // (19/10/2026) asunto (titulo) por defecto segun el tipo; tambien es el asunto del correo. Se puede cambiar antes de asignar.
   const TITULOS = { inventario: 'Inventario cíclico', inventario_general: 'Inventario general', auditoria: 'Auditoría de punto de venta',
-    cierre_mes: 'Subir token DIAN diario y dejar el mes depurado e ingresado', capacitacion: 'Capacitación', visita: 'Visita a punto de venta' };
+    cierre_mes: 'Subir token DIAN diario y dejar el mes depurado e ingresado', ingreso_facturas: 'Ingresar al ERP y sellar las facturas del día',
+    envio_contabilidad: 'Enviar a contabilidad lo del día (ZIP + Excel + Excel organizado)', capacitacion: 'Capacitación', visita: 'Visita a punto de venta' };
+  // tipos que la base acepta solo despues de supabase/tareas_cierre_mes.sql (mientras tanto la web los guarda como «Otra»)
+  const TIPOS_NUEVOS = ['cierre_mes', 'ingreso_facturas', 'envio_contabilidad'];
   const tituloDe = (tipo) => TITULOS[tipo] || '';
   const MAX_ACTIVIDADES = 60;
   // texto (una actividad por linea; se quitan viñetas «-», «•», «*» o casillas) -> [{ t, h:false }]
@@ -219,5 +243,5 @@
   return { TIPOS, ESTADOS, fechaCO, abierta, aTiempo, vencida, faltan, cuentan, cumplimiento, resumen, ordenar, rutaEvidencia,
     MESES, DIAS_CORTO, diaSemana, mesSumar, mesNombre, mesGrid, porDia, fechasPatron, colorEstado,
     PLANTILLAS, plantilla, MAX_ACTIVIDADES, actividadesDeTexto, actividadesTexto, actividades, avance, sumarDias, diasEntre, inicio,
-    marcaDia, validaciones, esDiaria, seguimiento, TITULOS, tituloDe };
+    marcaDia, validaciones, esDiaria, seguimiento, TITULOS, tituloDe, TIPOS_NUEVOS };
 });
