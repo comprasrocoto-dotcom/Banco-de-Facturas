@@ -100,6 +100,17 @@
   // tipos que la base acepta solo despues de supabase/tareas_cierre_mes.sql (mientras tanto la web los guarda como «Otra»)
   const TIPOS_NUEVOS = ['cierre_mes', 'ingreso_facturas', 'envio_contabilidad'];
   const tituloDe = (tipo) => TITULOS[tipo] || '';
+  // (19/10/2026) tipo «real» de una tarea: mientras la base no acepta los tipos nuevos, la web los guarda como «otra».
+  // Una «otra» se reconoce como token / ingreso / envio por su asunto o resumen de plantilla (o palabras clave del asunto),
+  // para que el filtro por tipo y el icono la muestren bien.
+  const CLAVES_TIPO = { cierre_mes: /token/i, ingreso_facturas: /ingres\w*.*factur|factur\w*.*ingres/i, envio_contabilidad: /contabilidad/i };
+  function tipoDe(t) {
+    if (!t) return '';
+    if (t.tipo !== 'otra') return t.tipo || '';
+    const tit = String(t.titulo || '').trim(), d = String(t.descripcion || '').trim();
+    return TIPOS_NUEVOS.find((k) => tit === TITULOS[k] || (PLANTILLAS[k] && d === PLANTILLAS[k].resumen))
+      || TIPOS_NUEVOS.find((k) => CLAVES_TIPO[k].test(tit)) || 'otra';
+  }
   const MAX_ACTIVIDADES = 60;
   // texto (una actividad por linea; se quitan viñetas «-», «•», «*» o casillas) -> [{ t, h:false }]
   function actividadesDeTexto(texto, previas) {
@@ -243,5 +254,5 @@
   return { TIPOS, ESTADOS, fechaCO, abierta, aTiempo, vencida, faltan, cuentan, cumplimiento, resumen, ordenar, rutaEvidencia,
     MESES, DIAS_CORTO, diaSemana, mesSumar, mesNombre, mesGrid, porDia, fechasPatron, colorEstado,
     PLANTILLAS, plantilla, MAX_ACTIVIDADES, actividadesDeTexto, actividadesTexto, actividades, avance, sumarDias, diasEntre, inicio,
-    marcaDia, validaciones, esDiaria, seguimiento, TITULOS, tituloDe, TIPOS_NUEVOS };
+    marcaDia, validaciones, esDiaria, seguimiento, TITULOS, tituloDe, TIPOS_NUEVOS, tipoDe };
 });
