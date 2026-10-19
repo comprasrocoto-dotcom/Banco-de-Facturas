@@ -88,15 +88,17 @@ async function tarAbrir() { const raiz = $('tareasRaiz'); if (!raiz) return; if 
 
 // (19/10/2026) FILTRO DE TAREAS: persona, tipo, sede, fechas y buscador valen para la lista y el calendario.
 // Fechas: la tarea entra si su rango (inicio -> vence) toca el rango elegido.
+// tipo real (reconoce las tareas diarias que la base guardo como «Otra»); si la pagina aun no tiene tipoDe, el de la base
+const tarTipoReal = (t) => (typeof Tareas.tipoDe === 'function' ? Tareas.tipoDe(t) : t.tipo);
 function tarPasaFiltro(t) {
   const q = (TAR.busca || '').trim().toLowerCase();
   if (TAR.filtroPersona && t.asignada_a !== TAR.filtroPersona) return false;
-  if (TAR.filtroTipo && t.tipo !== TAR.filtroTipo) return false;
+  if (TAR.filtroTipo && tarTipoReal(t) !== TAR.filtroTipo) return false;
   if (TAR.filtroSede === 'sin' ? !!t.sede_id : TAR.filtroSede && String(t.sede_id) !== TAR.filtroSede) return false;
   const fin = String(t.fecha_limite).slice(0, 10), ini = Tareas.inicio(t) || fin;
   if (TAR.filtroDesde && fin < TAR.filtroDesde) return false;
   if (TAR.filtroHasta && ini > TAR.filtroHasta) return false;
-  if (q && !(t.titulo + ' ' + (t.descripcion || '') + ' ' + tarNombre(t.asignada_a) + ' ' + tarSede(t.sede_id) + ' ' + (Tareas.TIPOS[t.tipo] || '')).toLowerCase().includes(q)) return false;
+  if (q && !(t.titulo + ' ' + (t.descripcion || '') + ' ' + tarNombre(t.asignada_a) + ' ' + tarSede(t.sede_id) + ' ' + (Tareas.TIPOS[tarTipoReal(t)] || '')).toLowerCase().includes(q)) return false;
   return true;
 }
 const tarHayFiltro = () => !!(TAR.filtroPersona || TAR.filtroTipo || TAR.filtroSede || TAR.filtroDesde || TAR.filtroHasta || (TAR.busca || '').trim());
@@ -240,7 +242,7 @@ function tarCalGridHtml() {
     const chips = ts.slice(0, 3).map((t) => {
       const k = Tareas.colorEstado(t, hoy), col = TAR_COLOR[k] || TAR_COLOR.pendiente;
       const quien = adm && !TAR.filtroPersona ? ' · ' + (tarNombre(t.asignada_a) || '').split(' ')[0] : '';
-      return `<div class="tcal-c ${k}" style="background:${col.bg};border-color:${col.bd};color:${col.tx}" title="${escAg(t.titulo + quien + ' · ' + col.t)}">${escAg((Tareas.TIPOS[t.tipo] || '📝').split(' ')[0])} ${escAg(t.titulo)}${escAg(quien)}</div>`;
+      return `<div class="tcal-c ${k}" style="background:${col.bg};border-color:${col.bd};color:${col.tx}" title="${escAg(t.titulo + quien + ' · ' + col.t)}">${escAg((Tareas.TIPOS[tarTipoReal(t)] || '📝').split(' ')[0])} ${escAg(t.titulo)}${escAg(quien)}</div>`;
     }).join('');
     h += `<div class="${cls}" onclick="tarCalClic('${c.fecha}')"><span class="tcal-n">${Number(c.fecha.slice(8, 10))}</span>${chips}${ts.length > 3 ? `<span class="tcal-mas">+${ts.length - 3} más</span>` : ''}</div>`;
   }));
@@ -393,8 +395,8 @@ function tarTarjetaHtml(t, hoy, adm) {
     if (adm && t.estado !== 'cancelada') acciones.push(`<button onclick="tarEditarFecha(${t.id})">✏️ Cambiar fechas</button>`, `<button class="d" onclick="tarEstado(${t.id},'cancelada')">✖ Cancelar</button>`);
     return `<div class="card" style="margin-bottom:8px${Tareas.vencida(t, hoy) ? ';border-left:5px solid #b91c1c' : ''}">
       <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
-        <div style="flex:1 1 260px"><b>${escAg((Tareas.TIPOS[t.tipo] || '📝').split(' ')[0])} ${escAg(t.titulo)}</b>
-          <div class="mut" style="font-size:12.5px">${escAg(Tareas.TIPOS[t.tipo] || '')}${adm ? ' · 👤 ' + escAg(tarNombre(t.asignada_a)) : ''}${t.sede_id ? ' · 🏪 ' + escAg(tarSede(t.sede_id)) : ''}${Tareas.inicio(t) ? ' · 🟢 inicia ' + tarFecha(Tareas.inicio(t)) : ''} · 🏁 vence ${tarFecha(t.fecha_limite)}${t.terminada_en ? ' · terminada ' + tarHora(t.terminada_en) : ''}</div></div>
+        <div style="flex:1 1 260px"><b>${escAg((Tareas.TIPOS[tarTipoReal(t)] || '📝').split(' ')[0])} ${escAg(t.titulo)}</b>
+          <div class="mut" style="font-size:12.5px">${escAg(Tareas.TIPOS[tarTipoReal(t)] || '')}${adm ? ' · 👤 ' + escAg(tarNombre(t.asignada_a)) : ''}${t.sede_id ? ' · 🏪 ' + escAg(tarSede(t.sede_id)) : ''}${Tareas.inicio(t) ? ' · 🟢 inicia ' + tarFecha(Tareas.inicio(t)) : ''} · 🏁 vence ${tarFecha(t.fecha_limite)}${t.terminada_en ? ' · terminada ' + tarHora(t.terminada_en) : ''}</div></div>
         <span class="badge">${Tareas.ESTADOS[t.estado] || t.estado}</span>${vence}${seg && Tareas.abierta(t) && seg.dias.some((d) => d.estado === 'hoy') ? '<span class="badge" style="color:#1e40af;background:#eff6ff;border-color:#93c5fd;font-weight:700">📆 falta validar HOY</span>' : ''}
       </div>
       ${TAR.editando === t.id ? tarEditorHtml(t) : (t.descripcion ? `<div style="margin-top:6px;white-space:pre-wrap;font-size:13.5px">${escAg(t.descripcion)}</div>` : '') + tarActividadesHtml(t, adm)}
@@ -620,7 +622,7 @@ async function tarActividad(id, idx, el) {
 function tarEditarAbrir(id) { TAR.editando = id; tarRefrescarCuerpo(); }
 function tarEditarCerrar() { TAR.editando = null; tarRefrescarCuerpo(); }
 function tarEditorHtml(t) {
-  const p = Tareas.plantilla(t.tipo), conPlantilla = p.resumen || p.actividades.length;
+  const p = Tareas.plantilla(tarTipoReal(t)), conPlantilla = p.resumen || p.actividades.length;
   return `<div style="margin-top:8px;background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:8px 10px">
       <div class="mut" style="font-size:12.5px">📋 Resumen (solo de esta tarea; la plantilla no cambia)</div>
       <textarea id="tarEdDesc" rows="3" style="width:100%;margin-top:2px">${escAg(t.descripcion || '')}</textarea>
@@ -628,7 +630,7 @@ function tarEditorHtml(t) {
       <textarea id="tarEdActs" rows="${Math.min(14, Math.max(4, Tareas.actividades(t).length + 1))}" style="width:100%;margin-top:2px">${escAg(Tareas.actividadesTexto(t.actividades))}</textarea>
       <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center">
         <button class="p" onclick="tarEditarGuardar(${t.id})">💾 Guardar</button><button onclick="tarEditarCerrar()">Cancelar</button>
-        ${conPlantilla ? `<button class="s" onclick="tarEditarPlantilla('${escAg(t.tipo)}')" title="Pone el texto de la plantilla en los cuadros (no guarda hasta que presiones Guardar)">↺ Poner la plantilla de ${escAg(Tareas.TIPOS[t.tipo] || t.tipo)}</button>` : ''}
+        ${conPlantilla ? `<button class="s" onclick="tarEditarPlantilla('${escAg(tarTipoReal(t))}')" title="Pone el texto de la plantilla en los cuadros (no guarda hasta que presiones Guardar)">↺ Poner la plantilla de ${escAg(Tareas.TIPOS[tarTipoReal(t)] || t.tipo)}</button>` : ''}
         <span class="mut" id="tarEdRes"></span>
       </div>
     </div>`;
