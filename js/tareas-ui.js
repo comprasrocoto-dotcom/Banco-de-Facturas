@@ -492,7 +492,14 @@ function tarPlantillaCargar(idTipo, idDesc, idActs) {
   d.setAttribute('data-plantilla', sel.value);
 }
 // asigna con tarea_asignar; si la base todavia no la tiene y la tarea no usa nada nuevo, sigue como antes (tarea_crear / _varias)
-async function tarAsignarRpc(a0) {
+async function tarAsignarRpc(a0, sinRespaldo) {
+  // (19/10/2026) tipo nuevo «cierre de mes»: si la base aun no lo acepta (supabase/tareas_cierre_mes.sql sin aplicar), se guarda
+  // como «Otra» con el mismo titulo, resumen y actividades, para que nunca falle
+  if (a0.p_tipo === 'cierre_mes' && !sinRespaldo) {
+    const rc = await tarAsignarRpc(a0, true);
+    if (!rc.error || !/tipo_check|check constraint/i.test(rc.error.message || '')) return rc;
+    return tarAsignarRpc(Object.assign({}, a0, { p_tipo: 'otra' }), true);
+  }
   // (18/10/2026) con fecha de inicio: tarea_asignar_rango (supabase/tareas_fechas.sql); si la base aun no la tiene y la tarea es de un
   // solo dia, sigue como antes
   const r0 = await SB.rpc('tarea_asignar_rango', a0);
