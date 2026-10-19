@@ -77,7 +77,15 @@ function contPrepClave() { return 'bf_envio_prep_' + ((typeof usuario !== 'undef
 function contPrepLeer() { try { const s = localStorage.getItem(contPrepClave()); CONT_PREP = s ? JSON.parse(s) : null; } catch (e) { /* sin storage: solo no se recuerda */ } }
 function contPrepGuardar() { try { if (CONT_PREP) localStorage.setItem(contPrepClave(), JSON.stringify(CONT_PREP)); else localStorage.removeItem(contPrepClave()); } catch (e) { /* sin storage */ } }
 function contPendientes() { return EnvioContabilidad.pendientes(contBase(), CONT_ENV, BancoUtils.esTerminada); }
-function contPrepRefrescar() { if (typeof pintarPanelEnvio === 'function') pintarPanelEnvio('envio'); }
+// (19/10/2026) al marcar / desmarcar, la lista se vuelve a pintar: se guarda y se repone donde iba el scroll
+// (antes saltaba al inicio de la lista con cada casilla)
+function contPrepRefrescar() {
+  if (typeof pintarPanelEnvio !== 'function') return;
+  const l = document.getElementById('envioLista'), arriba = l ? l.scrollTop : 0, lado = l ? l.scrollLeft : 0, y = window.scrollY;
+  pintarPanelEnvio('envio');
+  const n = document.getElementById('envioLista'); if (n) { n.scrollTop = arriba; n.scrollLeft = lado; }
+  if (Math.abs(window.scrollY - y) > 1) window.scrollTo(window.scrollX, y);
+}
 
 function contPrepHtml(p) {
   const v = EnvioContabilidad.vigentes(CONT_PREP, p.lista), sel = EnvioContabilidad.seleccion(CONT_PREP, v.docs);
@@ -98,7 +106,7 @@ function contPrepHtml(p) {
           ${v.nuevos.length ? `<b style="color:#b45309">${v.nuevos.length} documento(s) nuevos quedaron para el próximo envío.</b>` : ''}${v.salieron ? ` ${v.salieron} no se ven con este filtro de sede o ya no están pendientes.` : ''}</div></div>
       <button onclick="contPrepTodos(true)">☑ Todos</button><button onclick="contPrepTodos(false)">☐ Ninguno</button>
     </div>
-    ${v.docs.length ? `<div style="overflow-x:auto;max-height:420px;overflow-y:auto;margin-top:8px"><table style="width:100%;font-size:13px;border-collapse:collapse">
+    ${v.docs.length ? `<div id="envioLista" style="overflow-x:auto;max-height:420px;overflow-y:auto;margin-top:8px"><table style="width:100%;font-size:13px;border-collapse:collapse">
       <tr class="mut" style="text-align:left"><th></th><th>Documento</th><th>Proveedor</th><th>Sede</th><th>Ingreso ERP</th><th style="text-align:right">Total</th><th></th></tr>${filas}</table></div>`
     : `<div class="mut" style="margin-top:8px">Ninguno de los ${CONT_PREP.cufes.length} documento(s) de este envío está pendiente con el filtro de sede actual: cambia a «Todas las sedes» o descártalo.</div>`}
     <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
