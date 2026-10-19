@@ -135,7 +135,7 @@ async function contPrepBajar() {
   const res = $('envioRes') || $('resdesc'), b = $('btnEnvioBajar'); if (b) b.disabled = true;
   try {
     const hoy = BancoUtils.hoyColombia();
-    const r = await bajarPdfsEnZip(sel, BancoUtils.nombreArchivoCiclo, 'envio_contabilidad_' + hoy + '.zip', res);
+    const r = await bajarPdfsEnZip(sel, BancoUtils.nombreArchivoCiclo, 'envio_contabilidad_' + hoy + '.zip', res, { foto: true });   // (19/10/2026) foto del pedido
     const fall = new Set(r.fallCufes || []);
     if (fall.size) fall.forEach((c) => { CONT_PREP = EnvioContabilidad.marcar(CONT_PREP, c, false); });   // sin PDF: se desmarca (sigue pendiente)
     const enZip = sel.filter((f) => !fall.has(f.cufe));
@@ -166,7 +166,7 @@ async function rebajarLote(lote) {
   const docs = facturas.filter((f) => { const e = CONT_ENV.get(f.cufe); return e && e.lote === lote; });
   if (!docs.length) return;
   const res = $('envioRes') || $('resdesc');
-  const r = await bajarPdfsEnZip(docs, BancoUtils.nombreArchivoCiclo, 'envio_contabilidad_lote_' + lote + '.zip', res);
+  const r = await bajarPdfsEnZip(docs, BancoUtils.nombreArchivoCiclo, 'envio_contabilidad_lote_' + lote + '.zip', res, { foto: true });
   await descargarContabilidad(docs, 'envio_contabilidad_lote_' + lote + '.xlsx');
   res.textContent = msgZip(r, ' Lote ' + lote + ' (solo para volver a mirarlo: no cambia nada).');
   await contOrganizadoAviso(docs, 'envio_contabilidad_lote_' + lote);
