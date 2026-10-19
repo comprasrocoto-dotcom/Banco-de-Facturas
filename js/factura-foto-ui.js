@@ -110,7 +110,15 @@ async function ffElegirFoto(input) {
   if (!f) return;
   if (!/^image\//.test(f.type)) { $('ffErr').textContent = 'El archivo no es una foto.'; return; }
   if (FF.fotoUrl) { try { URL.revokeObjectURL(FF.fotoUrl); } catch (e) {} FF.fotoUrl = null; }
-  try { FF.foto = await ccComprimir(f); } catch (e) { FF.foto = f; }
+  // (19/10/2026) ESCANEAR: la sede marca las 4 esquinas y la hoja queda derecha y en blanco y negro (js/escaner-ui.js).
+  // El QR se sigue leyendo de la foto original (mas detalle).
+  let escaneada = null;
+  if (typeof escanearFoto === 'function') {
+    const r = await escanearFoto(f);
+    if (r === null) { input.value = ''; return; }   // cancelo
+    if (r && r.blob) escaneada = r.blob;
+  }
+  try { FF.foto = escaneada || await ccComprimir(f); } catch (e) { FF.foto = f; }
   FF.fotoUrl = URL.createObjectURL(FF.foto);
   $('ffFotoVista').innerHTML = `<img src="${FF.fotoUrl}" alt="Foto de la factura" style="max-width:100%;max-height:220px;border:1px solid var(--line);border-radius:8px">`;
   $('ffErr').textContent = '';
