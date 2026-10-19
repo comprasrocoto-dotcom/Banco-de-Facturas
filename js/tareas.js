@@ -72,6 +72,10 @@
   };
   // copia de la plantilla (nunca la original, para que editar una tarea no la cambie)
   const plantilla = (tipo) => { const p = PLANTILLAS[tipo]; return { resumen: p ? p.resumen : '', actividades: p ? p.actividades.slice() : [] }; };
+  // (19/10/2026) asunto (titulo) por defecto segun el tipo; tambien es el asunto del correo. Se puede cambiar antes de asignar.
+  const TITULOS = { inventario: 'Inventario cíclico', inventario_general: 'Inventario general', auditoria: 'Auditoría de punto de venta',
+    cierre_mes: 'Subir token DIAN diario y dejar el mes depurado e ingresado', capacitacion: 'Capacitación', visita: 'Visita a punto de venta' };
+  const tituloDe = (tipo) => TITULOS[tipo] || '';
   const MAX_ACTIVIDADES = 60;
   // texto (una actividad por linea; se quitan viñetas «-», «•», «*» o casillas) -> [{ t, h:false }]
   function actividadesDeTexto(texto, previas) {
@@ -215,5 +219,5 @@
   return { TIPOS, ESTADOS, fechaCO, abierta, aTiempo, vencida, faltan, cuentan, cumplimiento, resumen, ordenar, rutaEvidencia,
     MESES, DIAS_CORTO, diaSemana, mesSumar, mesNombre, mesGrid, porDia, fechasPatron, colorEstado,
     PLANTILLAS, plantilla, MAX_ACTIVIDADES, actividadesDeTexto, actividadesTexto, actividades, avance, sumarDias, diasEntre, inicio,
-    marcaDia, validaciones, esDiaria, seguimiento };
+    marcaDia, validaciones, esDiaria, seguimiento, TITULOS, tituloDe };
 });
