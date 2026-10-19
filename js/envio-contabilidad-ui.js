@@ -135,6 +135,7 @@ async function contPrepBajar() {
     await descargarContabilidad(enZip, 'envio_contabilidad_' + hoy + '.xlsx');
     CONT_PREP = Object.assign({}, CONT_PREP, { bajado: true, firmaBajada: EnvioContabilidad.firma(enZip.map((f) => f.cufe)) });
     contPrepGuardar(); contPrepRefrescar();
+    await contOrganizadoAviso(enZip, 'envio_contabilidad_' + hoy);   // (19/10/2026) + el Excel ORGANIZADO de Hiopos (sin doble trabajo)
     if (fall.size) alert('⚠️ ' + fall.size + ' PDF no se pudieron bajar: quedaron DESMARCADOS y siguen pendientes.');
   } finally { const bb = $('btnEnvioBajar'); if (bb) bb.disabled = false; }
 }
@@ -160,6 +161,7 @@ async function rebajarLote(lote) {
   const r = await bajarPdfsEnZip(docs, BancoUtils.nombreArchivoCiclo, 'envio_contabilidad_lote_' + lote + '.zip', res);
   await descargarContabilidad(docs, 'envio_contabilidad_lote_' + lote + '.xlsx');
   res.textContent = msgZip(r, ' Lote ' + lote + ' (solo para volver a mirarlo: no cambia nada).');
+  await contOrganizadoAviso(docs, 'envio_contabilidad_lote_' + lote);
 }
 
 async function deshacerLote(lote) {
@@ -168,4 +170,63 @@ async function deshacerLote(lote) {
   if (r.error) { alert('No se pudo: ' + r.error.message); return; }
   await cargarEnvioContabilidad(); pintar();
   alert('Lote ' + lote + ' deshecho: ' + r.data + ' documento(s) vuelven a «Por enviar».');
+}
+
+// ============================================================
+//  (19/10/2026) EXCEL ORGANIZADO DE HIOPOS JUNTO CON EL ENVIO (pedido del usuario: no hacer doble trabajo)
+// ============================================================
+// Con el ZIP y el Excel del envio baja tambien «<nombre> - ORGANIZADO HIOPOS.xlsx»: el mismo libro del modulo
+// «📊 Organizador Hiopos» (Documentos, Caja menor, Por revisar, Clasificacion, Resumen) con las mismas reglas por proveedor,
+// pero solo con los documentos del envio. Los datos salen de la copia del reporte «Documentos» de Hiopos que se carga en
+// Conciliacion (erp_documento); lo que no este ahi sale con los datos de la web y la Nota lo marca para verificar en Hiopos.
+// No toca Hiopos ni crea nada: solo arma el Excel (y deja el registro en hiopos_organizador_ejecucion, igual que el modulo).
+async function contOrganizadoHiopos(docs, nombre) {
+  if (typeof OrganizadorHiopos === 'undefined' || typeof orgHCargarExcelJS !== 'function') throw new Error('el Organizador Hiopos no está cargado en esta página');
+  const lista = (docs || []).filter((f) => f && f.num_ingreso);
+  if (!lista.length) return null;
+  const causacion = (n) => String(n || '').replace(/[\s/]+/g, '').toUpperCase();
+  const ingresos = [...new Set(lista.map((f) => causacion(f.num_ingreso)))];
+  const erp = [];
+  for (let i = 0; i < ingresos.length; i += 100) {
+    const { data, error } = await SB.from('erp_documento').select('causacion,serie,numero,fecha,hora,su_doc,contacto,almacen,base,impuestos,neto,procesado').in('causacion', ingresos.slice(i, i + 100));
+    if (error) throw new Error('no pude leer la copia del reporte de Hiopos: ' + error.message);
+    erp.push(...(data || []));
+  }
+  const centro = new Map(), cufes = lista.map((f) => f.cufe).filter(Boolean);
+  for (let i = 0; i < cufes.length; i += 100) {
+    const { data } = await SB.from('pedidos').select('factura_cufe,centro_costo').in('factura_cufe', cufes.slice(i, i + 100)).not('centro_costo', 'is', null);
+    (data || []).forEach((p) => centro.set(p.factura_cufe, p.centro_costo));
+  }
+  const sedeDe = (id) => { const x = (typeof sedes !== 'undefined' ? sedes : []).find((y) => y.id === id); return x ? x.nombre : ''; };
+  const t = OrganizadorHiopos.tablaDesdeEnvio(lista.map((f) => ({ num_ingreso: f.num_ingreso, documento: f.documento || ((f.prefijo || '') + (f.folio || '')), emisor: f.emisor,
+    almacen: sedeDe(f.sede_id), fecha: f.fecha_ingreso || f.fecha_emision || '', total: f.total, iva_pct: f.iva, centro_costo: centro.get(f.cufe) || null })), erp);
+  const lectura = OrganizadorHiopos.leerTabla(t.aoa);
+  await orgHCargarReglas();                       // reglas confirmadas por proveedor (cuenta de cobro / caja menor)
+  orgH.banco = null; const banco = await orgHCargarBanco();   // evidencia fresca del Banco de Facturas
+  const evidencia = OrganizadorHiopos.armarEvidencia({ facturas: banco.facturas, proveedores: banco.proveedores });
+  const cl = OrganizadorHiopos.clasificar(lectura.filas, [...orgH.reglas.values()], evidencia, new Map());
+  const ExcelJS = await orgHCargarExcelJS();
+  const wb = OrganizadorHiopos.armarLibro(ExcelJS, { lectura, clasificacion: cl, nombreArchivo: nombre + '.xlsx', ahora: new Date().toLocaleString('es-CO'), comparacion: null });
+  const buf = await wb.xlsx.writeBuffer();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  a.download = nombre + ' - ORGANIZADO HIOPOS.xlsx';
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  const R = OrganizadorHiopos.resumen(lectura, cl);
+  try {
+    await SB.from('hiopos_organizador_ejecucion').insert({ huella: 'envio:' + EnvioContabilidad.firma(cufes), archivo: nombre + ' (envío a contabilidad)', documentos: R.validos, neto: R.neto.total, usuario: orgHUsuario(),
+      resumen: { cuentasCobro: R.cuentasCobro, cajaMenor: R.cajaMenor, porRevisar: R.revision, errores: R.errores, porTipo: R.porTipo, deWeb: t.deWeb.length } });
+  } catch (e) { /* el Excel ya se descargo: el registro es solo informativo */ }
+  return { documentos: R.validos, deWeb: t.deWeb, revision: R.revision, cuentasCobro: R.cuentasCobro, cajaMenor: R.cajaMenor };
+}
+// lo llama el envio: nunca rompe el ZIP ni el Excel de contabilidad (ya bajaron); solo avisa
+async function contOrganizadoAviso(docs, nombre) {
+  const res = $('envioRes') || $('resdesc');
+  try {
+    const r = await contOrganizadoHiopos(docs, nombre);
+    if (!r) return;
+    const txt = '📊 Excel ORGANIZADO de Hiopos: ' + r.documentos + ' documento(s) (' + r.cuentasCobro + ' cuenta(s) de cobro, ' + r.cajaMenor + ' caja menor' + (r.revision ? ', ' + r.revision + ' por revisar' : '') + ').' +
+      (r.deWeb.length ? ' ⚠️ ' + r.deWeb.length + ' no estaban en el último reporte de Hiopos cargado en Conciliación: salen con datos de la web y la Nota dice «VERIFICAR EN HIOPOS».' : '');
+    if (res) res.textContent = ((res.textContent || '') + ' ' + txt).trim();
+  } catch (e) { alert('El ZIP y el Excel de contabilidad sí bajaron, pero no pude armar el Excel organizado de Hiopos: ' + e.message + '\n\nPuedes hacerlo como antes en «📊 Organizador Hiopos».'); }
 }
