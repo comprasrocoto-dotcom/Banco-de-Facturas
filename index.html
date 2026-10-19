@@ -237,8 +237,9 @@ tr:hover td{background:#f1f5f9}
         <input type="date" id="d1" style="width:auto;margin:0">
         <span class="mut">al</span>
         <input type="date" id="d2" style="width:auto;margin:0">
-        <button class="p" onclick="descargarSelladas()">⬇ Descargar ZIP</button>
-        <button class="p" onclick="descargarCicloCompleto()" title="Lo mismo que la vista ✅ Proceso terminado (con N° de ingreso ERP y sellada, o nota crédito): un PDF por documento, dentro de un ZIP. Las fechas del/al cuentan por FECHA DE INGRESO AL ERP">📄 PDF ciclo completo</button>
+        <!-- (19/10/2026) pedido del usuario: «⬇ Descargar ZIP» y «📄 PDF ciclo completo» se reemplazan por el envío a contabilidad
+             (lista fija que baja ZIP + Excel + Excel organizado de Hiopos). Las funciones descargarSelladas / descargarCicloCompleto siguen en el código. -->
+        <button class="p" onclick="setVista('envio');window.scrollTo({top:0,behavior:'smooth'})" title="Abre «📤 Por enviar a contabilidad»: todo lo que tiene el proceso terminado y aún no se ha enviado. Ahí se prepara el envío y se baja el ZIP + Excel">📤 Por enviar a contabilidad</button>
         <button class="p" onclick="descargarPendientes()" title="Sin Nº de ingreso ERP o con novedad registrada">📥 Pendientes y novedades</button>
         <button class="p" onclick="descargarContabilidad()" title="Exporta Excel con centro de costo, cuenta contable, base, IVA y total para SIIGO" style="background:#1e40af;border-color:#1e40af">📊 Exportar contabilidad</button>
         <span class="mut" id="resDian"></span>
