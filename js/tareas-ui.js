@@ -24,6 +24,40 @@ function tarSedeOpciones() {
   return [...grupos.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([m, l]) => `<optgroup label="${escAg(m)}">${l.slice().sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)))
     .map((s) => `<option value="${s.id}">${escAg(s.nombre)} · ${escAg(m)}</option>`).join('')}</optgroup>`).join('');
 }
+// (19/10/2026) SEDES CON SELECCION MULTIPLE: casillas agrupadas por marca dentro de un desplegable (<details>).
+// Al asignar, a cada persona le queda una tarea por cada sede marcada (y por cada fecha). Ninguna marcada = sin sede.
+function tarSedesHtml(id) {
+  const grupos = new Map();
+  (typeof sedes !== 'undefined' ? sedes : []).forEach((s) => { const m = (s.marcas && s.marcas.nombre) || 'Sin marca'; if (!grupos.has(m)) grupos.set(m, []); grupos.get(m).push(s); });
+  const cuerpo = [...grupos.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([m, l]) => `<div style="margin-top:4px"><b style="font-size:12.5px">${escAg(m)}</b>
+      ${l.slice().sort((a, b) => String(a.nombre).localeCompare(String(b.nombre))).map((s) => `<label style="display:flex;gap:6px;align-items:center;padding:2px 0 2px 8px;white-space:nowrap;cursor:pointer"><input type="checkbox" data-tsede="${s.id}" style="width:auto;margin:0" onchange="tarSedesResumen('${id}')">${escAg(s.nombre)} · ${escAg(m)}</label>`).join('')}</div>`).join('');
+  return `<details id="${id}" class="tar-sedes" style="display:inline-block;position:relative;vertical-align:middle">
+      <summary style="cursor:pointer;list-style:none;border:1px solid var(--line);border-radius:8px;padding:6px 10px;background:#fff;min-width:220px">
+        <span data-tsres>— (ninguna)</span> ▾</summary>
+      <div style="position:absolute;z-index:30;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:6px 10px;max-height:320px;overflow:auto;min-width:260px">
+        <div style="display:flex;gap:8px;margin-bottom:2px"><button type="button" class="s" style="padding:2px 8px;font-size:12px" onclick="tarSedesTodas('${id}',true)">Todas</button><button type="button" style="padding:2px 8px;font-size:12px" onclick="tarSedesTodas('${id}',false)">Ninguna</button></div>
+        ${cuerpo}
+      </div>
+    </details>`;
+}
+function tarSedesElegidas(id) { return [...document.querySelectorAll('#' + id + ' input[data-tsede]')].filter((x) => x.checked).map((x) => Number(x.getAttribute('data-tsede'))); }
+function tarSedesResumen(id) {
+  const d = $(id); if (!d) return;
+  const l = tarSedesElegidas(id), r = d.querySelector('[data-tsres]');
+  if (r) r.textContent = !l.length ? '— (ninguna)' : l.length === 1 ? tarSede(l[0]) : l.length + ' sedes marcadas';
+}
+function tarSedesTodas(id, si) { document.querySelectorAll('#' + id + ' input[data-tsede]').forEach((x) => { x.checked = !!si; }); tarSedesResumen(id); }
+// asigna una vez por sede marcada (o una sola vez sin sede). a = parametros de tarAsignarRpc sin p_sede -> { data, error, hechas }
+async function tarAsignarPorSedes(a, sedesIds) {
+  const lista = sedesIds.length ? sedesIds : [null];
+  let total = 0, hechas = 0;
+  for (const s of lista) {
+    const r = await tarAsignarRpc(Object.assign({}, a, { p_sede: s }));
+    if (r.error) return { data: total, error: r.error, hechas, falto: s };
+    total += Number(r.data) || 0; hechas++;
+  }
+  return { data: total, error: null, hechas };
+}
 
 async function tarCargar() {
   const r = await SB.from('tarea').select('*').order('fecha_limite', { ascending: true }).limit(2000);
@@ -236,7 +270,7 @@ function tarSelCuentaHtml() {
 function tarPlanBarraHtml() {
   const dia = (n, t) => `<button class="chip" onclick="tarPlanPatron([${n}])" title="Marcar todos los ${t} que faltan del mes">${t}</button>`;
   return `<div style="background:#ecfeff;border:1px solid #67e8f9;border-radius:10px;padding:8px 10px;margin-bottom:8px">
-      <div style="font-weight:700;color:#155e75">📦 Planear el mes: marca los días en que va la tarea</div>
+      <div style="font-weight:700;color:#155e75">📦 Planear el mes: marca el día en que INICIA cada tarea</div>
       <div class="row" style="gap:4px;flex-wrap:wrap;margin-top:6px;align-items:center">
         <span class="mut">Marcar todos los:</span>${dia(1, 'lunes')}${dia(2, 'martes')}${dia(3, 'miércoles')}${dia(4, 'jueves')}${dia(5, 'viernes')}${dia(6, 'sábados')}${dia(7, 'domingos')}
         <button class="chip" onclick="tarPlanPatron([1,2,3,4,5])">Días hábiles (L–V)</button>
@@ -259,8 +293,10 @@ function tarPlanFormHtml() {
     <div style="display:flex;flex-wrap:wrap;gap:4px 14px">${personas.map((p) => `<label style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap"><input type="checkbox" data-tpq="${p.user_id}" style="width:auto;margin:0">${escAg(p.nombre)}</label>`).join('')}</div>
     <div style="display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:8px">
       <label>Tipo <select id="tarPlanTipo" style="width:auto;margin:0" onchange="tarPlantillaCargar('tarPlanTipo','tarPlanDesc','tarPlanActs')">${Object.entries(Tareas.TIPOS).map(([k, v]) => `<option value="${k}"${k === 'inventario' ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
-      <label>Sede (opcional) <select id="tarPlanSede" style="width:auto;margin:0"><option value="">—</option>${tarSedeOpciones()}</select></label>
+      <label>Sede(s) (opcional) ${tarSedesHtml('tarPlanSede')}</label>
+      <label title="1 = se inicia y se termina el mismo día">⏱️ Días para terminarla <input type="number" id="tarPlanDias" min="1" max="31" value="1" style="width:70px;margin:0"></label>
     </div>
+    <div class="mut" style="font-size:12.5px;margin-top:4px">Cada día marcado es el 🟢 inicio; la tarea 🏁 debe terminarse los días que pongas después (1 = el mismo día).</div>
     <input id="tarPlanTitulo" placeholder="Título (ej. Inventario cíclico de bebidas)" style="margin-top:8px">
     ${tarPlantillaCamposHtml('tarPlanDesc', 'tarPlanActs', 'inventario')}
     <div style="margin-top:8px"><button class="p" onclick="tarCrearVarias()">📦 Asignar en los días marcados</button> <span class="mut" id="tarPlanRes"></span></div>
@@ -270,22 +306,24 @@ async function tarCrearVarias() {
   if (TAR.ocupado) return;
   const res = $('tarPlanRes'), msg = (t) => { if (res) res.textContent = t; };
   const quienes = [...document.querySelectorAll('#tareasRaiz input[data-tpq]')].filter((x) => x.checked).map((x) => x.getAttribute('data-tpq'));
-  const fechas = [...TAR.sel].filter((f) => f >= tarHoy()).sort();
+  const fechas = [...TAR.sel].filter((f) => f >= tarHoy()).sort();   // dias de INICIO
+  const nd = Math.max(1, Math.min(31, parseInt(($('tarPlanDias') || {}).value, 10) || 1));
+  const fines = fechas.map((f) => Tareas.sumarDias(f, nd - 1));
   const titulo = ($('tarPlanTitulo') || {}).value || '';
   if (!fechas.length) return msg('⚠️ Marca al menos un día en el calendario.');
   if (!quienes.length) return msg('⚠️ Elige a quién se le asigna.');
   if (!titulo.trim()) return msg('⚠️ Escribe el título.');
   if (fechas.length > 62) return msg('⚠️ Máximo 62 días por asignación.');
-  const total = fechas.length * quienes.length;
-  if (!confirm(`📦 Se van a crear ${total} tarea(s): ${fechas.length} día(s) × ${quienes.length} persona(s).\nA cada persona le llega un correo con sus fechas.\n\n¿Continuar?`)) return;
+  const sedesIds = tarSedesElegidas('tarPlanSede'), ns = Math.max(1, sedesIds.length);
+  const total = fechas.length * quienes.length * ns;
+  if (!confirm(`📦 Se van a crear ${total} tarea(s): ${fechas.length} día(s) × ${quienes.length} persona(s)${ns > 1 ? ' × ' + ns + ' sedes' : ''}.\nA cada persona le llega un correo con sus fechas${ns > 1 ? ' (uno por sede)' : ''}.\n\n¿Continuar?`)) return;
   TAR.ocupado = true; msg('Asignando…');
   try {
-    const sede = ($('tarPlanSede') || {}).value;
-    const r = await tarAsignarRpc({ p_asignados: quienes, p_tipo: ($('tarPlanTipo') || {}).value || 'inventario', p_titulo: titulo,
-      p_descripcion: ($('tarPlanDesc') || {}).value || null, p_sede: sede ? Number(sede) : null, p_fechas: fechas,
-      p_actividades: Tareas.actividadesDeTexto(($('tarPlanActs') || {}).value), p_usuario: tarUsuario() });
-    if (r.error) return msg(r.error.aviso || 'No se pudo: ' + r.error.message);
-    TAR.plan = false; TAR.sel = new Set(); TAR.dia = fechas[0];
+    const r = await tarAsignarPorSedes({ p_asignados: quienes, p_tipo: ($('tarPlanTipo') || {}).value || 'inventario', p_titulo: titulo,
+      p_descripcion: ($('tarPlanDesc') || {}).value || null, p_fechas: fines, p_dias_antes: nd - 1,
+      p_actividades: Tareas.actividadesDeTexto(($('tarPlanActs') || {}).value), p_usuario: tarUsuario() }, sedesIds);
+    if (r.error) { if (r.hechas) { await tarCargar(); tarPintar(); } return msg((r.hechas ? '⚠️ Se asignaron ' + r.hechas + ' sede(s), pero falló ' + tarSede(r.falto) + ': ' : '') + (r.error.aviso || 'No se pudo: ' + r.error.message)); }
+    TAR.plan = false; TAR.sel = new Set(); TAR.dia = fines[0];
     await tarCargar(); tarPintar();
     if (typeof csEnviarCola === 'function') csEnviarCola(true);   // el correo sale ya desde el servidor
     alert('✅ ' + r.data + ' tarea(s) asignada(s). A cada persona le llega un correo con sus fechas.');
@@ -301,8 +339,9 @@ function tarFormHtml() {
     <div style="display:flex;flex-wrap:wrap;gap:4px 14px">${personas.map((p) => `<label style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap"><input type="checkbox" data-tq="${p.user_id}" style="width:auto;margin:0">${escAg(p.nombre)}</label>`).join('')}</div>
     <div style="display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:8px">
       <label>Tipo <select id="tarTipo" style="width:auto;margin:0" onchange="tarPlantillaCargar('tarTipo','tarDesc','tarActs')">${Object.entries(Tareas.TIPOS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
-      <label>Sede (opcional) <select id="tarSedeSel" style="width:auto;margin:0"><option value="">—</option>${tarSedeOpciones()}</select></label>
-      <label>📅 Fecha de cumplimiento <input type="date" id="tarFecha" min="${hoy}" value="${hoy}" style="width:auto;margin:0"></label>
+      <label>Sede(s) (opcional) ${tarSedesHtml('tarSedeSel')}</label>
+      <label>🟢 Inicia <input type="date" id="tarFechaIni" min="${hoy}" value="${hoy}" style="width:auto;margin:0" onchange="tarFechaIniCambio()"></label>
+      <label>🏁 Debe terminarse <input type="date" id="tarFecha" min="${hoy}" value="${hoy}" style="width:auto;margin:0"></label>
     </div>
     <input id="tarTitulo" placeholder="Título (ej. Inventario cíclico de bebidas en Provenza)" style="margin-top:8px">
     ${tarPlantillaCamposHtml('tarDesc', 'tarActs', Object.keys(Tareas.TIPOS)[0])}
@@ -327,11 +366,11 @@ function tarTarjetaHtml(t, hoy, adm) {
     if (t.estado === 'terminada' || (t.estado === 'cancelada' && adm)) acciones.push(`<button onclick="tarEstado(${t.id},'en_proceso')">↩ Reabrir</button>`);
     if (t.estado !== 'cancelada') acciones.push(`<button onclick="tarComentar(${t.id})">💬 Comentar</button>`);
     if (adm && t.estado !== 'cancelada' && TAR.editando !== t.id) acciones.push(`<button onclick="tarEditarAbrir(${t.id})">📋 Editar resumen y actividades</button>`);
-    if (adm && t.estado !== 'cancelada') acciones.push(`<button onclick="tarEditarFecha(${t.id})">✏️ Cambiar fecha</button>`, `<button class="d" onclick="tarEstado(${t.id},'cancelada')">✖ Cancelar</button>`);
+    if (adm && t.estado !== 'cancelada') acciones.push(`<button onclick="tarEditarFecha(${t.id})">✏️ Cambiar fechas</button>`, `<button class="d" onclick="tarEstado(${t.id},'cancelada')">✖ Cancelar</button>`);
     return `<div class="card" style="margin-bottom:8px${Tareas.vencida(t, hoy) ? ';border-left:5px solid #b91c1c' : ''}">
       <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
         <div style="flex:1 1 260px"><b>${escAg((Tareas.TIPOS[t.tipo] || '📝').split(' ')[0])} ${escAg(t.titulo)}</b>
-          <div class="mut" style="font-size:12.5px">${escAg(Tareas.TIPOS[t.tipo] || '')}${adm ? ' · 👤 ' + escAg(tarNombre(t.asignada_a)) : ''}${t.sede_id ? ' · 🏪 ' + escAg(tarSede(t.sede_id)) : ''} · vence ${tarFecha(t.fecha_limite)}${t.terminada_en ? ' · terminada ' + tarHora(t.terminada_en) : ''}</div></div>
+          <div class="mut" style="font-size:12.5px">${escAg(Tareas.TIPOS[t.tipo] || '')}${adm ? ' · 👤 ' + escAg(tarNombre(t.asignada_a)) : ''}${t.sede_id ? ' · 🏪 ' + escAg(tarSede(t.sede_id)) : ''}${Tareas.inicio(t) ? ' · 🟢 inicia ' + tarFecha(Tareas.inicio(t)) : ''} · 🏁 vence ${tarFecha(t.fecha_limite)}${t.terminada_en ? ' · terminada ' + tarHora(t.terminada_en) : ''}</div></div>
         <span class="badge">${Tareas.ESTADOS[t.estado] || t.estado}</span>${vence}
       </div>
       ${TAR.editando === t.id ? tarEditorHtml(t) : (t.descripcion ? `<div style="margin-top:6px;white-space:pre-wrap;font-size:13.5px">${escAg(t.descripcion)}</div>` : '') + tarActividadesHtml(t, adm)}
@@ -350,16 +389,19 @@ async function tarCrear() {
   const res = $('tarFormRes');
   if (!quienes.length) { if (res) res.textContent = '⚠️ Elige a quién se le asigna.'; return; }
   if (!titulo.trim()) { if (res) res.textContent = '⚠️ Escribe el título.'; return; }
-  if (!fecha) { if (res) res.textContent = '⚠️ Elige la fecha de cumplimiento.'; return; }
+  if (!fecha) { if (res) res.textContent = '⚠️ Elige la fecha en que debe terminarse.'; return; }
+  const ini = ($('tarFechaIni') || {}).value || fecha;
+  if (ini > fecha) { if (res) res.textContent = '⚠️ La fecha de inicio no puede ser después de la fecha en que debe terminarse.'; return; }
+  const sedesIds = tarSedesElegidas('tarSedeSel');
+  if (sedesIds.length > 1 && !confirm(`📝 Se van a crear ${sedesIds.length * quienes.length} tarea(s): ${quienes.length} persona(s) × ${sedesIds.length} sedes.\nA cada persona le llega un correo por sede.\n\n¿Continuar?`)) return;
   TAR.ocupado = true;
   try {
-    const sede = ($('tarSedeSel') || {}).value;
-    const r = await tarAsignarRpc({ p_asignados: quienes, p_tipo: ($('tarTipo') || {}).value || 'otra', p_titulo: titulo, p_descripcion: ($('tarDesc') || {}).value || null,
-      p_sede: sede ? Number(sede) : null, p_fechas: [fecha], p_actividades: Tareas.actividadesDeTexto(($('tarActs') || {}).value), p_usuario: tarUsuario() });
-    if (r.error) { if (res) res.textContent = r.error.aviso || 'No se pudo: ' + r.error.message; return; }
+    const r = await tarAsignarPorSedes({ p_asignados: quienes, p_tipo: ($('tarTipo') || {}).value || 'otra', p_titulo: titulo, p_descripcion: ($('tarDesc') || {}).value || null,
+      p_fechas: [fecha], p_dias_antes: Tareas.diasEntre(ini, fecha), p_actividades: Tareas.actividadesDeTexto(($('tarActs') || {}).value), p_usuario: tarUsuario() }, sedesIds);
+    if (r.error) { if (r.hechas) { TAR.form = false; await tarCargar(); tarPintar(); } if (res) res.textContent = (r.hechas ? '⚠️ Se asignaron ' + r.hechas + ' sede(s), pero falló ' + tarSede(r.falto) + ': ' : '') + (r.error.aviso || 'No se pudo: ' + r.error.message); if (r.hechas) alert('Se asignaron ' + r.hechas + ' sede(s); la de ' + tarSede(r.falto) + ' falló: ' + (r.error.aviso || r.error.message)); return; }
     TAR.form = false; await tarCargar(); tarPintar();
     if (typeof csEnviarCola === 'function') csEnviarCola(true);   // el correo sale ya desde el servidor
-    alert('✅ Tarea asignada a ' + r.data + ' persona(s). A cada una le llega un correo.');
+    alert('✅ ' + r.data + ' tarea(s) asignada(s)' + (sedesIds.length > 1 ? ' en ' + sedesIds.length + ' sedes' : '') + '. A cada persona le llega un correo' + (sedesIds.length > 1 ? ' por sede' : '') + '.');
   } finally { TAR.ocupado = false; }
 }
 async function tarEstado(id, estado) {
@@ -379,9 +421,18 @@ async function tarComentar(id) {
 }
 async function tarEditarFecha(id) {
   const t = TAR.lista.find((x) => x.id === id); if (!t) return;
-  const v = prompt('📅 Nueva fecha de cumplimiento para «' + t.titulo + '» (AAAA-MM-DD):', String(t.fecha_limite).slice(0, 10));
+  const fin0 = String(t.fecha_limite).slice(0, 10), bien = (x) => /^\d{4}-\d{2}-\d{2}$/.test(x);
+  const i = prompt('🟢 Fecha de INICIO de «' + t.titulo + '» (AAAA-MM-DD):', Tareas.inicio(t) || fin0);
+  if (!i) return;
+  if (!bien(i.trim())) { alert('Escribe la fecha como AAAA-MM-DD (ej. 2026-10-20).'); return; }
+  const v = prompt('🏁 Fecha en que DEBE TERMINARSE «' + t.titulo + '» (AAAA-MM-DD):', fin0 < i.trim() ? i.trim() : fin0);
   if (!v) return;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(v.trim())) { alert('Escribe la fecha como AAAA-MM-DD (ej. 2026-10-20).'); return; }
+  if (!bien(v.trim())) { alert('Escribe la fecha como AAAA-MM-DD (ej. 2026-10-20).'); return; }
+  if (i.trim() > v.trim()) { alert('La fecha de inicio no puede ser después de la fecha en que debe terminarse.'); return; }
+  const rf = await SB.rpc('tarea_fechas', { p_id: id, p_inicio: i.trim(), p_fin: v.trim(), p_usuario: tarUsuario() });
+  if (!rf.error) { await tarCargar(); tarPintar(); return; }
+  if (!tarFaltaFuncion(rf.error, 'tarea_fechas')) { alert('No se pudo: ' + rf.error.message); return; }
+  if (i.trim() !== v.trim()) { alert(TAR_AVISO_FECHAS); return; }   // base sin la funcion nueva: solo se puede cambiar el fin
   const r = await SB.rpc('tarea_editar', { p_id: id, p_tipo: t.tipo, p_titulo: t.titulo, p_descripcion: t.descripcion, p_sede: t.sede_id, p_fecha_limite: v.trim(), p_usuario: tarUsuario() });
   if (r.error) { alert('No se pudo: ' + r.error.message); return; }
   await tarCargar(); tarPintar();
@@ -418,6 +469,9 @@ async function tarVer(ruta) {
 // («📋 Editar resumen y actividades») sin tocar la plantilla. Quien tiene la tarea marca cada actividad como hecha.
 // Base: supabase/tareas_plantillas.sql (tarea.actividades + tarea_asignar / tarea_actividad / tarea_actividades_editar).
 const TAR_AVISO_PLANTILLAS = '⚠️ Falta activar las plantillas en la base (supabase/tareas_plantillas.sql). Avísale al administrador del sistema.';
+const TAR_AVISO_FECHAS = '⚠️ Falta activar la fecha de inicio en la base (supabase/tareas_fechas.sql). Avísale al administrador del sistema.';
+// si la fecha de inicio pasa a ser despues del fin, el fin se corre al mismo dia
+function tarFechaIniCambio() { const i = $('tarFechaIni'), f = $('tarFecha'); if (!i || !f) return; f.min = i.value; if (f.value < i.value) f.value = i.value; }
 function tarFaltaFuncion(err, nombre) { const m = (err && err.message) || ''; return m.includes(nombre) && /(find|exist|encontr|schema cache)/i.test(m); }
 
 function tarPlantillaCamposHtml(idDesc, idActs, tipo) {
@@ -438,7 +492,13 @@ function tarPlantillaCargar(idTipo, idDesc, idActs) {
   d.setAttribute('data-plantilla', sel.value);
 }
 // asigna con tarea_asignar; si la base todavia no la tiene y la tarea no usa nada nuevo, sigue como antes (tarea_crear / _varias)
-async function tarAsignarRpc(a) {
+async function tarAsignarRpc(a0) {
+  // (18/10/2026) con fecha de inicio: tarea_asignar_rango (supabase/tareas_fechas.sql); si la base aun no la tiene y la tarea es de un
+  // solo dia, sigue como antes
+  const r0 = await SB.rpc('tarea_asignar_rango', a0);
+  if (!r0.error || !tarFaltaFuncion(r0.error, 'tarea_asignar_rango')) return r0;
+  if ((a0.p_dias_antes || 0) > 0) return { data: null, error: { message: r0.error.message, aviso: TAR_AVISO_FECHAS } };
+  const a = Object.assign({}, a0); delete a.p_dias_antes;
   const r = await SB.rpc('tarea_asignar', a);
   if (!r.error || !tarFaltaFuncion(r.error, 'tarea_asignar')) return r;
   const viejo = ['inventario', 'visita', 'capacitacion', 'otra'].includes(a.p_tipo) && !(a.p_actividades || []).length;
@@ -510,3 +570,5 @@ async function tarEditarGuardar(id) {
     await tarCargar(); tarPintar();
   } finally { TAR.ocupado = false; }
 }
+// el desplegable de sedes se cierra al hacer clic fuera de el
+if (typeof document !== 'undefined') document.addEventListener('click', (e) => { document.querySelectorAll('details.tar-sedes[open]').forEach((d) => { if (!d.contains(e.target)) d.open = false; }); });
