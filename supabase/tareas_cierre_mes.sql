@@ -13,7 +13,7 @@ alter table tarea add constraint tarea_tipo_check
 
 create or replace function tarea_tipo_nombre(p_tipo text) returns text language sql immutable as $$
   select case p_tipo when 'inventario' then '📦 Inventario cíclico' when 'inventario_general' then '🗃️ Inventario general'
-                     when 'auditoria' then '🔍 Auditoría de punto de venta' when 'cierre_mes' then '🗓️ Cierre de mes (token DIAN)'
+                     when 'auditoria' then '🔍 Auditoría de punto de venta' when 'cierre_mes' then '🗓️ Token DIAN diario y cierre de mes'
                      when 'visita' then '🚗 Visita' when 'capacitacion' then '🎓 Capacitación' else '📝 Tarea' end
 $$;
 
@@ -31,5 +31,5 @@ notify pgrst, 'reload schema';
 --   n := tarea_asignar_rango(array[adm], 'cierre_mes', 'PRUEBA cierre', null, null, array['2026-10-31'::date], '[{"t":"Subir token"}]'::jsonb, 'prueba', 2);
 --   select t.tipo into tipo from tarea t where t.titulo = 'PRUEBA cierre' limit 1;
 --   select c.cuerpo into asunto from correo_cola c where c.asunto like '%PRUEBA cierre%';
---   raise exception 'RESULTADO creadas=% tipo=% correo=% | total tareas=%', n, tipo, substring(asunto from 'Cierre de mes[^:]*'), (select count(*) from tarea);
+--   raise exception 'RESULTADO creadas=% tipo=% correo=% | total tareas=%', n, tipo, substring(asunto from 'Token DIAN[^:]*'), (select count(*) from tarea);
 -- end $$;
