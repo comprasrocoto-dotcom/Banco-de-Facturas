@@ -463,6 +463,41 @@
     return ws;
   }
   // -> el libro (ExcelJS.Workbook): Documentos (todos), Caja menor (vista), Por revisar, Clasificacion (trazabilidad) y Resumen
+  // ---- (19/10/2026) ENVIO A CONTABILIDAD -> el mismo Excel ORGANIZADO, sin bajar nada de Hiopos ----
+  // El usuario pidio no hacer doble trabajo: con «Bajar ZIP + Excel» del envio sale tambien el organizado de Hiopos.
+  // Fuente de cada documento marcado (por su N° de ingreso = causacion):
+  //   1. la COPIA del reporte «Documentos» de Hiopos que se carga en Conciliacion (tabla erp_documento): son los datos de Hiopos;
+  //   2. si el ingreso no esta en esa copia (reporte viejo), los datos de la web, y la Nota lo dice para verificarlo en Hiopos.
+  // Retenciones = Base + Impuestos - Neto (Hiopos: el Neto ya las descuenta). Estado, Empleado y Pendiente no estan en la copia:
+  // quedan vacios. docs: [{ num_ingreso, documento, emisor, almacen, fecha, total, iva_pct, centro_costo }]
+  // erp: filas de erp_documento -> { aoa (como el Excel de Hiopos, para leerTabla), deErp, deWeb: [num_ingreso] }
+  const NOTA_SIN_ERP = 'VERIFICAR EN HIOPOS: no estaba en el ultimo reporte cargado (datos de la web)';
+  function tablaDesdeEnvio(docs, erp) {
+    const por = new Map((erp || []).map((e) => [alnum(e.causacion), e]));
+    const r2 = (n) => Math.round(Number(n || 0) * 100) / 100;
+    const aoa = [['Serie / Número', 'Fecha Doc', 'Su Doc', 'Hora', 'Contacto', 'Estado', 'Almacén', 'Empleado', 'Base', 'Impuestos', 'Retenciones', 'Neto', 'Procesado', 'Pendiente', 'DETALLE', 'Nota']];
+    const deWeb = [], vistos = new Set(); let deErp = 0;
+    for (const d of docs || []) {
+      const k = alnum(d.num_ingreso);
+      if (!k || vistos.has(k)) continue;
+      vistos.add(k);
+      const e = por.get(k);
+      const ingreso = e ? String(e.serie || '').trim() + ' / ' + String(e.numero || '').trim() : ingresoLegible(d.num_ingreso);
+      const detalle = detalleDeSerie(ingreso) || (d.centro_costo ? detalleDeSerie(d.centro_costo) : '');
+      if (e) {
+        deErp++;
+        const base = r2(e.base), imp = r2(e.impuestos), neto = r2(e.neto), ret = r2(base + imp - neto);
+        aoa.push([ingreso, e.fecha || '', e.su_doc || '', e.hora || '', e.contacto || '', '', e.almacen || '', '', base, imp, Math.abs(ret) < 1 ? 0 : ret, neto,
+          e.procesado ? 'Verdadero' : 'Falso', '', detalle, '']);
+      } else {
+        deWeb.push(d.num_ingreso);
+        const total = r2(d.total), iva = Number(d.iva_pct || 0), base = iva > 0 ? r2(total / (1 + iva / 100)) : total;
+        aoa.push([ingreso, d.fecha || '', d.documento || '', '', d.emisor || '', '', d.almacen || '', '', base, r2(total - base), 0, total, '', '', detalle, NOTA_SIN_ERP]);
+      }
+    }
+    return { aoa, deErp, deWeb };
+  }
+
   function armarLibro(ExcelJS, { lectura, clasificacion, nombreArchivo, ahora, comparacion }) {
     const dif = comparacion && comparacion.porFila;
     const cl = clasificacion;
@@ -525,6 +560,7 @@
     return wb;
   }
 
-  return { COLUMNAS, NUMERICAS, REQUERIDAS, LEYENDA_CC, LEYENDA_CM, DETALLE_SERIE, COLOR, plano, columnaDe, contactoClave, serieDe, detalleDeSerie,
+  return { tablaDesdeEnvio, NOTA_SIN_ERP,
+    COLUMNAS, NUMERICAS, REQUERIDAS, LEYENDA_CC, LEYENDA_CM, DETALLE_SERIE, COLOR, plano, columnaDe, contactoClave, serieDe, detalleDeSerie,
     aNumero, aFecha, aHora, aBooleano, agregarLeyenda, cuentaCobroWeb, leerCsv, leerTabla, completarDesdeWeb, ingresoLegible, leerDian, compararConDian, textoDiferencia, IMPUESTOS_DIAN, TIPO, TIPO_TXT, claveProveedor, indicioCuentaCobro, mapaReglas, armarEvidencia, facturaElectronica, clasificar, resumen, contactos, filaExcel, armarLibro };
 });
