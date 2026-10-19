@@ -68,6 +68,11 @@
   const ESTADOS = { pendiente: '⏳ Pendiente', en_proceso: '🔧 En proceso', terminada: '✅ Terminada', cancelada: '✖ Cancelada' };
   const fechaCO = (ts) => { if (!ts) return null; const s = String(ts); if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; const t = Date.parse(s); return isNaN(t) ? null : new Date(t - 5 * 3600000).toISOString().slice(0, 10); };
   const dias = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+  // (18/10/2026) fecha de inicio: "AAAA-MM-DD" + n dias, y dias entre dos fechas (b - a)
+  const sumarDias = (f, n) => new Date(Date.parse(String(f).slice(0, 10) + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+  const diasEntre = (a, b) => dias(String(a).slice(0, 10), String(b).slice(0, 10));
+  // la tarea tiene un rango (inicio antes del fin)? -> "AAAA-MM-DD" del inicio o null
+  const inicio = (t) => (t && t.fecha_inicio && String(t.fecha_inicio).slice(0, 10) < String(t.fecha_limite).slice(0, 10) ? String(t.fecha_inicio).slice(0, 10) : null);
 
   const abierta = (t) => t && t.estado !== 'terminada' && t.estado !== 'cancelada';
   // terminada a tiempo: el dia (Colombia) en que se termino es <= la fecha de cumplimiento
@@ -157,5 +162,5 @@
 
   return { TIPOS, ESTADOS, fechaCO, abierta, aTiempo, vencida, faltan, cuentan, cumplimiento, resumen, ordenar, rutaEvidencia,
     MESES, DIAS_CORTO, diaSemana, mesSumar, mesNombre, mesGrid, porDia, fechasPatron, colorEstado,
-    PLANTILLAS, plantilla, MAX_ACTIVIDADES, actividadesDeTexto, actividadesTexto, actividades, avance };
+    PLANTILLAS, plantilla, MAX_ACTIVIDADES, actividadesDeTexto, actividadesTexto, actividades, avance, sumarDias, diasEntre, inicio };
 });
