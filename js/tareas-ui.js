@@ -6,6 +6,7 @@
 // desde el celular; quedan en el bucket «facturas», carpeta tareas/<id>/). Logica pura en js/tareas.js; base en supabase/tareas.sql.
 // Nombres globales con prefijo tar / TAR.
 var TAR = { lista: [], eventos: new Map(), personas: [], cargado: false, filtroPersona: '', filtroEstado: 'abiertas', busca: '', form: false, ocupado: false,
+  filtroTipo: '', filtroSede: '', filtroDesde: '', filtroHasta: '',   // (19/10/2026) filtro de tareas: tipo, sede y rango de fechas
   // (18/10/2026) vista calendario: mes visible, dia abierto, modo «planear el mes» (admin) y dias marcados
   vista: (function () { try { return localStorage.getItem('tarVista') === 'calendario' ? 'calendario' : 'lista'; } catch (e) { return 'lista'; } })(),
   mes: '', dia: '', plan: false, sel: new Set() };
@@ -85,15 +86,32 @@ function tarContador() {
 async function tarContarAlEntrar() { if (!tarPuede() || typeof SB === 'undefined') return; try { await tarCargar(); } catch (e) { /* sin tablas: nada */ } }
 async function tarAbrir() { const raiz = $('tareasRaiz'); if (!raiz) return; if (!tarPuede()) { raiz.innerHTML = '<div class="vacio">Solo administradores y analistas ven las tareas.</div>'; return; } raiz.innerHTML = '<div class="mut" style="padding:16px">Cargando tareas…</div>'; await tarCargar(); tarPintar(); }
 
+// (19/10/2026) FILTRO DE TAREAS: persona, tipo, sede, fechas y buscador valen para la lista y el calendario.
+// Fechas: la tarea entra si su rango (inicio -> vence) toca el rango elegido.
+function tarPasaFiltro(t) {
+  const q = (TAR.busca || '').trim().toLowerCase();
+  if (TAR.filtroPersona && t.asignada_a !== TAR.filtroPersona) return false;
+  if (TAR.filtroTipo && t.tipo !== TAR.filtroTipo) return false;
+  if (TAR.filtroSede === 'sin' ? !!t.sede_id : TAR.filtroSede && String(t.sede_id) !== TAR.filtroSede) return false;
+  const fin = String(t.fecha_limite).slice(0, 10), ini = Tareas.inicio(t) || fin;
+  if (TAR.filtroDesde && fin < TAR.filtroDesde) return false;
+  if (TAR.filtroHasta && ini > TAR.filtroHasta) return false;
+  if (q && !(t.titulo + ' ' + (t.descripcion || '') + ' ' + tarNombre(t.asignada_a) + ' ' + tarSede(t.sede_id) + ' ' + (Tareas.TIPOS[t.tipo] || '')).toLowerCase().includes(q)) return false;
+  return true;
+}
+const tarHayFiltro = () => !!(TAR.filtroPersona || TAR.filtroTipo || TAR.filtroSede || TAR.filtroDesde || TAR.filtroHasta || (TAR.busca || '').trim());
+function tarLimpiarFiltros() { Object.assign(TAR, { filtroPersona: '', filtroTipo: '', filtroSede: '', filtroDesde: '', filtroHasta: '', busca: '', filtroEstado: 'abiertas' }); tarPintar(); }
 function tarFiltradas() {
-  const hoy = tarHoy(), q = (TAR.busca || '').trim().toLowerCase();
+  const hoy = tarHoy();
   return Tareas.ordenar(TAR.lista).filter((t) => {
-    if (TAR.filtroPersona && t.asignada_a !== TAR.filtroPersona) return false;
     if (TAR.filtroEstado === 'abiertas' && !Tareas.abierta(t)) return false;
+    if (TAR.filtroEstado === 'pendientes' && t.estado !== 'pendiente') return false;
+    if (TAR.filtroEstado === 'en_proceso' && t.estado !== 'en_proceso') return false;
     if (TAR.filtroEstado === 'vencidas' && !Tareas.vencida(t, hoy)) return false;
     if (TAR.filtroEstado === 'terminadas' && t.estado !== 'terminada') return false;
-    if (q && !(t.titulo + ' ' + (t.descripcion || '') + ' ' + tarNombre(t.asignada_a) + ' ' + tarSede(t.sede_id)).toLowerCase().includes(q)) return false;
-    return true;
+    if (TAR.filtroEstado === 'canceladas' && t.estado !== 'cancelada') return false;
+    if (TAR.filtroEstado === 'validar') { const sg = Tareas.abierta(t) && Tareas.seguimiento(t, TAR.eventos.get(t.id) || [], hoy); if (!sg || !sg.dias.some((d) => d.estado === 'hoy')) return false; }
+    return tarPasaFiltro(t);
   });
 }
 
@@ -118,16 +136,24 @@ function tarPintar() {
     </div>
     ${adm && TAR.form && !cal ? tarFormHtml() : ''}
     <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
-      ${cal ? '' : chip('abiertas', '⏳ Abiertas') + chip('vencidas', '⚠️ Vencidas') + chip('terminadas', '✅ Terminadas') + chip('todas', 'Todas')}
-      ${adm ? `<select onchange="TAR.filtroPersona=this.value;tarPintar()" style="width:auto;margin:0"><option value="">👤 Todas las personas</option>${TAR.personas.map((p) => `<option value="${p.user_id}"${TAR.filtroPersona === p.user_id ? ' selected' : ''}>${escAg(p.nombre)}</option>`).join('')}</select>` : ''}
-      <input type="search" placeholder="🔎 Buscar" value="${escAg(TAR.busca)}" oninput="TAR.busca=this.value;tarRefrescarCuerpo()" style="width:auto;min-width:180px;margin:0">
+      ${cal ? '' : chip('abiertas', '⏳ Abiertas') + chip('pendientes', '🕒 Sin empezar') + chip('en_proceso', '🔧 En proceso') + chip('vencidas', '⚠️ Vencidas') + chip('validar', '📆 Falta validar hoy') + chip('terminadas', '✅ Terminadas') + chip('canceladas', '✖ Canceladas') + chip('todas', 'Todas')}
+    </div>
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
+      ${adm ? `<select onchange="TAR.filtroPersona=this.value;tarPintar()" style="width:auto;max-width:190px;margin:0"><option value="">👤 Todas las personas</option>${TAR.personas.map((p) => `<option value="${p.user_id}"${TAR.filtroPersona === p.user_id ? ' selected' : ''}>${escAg(p.nombre)}</option>`).join('')}</select>` : ''}
+      <select onchange="TAR.filtroTipo=this.value;tarPintar()" style="width:auto;max-width:210px;margin:0"><option value="">📂 Todos los tipos</option>${Object.entries(Tareas.TIPOS).map(([k, v]) => `<option value="${k}"${TAR.filtroTipo === k ? ' selected' : ''}>${escAg(v)}</option>`).join('')}</select>
+      <select onchange="TAR.filtroSede=this.value;tarPintar()" style="width:auto;max-width:200px;margin:0"><option value="">🏪 Todas las sedes</option><option value="sin"${TAR.filtroSede === 'sin' ? ' selected' : ''}>— Sin sede</option>${TAR.filtroSede && TAR.filtroSede !== 'sin' ? tarSedeOpciones().replace('value="' + TAR.filtroSede + '"', 'value="' + TAR.filtroSede + '" selected') : tarSedeOpciones()}</select>
+      <span style="display:inline-flex;gap:4px;align-items:center;white-space:nowrap"><span class="mut">📅</span><input type="date" value="${escAg(TAR.filtroDesde)}" onchange="TAR.filtroDesde=this.value;tarPintar()" title="Desde (fecha de la tarea)" style="width:auto;margin:0">
+      <span class="mut">→</span><input type="date" value="${escAg(TAR.filtroHasta)}" onchange="TAR.filtroHasta=this.value;tarPintar()" title="Hasta (fecha de la tarea)" style="width:auto;margin:0"></span>
+      <input type="search" placeholder="🔎 Buscar" value="${escAg(TAR.busca)}" oninput="TAR.busca=this.value;tarRefrescarCuerpo()" style="width:180px;margin:0">
+      ${tarHayFiltro() || TAR.filtroEstado !== 'abiertas' ? '<button class="mut" style="padding:4px 10px" onclick="tarLimpiarFiltros()">✖ Limpiar filtros</button>' : ''}
+      ${cal ? '' : `<span class="mut" id="tarCuenta">${tarFiltradas().length} de ${TAR.lista.length} tarea(s)</span>`}
     </div>
     ${cal ? tarCalHtml() : `<div id="tarLista">${tarListaHtml()}</div>`}`;
 }
 // repinta solo lo que cambia con el buscador (sin perder lo que se esta escribiendo)
 function tarRefrescarCuerpo() {
   if (TAR.vista === 'calendario') tarCalRefrescar();
-  else { const l = $('tarLista'); if (l) l.innerHTML = tarListaHtml(); }
+  else { const l = $('tarLista'); if (l) l.innerHTML = tarListaHtml(); const c = $('tarCuenta'); if (c) c.textContent = tarFiltradas().length + ' de ' + TAR.lista.length + ' tarea(s)'; }
 }
 function tarVista(v) {
   TAR.vista = v === 'calendario' ? 'calendario' : 'lista';
@@ -179,12 +205,9 @@ function tarCalCss() {
 }
 // tareas que se ven en el calendario: respetan persona y buscador; las canceladas solo si se pide «Todas»
 function tarCalTareas() {
-  const q = (TAR.busca || '').trim().toLowerCase();
   return TAR.lista.filter((t) => {
-    if (TAR.filtroPersona && t.asignada_a !== TAR.filtroPersona) return false;
     if (t.estado === 'cancelada' && !TAR.verCanceladas) return false;
-    if (q && !(t.titulo + ' ' + (t.descripcion || '') + ' ' + tarNombre(t.asignada_a) + ' ' + tarSede(t.sede_id)).toLowerCase().includes(q)) return false;
-    return true;
+    return tarPasaFiltro(t);   // persona, tipo, sede, fechas y buscador
   });
 }
 function tarCalHtml() {
@@ -297,7 +320,7 @@ function tarPlanFormHtml() {
       <label title="1 = se inicia y se termina el mismo día">⏱️ Días para terminarla <input type="number" id="tarPlanDias" min="1" max="31" value="1" style="width:70px;margin:0"></label>
     </div>
     <div class="mut" style="font-size:12.5px;margin-top:4px">Cada día marcado es el 🟢 inicio; la tarea 🏁 debe terminarse los días que pongas después (1 = el mismo día).</div>
-    <input id="tarPlanTitulo" placeholder="Título (ej. Inventario cíclico de bebidas)" style="margin-top:8px">
+    <input id="tarPlanTitulo" placeholder="Título (ej. Inventario cíclico de bebidas)" value="${escAg(Tareas.tituloDe('inventario'))}" data-titulo="inventario" style="margin-top:8px">
     ${tarPlantillaCamposHtml('tarPlanDesc', 'tarPlanActs', 'inventario')}
     <div style="margin-top:8px"><button class="p" onclick="tarCrearVarias()">📦 Asignar en los días marcados</button> <span class="mut" id="tarPlanRes"></span></div>
   </div>`;
@@ -343,7 +366,7 @@ function tarFormHtml() {
       <label>🟢 Inicia <input type="date" id="tarFechaIni" min="${hoy}" value="${hoy}" style="width:auto;margin:0" onchange="tarFechaIniCambio()"></label>
       <label>🏁 Debe terminarse <input type="date" id="tarFecha" min="${hoy}" value="${hoy}" style="width:auto;margin:0"></label>
     </div>
-    <input id="tarTitulo" placeholder="Título (ej. Inventario cíclico de bebidas en Provenza)" style="margin-top:8px">
+    <input id="tarTitulo" placeholder="Título (ej. Inventario cíclico de bebidas en Provenza)" value="${escAg(Tareas.tituloDe(Object.keys(Tareas.TIPOS)[0]))}" data-titulo="${Object.keys(Tareas.TIPOS)[0]}" style="margin-top:8px">
     ${tarPlantillaCamposHtml('tarDesc', 'tarActs', Object.keys(Tareas.TIPOS)[0])}
     <div style="margin-top:8px"><button class="p" id="tarBtnCrear" onclick="tarCrear()">📝 Asignar</button> <span class="mut" id="tarFormRes"></span></div>
   </div>`;
@@ -532,6 +555,9 @@ function tarPlantillaCamposHtml(idDesc, idActs, tipo) {
 // cambia el tipo -> carga su plantilla (si ya habias cambiado el texto, pregunta antes de reemplazarlo)
 function tarPlantillaCargar(idTipo, idDesc, idActs) {
   const sel = $(idTipo), d = $(idDesc), a = $(idActs); if (!sel || !d || !a) return;
+  // (19/10/2026) asunto por defecto segun el tipo: se cambia solo si esta vacio o sigue con el asunto del tipo anterior
+  const ti = $(idTipo === 'tarPlanTipo' ? 'tarPlanTitulo' : 'tarTitulo');
+  if (ti && (!ti.value.trim() || ti.value.trim() === Tareas.tituloDe(ti.getAttribute('data-titulo') || ''))) { ti.value = Tareas.tituloDe(sel.value); ti.setAttribute('data-titulo', sel.value); }
   const antes = Tareas.plantilla(d.getAttribute('data-plantilla') || ''), nueva = Tareas.plantilla(sel.value);
   const tocado = (d.value.trim() && d.value.trim() !== antes.resumen) || (a.value.trim() && a.value.trim() !== antes.actividades.join('\n'));
   if (tocado && !confirm('Ya cambiaste el resumen o las actividades.\n\n¿Reemplazarlos por los de «' + (Tareas.TIPOS[sel.value] || sel.value) + '»?')) return;
