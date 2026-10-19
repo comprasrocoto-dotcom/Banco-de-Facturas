@@ -567,9 +567,9 @@ function tarPlantillaCargar(idTipo, idDesc, idActs) {
 }
 // asigna con tarea_asignar; si la base todavia no la tiene y la tarea no usa nada nuevo, sigue como antes (tarea_crear / _varias)
 async function tarAsignarRpc(a0, sinRespaldo) {
-  // (19/10/2026) tipo nuevo «cierre de mes»: si la base aun no lo acepta (supabase/tareas_cierre_mes.sql sin aplicar), se guarda
+  // (19/10/2026) tipos nuevos (token DIAN, ingreso de facturas, envio a contabilidad): si la base aun no los acepta (supabase/tareas_cierre_mes.sql sin aplicar), se guarda
   // como «Otra» con el mismo titulo, resumen y actividades, para que nunca falle
-  if (a0.p_tipo === 'cierre_mes' && !sinRespaldo) {
+  if ((Tareas.TIPOS_NUEVOS || ['cierre_mes']).includes(a0.p_tipo) && !sinRespaldo) {
     const rc = await tarAsignarRpc(a0, true);
     if (!rc.error || !/tipo_check|check constraint/i.test(rc.error.message || '')) return rc;
     return tarAsignarRpc(Object.assign({}, a0, { p_tipo: 'otra' }), true);
