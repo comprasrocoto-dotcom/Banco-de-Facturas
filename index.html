@@ -173,6 +173,35 @@ tr:hover td{background:#f1f5f9}
   #np_tabla tr.np-con{background:#ecfdf5}
   #np_tabla tr.np-dest{background:#dbeafe;border:2px solid #2563eb}
 }
+
+/* (20/10/2026) pedido del usuario: MENU LATERAL en computador (como «Raiz del Campo»). Solo estilos: los mismos botones del
+   encabezado (Facturas, Pedidos, Cruce DIAN... Manual, Salir) se ponen en una barra oscura a la izquierda. En celular y
+   pantallas angostas el encabezado queda como antes (arriba). No cambia ningun boton ni lo que hace. */
+@media (min-width:900px){
+  #app{padding-left:236px}
+  #app>header{position:fixed;top:0;left:0;bottom:0;width:236px;z-index:6;flex-direction:column;flex-wrap:nowrap;align-items:stretch;
+    gap:3px;padding:18px 12px 14px;background:#163d37;border:0;box-shadow:2px 0 12px rgba(15,23,42,.14);overflow:visible}
+  #app>header h1{color:#fff;font-size:14.5px;margin:0 6px 10px;line-height:1.25;letter-spacing:.2px;order:-3}
+  #app>header h1 .logo-app{box-shadow:none}
+  #app>header .chip{text-align:left;border:0;border-radius:10px;background:transparent;color:#d6efe8;padding:10px 14px;font-size:14.5px;font-weight:600;width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #app>header .chip:hover{background:rgba(255,255,255,.08);color:#fff}
+  #app>header .chip.on{background:#2f7d6d;color:#fff;box-shadow:inset 3px 0 0 #9fe3cf}
+  /* la sede va ARRIBA: debajo del nombre y antes de las opciones del menu (pedido del usuario, 20/10/2026) */
+  #app>header #sede{order:-2;align-self:flex-start;margin:0 6px 4px;background:rgba(255,255,255,.12);color:#fff;border-color:transparent;max-width:100%;white-space:normal}
+  #app>header #fSede{order:-2;width:100%!important;margin:2px 0 4px!important;font-size:13px}
+  #app>header #caja_fmSede{order:-2;margin:2px 0 4px}
+  #app>header #m-banco{margin-top:10px}
+  #app>header .sp{flex:1 1 auto}
+  #app>header>button:not(.chip){text-align:left;background:transparent;border:0;color:#d6efe8;padding:10px 14px;font-size:14.5px;font-weight:600;width:100%}
+  #app>header>button:not(.chip):hover{background:rgba(255,255,255,.08);color:#fff}
+  /* pestañas del modulo activo debajo de el (js/menu-lateral.js) */
+  #menuSub{display:flex;flex-direction:column;gap:1px;margin:2px 0 8px 14px;padding-left:8px;border-left:2px solid rgba(159,227,207,.35)}
+  #menuSub .menu-sub{text-align:left;background:transparent;border:0;border-radius:8px;color:#bfe0d7;padding:6px 10px;font-size:13px;font-weight:600;width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #menuSub .menu-sub:hover{background:rgba(255,255,255,.08);color:#fff}
+  #menuSub .menu-sub.on{background:rgba(255,255,255,.16);color:#fff}
+}
+@media (max-width:899px){ #menuSub{display:none} }
+@media (min-width:900px) and (max-height:820px){ #app>header{overflow-y:auto} }   /* pantallas bajitas: el menu se desliza */
 </style>
 </head>
 <body>
@@ -409,6 +438,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/organizador-hiopos-ui.js"></script>
 <script src="js/conciliacion-ui.js"></script>
 <script src="js/cruce-dian-ui.js"></script>
+<script src="js/menu-lateral.js"></script>
 <script>
 const SB = supabase.createClient("https://egzggxwfyqeihzgpjgmp.supabase.co", "sb_publishable_3rzP6pCef1S5nRzFkG-eHw_-BF73n91");
 let alcanceUsuario=null;   // { restringido, sedes } del usuario (mi_alcance): un analista con sedes asignadas solo ve/pide las suyas
