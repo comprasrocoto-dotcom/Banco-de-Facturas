@@ -49,6 +49,8 @@ function evPintarAviso() {
   const caja = $('avisoEval'); if (!caja) return;
   const l = evMisAlertas();
   if (!l.length) { caja.innerHTML = ''; return; }
+  // (23/10/2026) pedido del usuario: el administrador solo ve el boton (el detalle completo esta en la Evaluacion y en el correo diario)
+  if (evPuedeVer()) { caja.innerHTML = `<div style="margin-bottom:12px"><button class="s" title="${l.length} pendiente(s) de hoy fuera de la meta" onclick="setModulo('eval')">📈 Ver evaluación</button></div>`; return; }
   const porPersona = new Map();
   l.forEach((a) => { if (!porPersona.has(a.persona)) porPersona.set(a.persona, []); porPersona.get(a.persona).push(a); });
   caja.innerHTML = `<div class="card" style="border-left:5px solid #b91c1c;background:#fef2f2;margin-bottom:12px">
