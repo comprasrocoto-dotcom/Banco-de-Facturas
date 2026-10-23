@@ -1518,6 +1518,26 @@ async function catCompQuitar(ids){
   else if(!borrados.size) alert("No se quitó ninguna línea (ya no existían o no tienes permiso).");
   pintarAdmin();
 }
+// (23/10/2026) pedido del usuario: cambiar el precio de una linea del catalogo (general: catalogo_compras; marca propia: marca_catalogo).
+// Solo admin/pagos (los mismos que pueden quitar lineas). Se cambia SOLO el precio de esa linea (articulo + proveedor).
+async function catCompPrecio(id){
+  id=Number(id); if(!id || !catCompPuedeQuitar()) return;
+  const x=catCompFilas.find(f=>f.tipo==="catalogo"&&Number(f.id)===id); if(!x) return;
+  const mSel=Number(($("admCatalogo")||{}).value)||0, tabla=mSel?"marca_catalogo":"catalogo_compras";
+  const actual=x.precio!=null?x.precio:null;
+  const t=prompt("Nuevo precio de "+(x.articulo||x.codigo)+" ("+x.codigo+")\ncon "+(x.proveedor||"el proveedor")+(x.unidad?" · por "+x.unidad:"")+"\n\nPrecio actual: "+(actual!=null?"$"+actual.toLocaleString("es-CO"):"sin precio")+"\n(escribe solo el número, ej. 4500)", actual!=null?String(actual):"");
+  if(t===null) return;
+  const nuevo=CatalogoCompleto.leerPrecio(t);
+  if(nuevo===null || nuevo<=0){ alert("No entendí el precio \""+t+"\". Escribe solo el número, ej. 4500."); return; }
+  if(actual!==null && Math.abs(nuevo-actual)<0.005) return;
+  if(actual!==null && (nuevo>actual*3 || nuevo<actual/3) && !confirm("El precio cambia mucho: de $"+actual.toLocaleString("es-CO")+" a $"+nuevo.toLocaleString("es-CO")+".\n\n¿Es correcto?")) return;
+  const r=await SB.from(tabla).update({precio_negociado:nuevo}).eq("id",id).select("id,precio_negociado");
+  if(r.error || !(r.data&&r.data.length)){ alert("No se pudo cambiar el precio"+(r.error?": "+r.error.message:" (sin permiso o la línea ya no existe)")); return; }
+  (mSel?adminMarcaCat:adminCat).forEach(k=>{ if(Number(k.id)===id) k.precio_negociado=nuevo; });
+  provs=[]; marcaCat=[];   // Nuevo pedido vuelve a leer catalogo y proveedores la proxima vez que se abra
+  SB.from("historial").insert({accion:"catálogo: precio cambiado", detalle:(mSel?"marca "+mSel:"general")+" · "+x.codigo+" · "+(x.proveedor||"")+" · de "+(actual!=null?actual:"sin precio")+" a "+nuevo, usuario:usuario.id}).then(()=>{},()=>{});
+  pintarAdmin();
+}
 function pintarCatalogoCompleto(c){
   const selCat=$("admCatalogo"); { const cur=selCat.value||"general"; selCat.innerHTML=MarcaProv.opcionesCatalogo(adminMarcas,adminMarcaArts,cur); if(!selCat.value) selCat.value="general"; }
   const mSel=Number(selCat.value)||0;   // 0 = catalogo general; id = marca con catalogo propio (el historial no aplica: sus codigos chocan)
@@ -1540,7 +1560,7 @@ function pintarCatalogoCompleto(c){
   c.innerHTML=CatalogoCompleto.html(vis,{quitar:catCompPuedeQuitar(), seleccion:catCompSel, ver:f.ver, resumen:CatalogoCompleto.resumen(filas), conteos:CatalogoCompleto.conteos(filas,{q, prov:f.prov, sub:f.sub}),
     proveedores:CatalogoCompleto.proveedoresDe(filas), subfamilias:CatalogoCompleto.subfamiliasDe(CatalogoCompleto.filtrar(filas,{prov:f.prov})),
     prov:f.prov, sub:f.sub, orden:f.orden, hayFiltros: f.ver!=="todo"||!!f.prov||!!f.sub||!!String(q).trim(),
-    limite:adminLimite, amarrar: mSel?"amarrarMarca":"amarrarA", conHist: !mSel});
+    limite:adminLimite, amarrar: mSel?"amarrarMarca":"amarrarA", conHist: !mSel, editarPrecio: catCompPuedeQuitar()?"catCompPrecio":""});
 }
 let mpProvId=null;
 function asignarA(pid){
