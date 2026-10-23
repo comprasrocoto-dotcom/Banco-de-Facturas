@@ -434,6 +434,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/envio-contabilidad.js"></script>
 <script src="js/envio-contabilidad-ui.js"></script>
 <script src="js/un-pedido-factura.js"></script>
+<script src="js/revisar-amarre.js"></script>
 <script src="js/evaluacion.js"></script>
 <script src="js/evaluacion-ui.js"></script>
 <script src="js/evaluacion-proveedores.js"></script>
@@ -2359,10 +2360,50 @@ function bloquearFacturaConOtroPedido(f,pid){
   if(d==="preguntar") return !confirm(UnPedidoFactura.textoPregunta(otro));
   return false;
 }
+// (23/10/2026) pedido del usuario: ANTES de amarrar se revisa si la factura corresponde al pedido (js/revisar-amarre.js):
+// productos del pedido en el PDF de la factura, fecha y sede; y si otro pedido pendiente del mismo proveedor cuadra mejor.
+// Si algo no cuadra se avisa; si es grave, para seguir hay que escribir el motivo (queda en el historial). -> true = seguir
+const textoPdfCache=new Map();
+async function textoPdfDeFactura(f){
+  if(!f || !f.archivo_pdf || f.tipo==="cuenta_cobro") return null;
+  if(textoPdfCache.has(f.cufe)) return textoPdfCache.get(f.cufe);
+  let t=null;
+  try{
+    const {data}=await SB.storage.from("facturas").createSignedUrl(f.archivo_pdf,120);
+    if(data&&data.signedUrl){ const r=await fetch(data.signedUrl); if(r.ok){ t=await textoPdf({arrayBuffer:()=>r.arrayBuffer()}); } }
+  }catch(e){ t=null; }   // PDF protegido o escaneado: se revisa solo fecha y sede
+  textoPdfCache.set(f.cufe,t);
+  return t;
+}
+async function revisarAmarreAntes(f,p){
+  if(typeof RevisarAmarre==="undefined" || !f || !p) return true;
+  const err=$("amErr"); if(err) err.textContent="⏳ Revisando si la factura corresponde al pedido...";
+  try{
+    const texto=await textoPdfDeFactura(f);
+    // otros pedidos pendientes (sin factura) del mismo proveedor: por si la factura es de otro de ellos
+    const mismo=(x)=>x.id!==p.id && !x.factura_cufe && x.estado!=="anulado" && ((p.proveedor_id && x.proveedor_id===p.proveedor_id) || (p.nit_proveedor && x.nit_proveedor===p.nit_proveedor));
+    const otros=(pedidos||[]).filter(mismo).sort((a,b)=>String(b.fecha||"").localeCompare(String(a.fecha||""))).slice(0,8);
+    const ids=[p.id].concat(otros.map(x=>x.id));
+    const rl=await SB.from("pedido_lineas").select("pedido_id,insumo").in("pedido_id",ids);
+    const lin=(rl&&rl.data)||[], de=(id)=>lin.filter(l=>l.pedido_id===id);
+    const nombreSede=(id)=>((sedes||[]).find(s=>s.id===Number(id))||{}).nombre||("sede "+id);
+    const r=RevisarAmarre.revisar({factura:f, pedido:p, lineas:de(p.id), texto, otros:otros.map(x=>({pedido:x, lineas:de(x.id)})), nombreSede});
+    if(err) err.textContent="";
+    if(r.nivel==="ok") return true;
+    const numF=((f.prefijo||"")+(f.folio||""))||f.documento||"";
+    const msg=RevisarAmarre.texto(r,numF,p.numero);
+    if(r.nivel==="aviso") return confirm(msg+"\n\n¿Amarrar de todas formas?");
+    const motivo=prompt(msg+"\n\nSi estás SEGURO de que sí es de este pedido, escribe el motivo para amarrarla igual (queda registrado). Si no, cancela.");
+    if(!motivo || !motivo.trim()) return false;
+    SB.from("historial").insert({cufe:f.cufe,accion:"amarre con alerta",detalle:"pedido "+(p.numero||"")+" · "+r.motivos.join(" | ").slice(0,600)+" · motivo: "+motivo.trim().slice(0,300),usuario:usuario.id}).then(()=>{},()=>{});
+    return true;
+  }catch(e){ if(err) err.textContent=""; console.warn("revisarAmarreAntes",e); return true; }   // si la revision falla, no se frena el trabajo
+}
 async function amarrarConFactura(cufe){
   const pAntes=pedidos.find(x=>x.id===amId);
   if(bloquearSiYaAmarrado(pAntes)) return;
   if(bloquearFacturaConOtroPedido(facturas.find(x=>x.cufe===cufe),amId)) return;
+  if(!(await revisarAmarreAntes(facturas.find(x=>x.cufe===cufe),pAntes))) return;   // (23/10/2026) ¿la factura es de este pedido?
   const fRec=fechaRecibidoPara(pAntes); if(!fRec) return;   // (06/10/2026) Fecha Recibido obligatoria
   const cc=centroCostoPara(pAntes,"amCentro"); if(cc===undefined) return;   // (09/10/2026) centro de costo (solo marcas que lo usan)
   const f=facturas.find(x=>x.cufe===cufe)||{};
@@ -2378,6 +2419,7 @@ async function amarrarConPedido(pid){
   const pAntes=pedidos.find(x=>x.id===pid);
   if(bloquearSiYaAmarrado(pAntes)) return;
   if(bloquearFacturaConOtroPedido(facturas.find(x=>x.cufe===amId),pid)) return;
+  if(!(await revisarAmarreAntes(facturas.find(x=>x.cufe===amId),pAntes))) return;   // (23/10/2026) ¿la factura es de este pedido?
   const fRec=fechaRecibidoPara(pAntes); if(!fRec) return;   // (06/10/2026) Fecha Recibido obligatoria
   const cc=centroCostoPara(pAntes,"amCC_"+pid); if(cc===undefined) return;   // (09/10/2026) centro de costo (solo marcas que lo usan)
   const f=facturas.find(x=>x.cufe===amId);
@@ -2388,6 +2430,26 @@ async function amarrarConPedido(pid){
   $("modalAmarre").classList.remove("on");
   pedidosCargados=false; await cargarPedidos(); await cargar();
   alert("¡Amarrado!");
+}
+// (23/10/2026) pedido del usuario: el «🔗 Pedido PED-xxxx» de una factura abre ese pedido (modulo Pedidos, vista Todos, buscado y desplegado)
+async function irAPedido(numero, cufe){
+  numero=String(numero||"").trim(); cufe=String(cufe||"").trim();
+  setModulo("pedidos");
+  if(!pedidosCargados) await cargarPedidos();
+  let p=pedidos.find(x=>(numero && x.numero===numero) || (cufe && x.factura_cufe===cufe));
+  if(!p){   // fuera de los 1200 mas recientes o de las sedes elegidas: se trae solo ese
+    let q=SB.from("pedidos").select("*").limit(1);
+    q = numero ? q.eq("numero",numero) : q.eq("factura_cufe",cufe);
+    const r=await q;
+    p=r.data&&r.data[0];
+    if(!p){ alert("No encontré el pedido "+(numero||"")+(r.error?": "+r.error.message:" (puede ser de una sede que no ves).")); return; }
+    pedidos.push(p);
+  }
+  $("qp").value=p.numero||""; if($("fped_desde")) $("fped_desde").value=""; if($("fped_hasta")) $("fped_hasta").value="";
+  setPedVista("todos");
+  const c=$("det_"+p.id);
+  if(c && c.dataset.on!=="1") await abrirPedido(p.id);
+  const cab=c && c.closest(".card"); if(cab) cab.scrollIntoView({behavior:"smooth",block:"start"});
 }
 async function abrirPedido(id){
   const c=$("det_"+id), ch=$("ch_"+id);
@@ -3022,6 +3084,7 @@ async function amarrarPedido(id){
   const f=facturas.find(x=>(((x.prefijo||"")+(x.folio||"")).toUpperCase()===busc) || (x.cufe||"").toUpperCase().startsWith(busc));
   if(!f){alert("No encontré esa factura.");return;}
   if(typeof bloquearFacturaConOtroPedido==="function" && bloquearFacturaConOtroPedido(f,id)) return;
+  if(!(await revisarAmarreAntes(f,p))) return;   // (23/10/2026) ¿la factura es de este pedido?
   const fTxt=prompt("📅 Fecha Recibido de la factura (DD/MM/AAAA): el día que llegó la mercancía. Igual o posterior a la fecha del pedido ("+FechaRecibido.mostrar(p.fecha)+") y no futura.","");
   if(fTxt===null) return;
   const vRec=FechaRecibido.validar(fTxt,p.fecha,FechaRecibido.hoyCO()); if(!vRec.ok){alert(vRec.error);return;}
@@ -3207,7 +3270,7 @@ function pintar(){
         ${nv?`<span class="badge st-pool">CON NOVEDAD: ${nv.motivo}</span>`:""}
         ${f.num_ingreso?`<span class="badge st-sellada" style="font-size:13px;padding:5px 12px;font-weight:700">Ingreso ERP: ${f.num_ingreso}${CentroCosto.detalle(f.num_ingreso)?" · "+CentroCosto.detalle(f.num_ingreso):""}</span>`:""}
         ${SinSellar.esIngresadaSinSellar(f)?badgeSinSellar(f):""}
-        ${(f.pedido_erp||f.pedido_num)?`<span class="badge st-asignada">🔗 Pedido ${f.pedido_erp||f.pedido_num}</span>`:""}
+        ${(f.pedido_erp||f.pedido_num)?`<span class="badge st-asignada" style="cursor:pointer;text-decoration:underline" title="Abrir este pedido" onclick="irAPedido('${escAg(String(f.pedido_num||"").replace(/['\\]/g,""))}','${escAg(String(f.cufe||"").replace(/['\\]/g,""))}')">🔗 Pedido ${f.pedido_erp||f.pedido_num}</span>`:""}
         ${f.tipo==="cuenta_cobro"?`<span class="badge" style="color:#92400e;background:#fffbeb;border-color:#fcd34d;font-weight:700">📷 Cuenta de cobro</span>`:""}
         ${chipsNotaCredito(f)}
         ${(typeof envioBadge==="function")?envioBadge(f):""}
