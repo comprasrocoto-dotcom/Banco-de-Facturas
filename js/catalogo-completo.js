@@ -175,7 +175,10 @@
         : '<span style="color:#b91c1c;font-weight:700">— sin proveedor —</span>' + (x.compradoA.length
           ? '<div class="mut" style="font-size:11.5px;margin-top:3px">Se le ha comprado a: ' + x.compradoA.slice(0, 3).map((c) => `<b>${esc(c.nombre)}</b>${c.nit ? ' (NIT ' + esc(c.nit) + ')' : ''} · ${c.veces} ${c.veces === 1 ? 'vez' : 'veces'}`).join('; ') + (x.compradoA.length > 3 ? '; y ' + (x.compradoA.length - 3) + ' más' : '') + '</div>' : '');
       const nit = x.tipo === 'catalogo' ? (x.nit ? esc(x.nit) : (x.proveedor ? '<span style="color:#b91c1c">sin NIT</span>' : '—')) : '—';
-      const precio = x.precio != null ? pesos(x.precio) : (x.tipo === 'catalogo' ? '<span style="color:#b45309">sin precio</span>' : '—');
+      const precio0 = x.precio != null ? pesos(x.precio) : (x.tipo === 'catalogo' ? '<span style="color:#b45309">sin precio</span>' : '—');
+      // (23/10/2026) pedido del usuario: cambiar el precio de la linea del catalogo desde aqui (o.editarPrecio = funcion global)
+      const precio = o.editarPrecio && x.tipo === 'catalogo' && Number(x.id) > 0
+        ? `${precio0} <button style="padding:1px 7px;font-size:12px;margin-left:4px" title="Cambiar el precio" onclick="${o.editarPrecio}(${Number(x.id)})">✏️</button>` : precio0;
       const accion = o.amarrar && x.codigo ? `<button class="s" style="padding:3px 10px;font-size:12px;white-space:nowrap" title="${x.tipo === 'catalogo' ? 'Amarrarlo a otro proveedor o cambiar su precio' : 'Amarrarlo a un proveedor (con precio)'}" onclick="${o.amarrar}('${esc(String(x.codigo).replace(/['\\]/g, ''))}')">＋ Amarrar</button>` : '';
       const nomSede = (x.nombreSede || []).length
         ? (x.nombreSedeDistinto
@@ -213,5 +216,18 @@
       + (l.length >= PEDIR_ESCRIBIR_DESDE ? ': en el siguiente paso tendrás que escribir QUITAR.' : '.') + '\n\n¿Continuar?';
   }
 
-  return { esc, norm, armarFilas, resumen, filtrar, conteos, proveedoresDe, subfamiliasDe, ordenar, html, textoQuitar, PEDIR_ESCRIBIR_DESDE, VISTAS, ORDENES, SIN_SUB };
+  // (23/10/2026) precio escrito por la persona -> numero (o null si no se entiende). Acepta $, espacios y miles con punto o coma:
+  // "4.500" y "4,500" -> 4500; "4.500,50" -> 4500.5; "4500.5" -> 4500.5; "12.000.000" -> 12000000.
+  function leerPrecio(t) {
+    let s = String(t == null ? '' : t).replace(/[\s$]/g, '');
+    if (!s || /[^0-9.,]/.test(s)) return null;
+    const p = s.lastIndexOf('.'), c = s.lastIndexOf(',');
+    if (p >= 0 && c >= 0) { const dec = p > c ? '.' : ','; s = s.split(dec === '.' ? ',' : '.').join(''); if (dec === ',') s = s.replace(',', '.'); }
+    else { const sep = p >= 0 ? '.' : (c >= 0 ? ',' : ''); if (sep) { const partes = s.split(sep);
+      if (partes.length > 2 || /^\d{1,3}$/.test(partes[0]) && partes[1].length === 3) s = partes.join(''); else s = partes.join('.'); } }
+    const n = Number(s);
+    return isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null;
+  }
+
+  return { esc, norm, leerPrecio, armarFilas, resumen, filtrar, conteos, proveedoresDe, subfamiliasDe, ordenar, html, textoQuitar, PEDIR_ESCRIBIR_DESDE, VISTAS, ORDENES, SIN_SUB };
 });
