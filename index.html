@@ -2853,6 +2853,8 @@ setInterval(()=>{
 }, 60000);
 // (26/09/2026) COLA DE INGRESOS: documentos en ERROR / pendientes de reintento (tabla ingreso_documento), con su etapa y el motivo. Los COMPLETADOS no se vuelven a procesar.
 let ingresoDocs=[];
+let novedadSede="";   // (25/10/2026) filtro por sede de «Documentos con novedad» ('' = todas)
+function filtrarNovedadSede(v){ novedadSede=v||""; cargarErroresIngreso(); }
 async function cargarErroresIngreso(){
   const c=$("erroresIngreso"); if(!c) return;
   try{
@@ -2865,7 +2867,7 @@ async function cargarErroresIngreso(){
     if(ids.length){ const pq=await SB.from("pedidos").select("id,numero,proveedor_texto,sede_id,sede_texto,marca_id").in("id",ids); const mp=new Map((pq.data||[]).map(p=>[p.id,p])); ingresoDocs.forEach(d=>{ d._ped=mp.get(d.pedido_id)||null; }); }
   }catch(e){ ingresoDocs=[]; }
   const sedeDeDoc=(d)=>{ const p=d._ped; if(!p||typeof IngresoElegir==="undefined") return ""; const sd=typeof sedes!=="undefined"?sedes:[]; const m=IngresoElegir.marcaDe(p,sd).nombre, s2=IngresoElegir.sedeDe(p,sd).nombre; return (m?m+" · ":"")+s2; };
-  const h=IngresoPanel.bloqueErrores(ingresoDocs,{puede:can("ingresos.iniciar"),sedeDe:sedeDeDoc});
+  const h=IngresoPanel.bloqueErrores(ingresoDocs,{puede:can("ingresos.iniciar"),sedeDe:sedeDeDoc,filtroSede:novedadSede});
   c.innerHTML=h; c.style.display=h?"block":"none";
 }
 // DETENER: el agente termina el documento en curso y se para (nada a medias)
@@ -2876,7 +2878,20 @@ async function detenerIngreso(id){
   await cargarOrdenes();
 }
 // REINTENTAR ERRORES: solo los documentos en ERROR vuelven a la cola; los COMPLETADOS no se tocan
-async function reintentarErroresIngreso(){
+async function reintentarErroresIngreso(ids){
+  // (25/10/2026) con una sede filtrada: solo esos documentos (los con error vuelven a la cola) y la orden lleva pedido_ids
+  if(Array.isArray(ids)){
+    const lista=ingresoDocs.filter(d=>ids.includes(d.pedido_id)); if(!lista.length) return;
+    const est=new Map(lista.map(d=>[d.pedido_id,d.estado]));
+    const conErr=lista.filter(d=>d.estado==="ERROR").map(d=>d.pedido_id);
+    if(!confirm("Se van a lanzar SOLO "+lista.length+" documento(s) de esta sede"+(conErr.length?" ("+conErr.length+" con error vuelven a la cola)":"")+":\n\n"+lista.slice(0,15).map(d=>"• "+(d.numero||d.pedido_id)).join("\n")+(lista.length>15?"\n… y "+(lista.length-15)+" más":"")+"\n\n¿Pedimos la orden?")) return;
+    if(conErr.length){ const rr=await SB.rpc("ingreso_reintentar_ids",{p_ids:conErr}); if(rr.error){ alert("No se pudieron volver a la cola: "+rr.error.message); return; } }
+    const o=await SB.from("ordenes").insert({tipo:"ingresos",estado:"pendiente",pedida_por:usuario.id,pedido_ids:lista.map(d=>d.pedido_id)});
+    if(o.error){ alert(msgPedirOrden(o.error)); return; }
+    await cargarOrdenes(); try{ await cargarErroresIngreso(); }catch(e){}
+    alert("✅ Orden enviada solo para esta sede.\n\nEl VIGILANTE la toma en menos de 30 segundos.");
+    return;
+  }
   const n=ingresoDocs.filter(d=>d.estado==="ERROR").length;
   if(!confirm("Se van a reintentar "+n+" documento(s) que quedaron en ERROR.\n\nLos COMPLETADOS no se vuelven a procesar. ¿Pedimos la orden?")) return;
   const r=await SB.rpc("ingreso_reintentar_errores");
