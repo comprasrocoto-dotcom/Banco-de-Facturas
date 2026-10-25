@@ -2565,7 +2565,7 @@ async function abrirPedido(id){
        ${!bot.foto&&p.estado!=="anulado"&&typeof abrirFotoFactura==="function"&&!(typeof FF!=="undefined"&&FF.baseNueva===false)?`<button title="Foto de una devolución u otro documento de este pedido (y la novedad, si algo llegó mal)" onclick="abrirFotoFactura(${p.id},true)">📎 Devolución / otro documento</button>`:""}
        ${!p.factura_cufe&&bot.amarrar?`<button class="s" onclick="abrirAmarre('pedido',${p.id})">🔗 Amarrar a factura</button>`:""}
        ${!p.factura_cufe&&bot.cuenta&&typeof abrirCuentaCobro==="function"?`<button class="s" title="Proveedor sin factura electrónica: foto de la cuenta de cobro + cantidades y precios" onclick="abrirCuentaCobro(${p.id})">📷 Cuenta de cobro</button>`:""}
-       ${p.factura_cufe?`<span class="badge st-sellada">Amarrado a ${numFacturaDe(p)||"factura"}</span>`:""}
+       ${p.factura_cufe?`<span class="badge st-sellada">Amarrado a ${numFacturaDe(p)||"factura"}</span><button title="Abre el PDF (o la foto) de la factura amarrada" onclick="verFacturaDePedido('${escAg(p.factura_cufe)}')">📄 Ver factura</button>`:""}
        ${p.factura_cufe&&!p.pedido_erp&&p.estado!=="facturado"&&p.estado!=="anulado"&&perfil&&perfil.rol==="admin"?`<button class="s" style="background:#1e3a8a;border-color:#1e3a8a;color:#fff" title="Pide una orden de ingreso al ERP solo para este pedido" onclick="ingresarSoloPedido(${p.id})">🤖 Ingresar solo este</button>`:""}
        ${(p.factura_cufe&&typeof Desamarrar!=="undefined"&&Desamarrar.puede(perfil))?`<button class="d" title="Suelta la factura de este pedido sin borrar nada: la factura queda libre en el banco" onclick="desamarrarPedido(${p.id})">⛓ Desamarrar factura</button>`:""}
        ${p.observacion_pedido?`<span class="mut">Obs: ${p.observacion_pedido}</span>`:""}
@@ -3438,6 +3438,15 @@ async function borrarFactura(cufe){
   await SB.from("historial").insert({accion:"factura borrada",detalle:num+" · "+(f.emisor||""),usuario:usuario.id}).then(()=>{},()=>{});
   await cargar();
   alert("Factura "+num+" borrada.");
+}
+// (25/10/2026) pedido del usuario: ver la factura amarrada desde el pedido (la factura puede no estar en la lista cargada)
+async function verFacturaDePedido(cufe){
+  let f=(typeof facturas!=="undefined"?facturas:[]).find(x=>x.cufe===cufe);
+  if(!f){ const r=await SB.from("facturas").select("cufe,archivo_pdf").eq("cufe",cufe).maybeSingle(); f=r.data; if(!f){ alert("No encontré la factura"+(r.error?": "+r.error.message:" (puede ser de una sede que no ves).")); return; } }
+  if(!f.archivo_pdf){ alert("Esta factura no tiene PDF guardado."); return; }
+  const {data,error}=await SB.storage.from("facturas").createSignedUrl(f.archivo_pdf,300);
+  if(error||!data){ alert("No pude abrir la factura: "+(error?error.message:"sin enlace")); return; }
+  window.open(data.signedUrl,"_blank");
 }
 async function verPdf(cufe){
   const f=facturas.find(x=>x.cufe===cufe);
