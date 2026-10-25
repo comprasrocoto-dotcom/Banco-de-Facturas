@@ -435,6 +435,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/envio-contabilidad-ui.js"></script>
 <script src="js/un-pedido-factura.js"></script>
 <script src="js/revisar-amarre.js"></script>
+<script src="js/ingreso-elegir.js"></script>
 <script src="js/evaluacion.js"></script>
 <script src="js/evaluacion-ui.js"></script>
 <script src="js/evaluacion-proveedores.js"></script>
@@ -2565,6 +2566,7 @@ async function abrirPedido(id){
        ${!p.factura_cufe&&bot.amarrar?`<button class="s" onclick="abrirAmarre('pedido',${p.id})">🔗 Amarrar a factura</button>`:""}
        ${!p.factura_cufe&&bot.cuenta&&typeof abrirCuentaCobro==="function"?`<button class="s" title="Proveedor sin factura electrónica: foto de la cuenta de cobro + cantidades y precios" onclick="abrirCuentaCobro(${p.id})">📷 Cuenta de cobro</button>`:""}
        ${p.factura_cufe?`<span class="badge st-sellada">Amarrado a ${numFacturaDe(p)||"factura"}</span>`:""}
+       ${p.factura_cufe&&!p.pedido_erp&&p.estado!=="facturado"&&p.estado!=="anulado"&&perfil&&perfil.rol==="admin"?`<button class="s" style="background:#1e3a8a;border-color:#1e3a8a;color:#fff" title="Pide una orden de ingreso al ERP solo para este pedido" onclick="ingresarSoloPedido(${p.id})">🤖 Ingresar solo este</button>`:""}
        ${(p.factura_cufe&&typeof Desamarrar!=="undefined"&&Desamarrar.puede(perfil))?`<button class="d" title="Suelta la factura de este pedido sin borrar nada: la factura queda libre en el banco" onclick="desamarrarPedido(${p.id})">⛓ Desamarrar factura</button>`:""}
        ${p.observacion_pedido?`<span class="mut">Obs: ${p.observacion_pedido}</span>`:""}
      </div>
@@ -2983,13 +2985,40 @@ async function pedirIngresos(){
     }
     alert("No hay pedidos con factura amarrada pendientes de ingresar.\n\nPrimero subí la factura y amarrála al pedido."); return;
   }
-  if(!confirm("Se van a ingresar al ERP estos pedidos (los que ya tienen factura amarrada):\n\n"+
-      eleg.slice(0,15).map(p=>"• "+p.numero+" · "+(p.proveedor_texto||"")).join("\n")+
-      (eleg.length>15?"\n… y "+(eleg.length-15)+" más":"")+"\n\n¿Pedimos la orden?")) return;
-  const r=await SB.from("ordenes").insert({tipo:"ingresos",estado:"pendiente",pedida_por:usuario.id});
+  // (25/10/2026) pedido del usuario: elegir QUE se ingresa (todos, una marca, una sede o pedidos sueltos) -> ordenes.pedido_ids
+  const estadosCola=new Map();
+  try{ const dq2=await SB.from("ingreso_documento").select("pedido_id,estado").in("pedido_id",eleg.map(p=>p.id)); (dq2.data||[]).forEach(d=>estadosCola.set(d.pedido_id,d.estado)); }catch(e){}
+  const sel=(typeof ingElegAbrir==="function")? await ingElegAbrir(eleg,estadosCola) : {todos:true,lista:eleg};
+  if(!sel) return;
+  const listaIng=sel.lista||eleg;
+  if(sel.todos && !confirm("Se van a ingresar al ERP estos pedidos (los que ya tienen factura amarrada):\n\n"+
+      listaIng.slice(0,15).map(p=>"• "+p.numero+" · "+(p.proveedor_texto||"")).join("\n")+
+      (listaIng.length>15?"\n… y "+(listaIng.length-15)+" más":"")+"\n\n¿Pedimos la orden?")) return;
+  if(sel.ids && !(await ingresoReintentarElegidos(listaIng,estadosCola))) return;
+  const r=await SB.from("ordenes").insert(Object.assign({tipo:"ingresos",estado:"pendiente",pedida_por:usuario.id}, sel.ids?{pedido_ids:sel.ids}:{}));
   if(r.error){ alert(msgPedirOrden(r.error)); return; }
   await cargarOrdenes();
   alert("✅ Orden enviada.\n\nEl VIGILANTE local la toma en menos de 30 segundos (si está encendido en tu PC).\n\nSi no arranca: abrí el VIGILANTE (INICIAR-VIGILANTE.bat).");
+}
+// (25/10/2026) los elegidos que estaban con ERROR o fuera de la cola vuelven a la cola (solo esos). false = cancelo
+async function ingresoReintentarElegidos(lista,estados){
+  const conErr=(lista||[]).filter(p=>["ERROR","DESCARTADO"].includes(estados.get(p.id)));
+  if(!conErr.length) return true;
+  if(!confirm(conErr.length+" de los pedidos elegidos quedaron con ERROR o fuera de la cola:\n\n"+conErr.slice(0,12).map(p=>"• "+p.numero+" · "+(p.proveedor_texto||"")).join("\n")+(conErr.length>12?"\n… y "+(conErr.length-12)+" más":"")+"\n\nSe vuelven a intentar (solo esos). ¿Continuar?")) return false;
+  const rr=await SB.rpc("ingreso_reintentar_ids",{p_ids:conErr.map(p=>p.id)});
+  if(rr.error){ alert("No se pudieron volver a la cola: "+rr.error.message); return false; }
+  return true;
+}
+// (25/10/2026) «🤖 Ingresar solo este» desde el detalle del pedido
+async function ingresarSoloPedido(id){
+  const p=pedidos.find(x=>x.id===id); if(!p) return;
+  if(!confirm("Se va a ingresar al ERP SOLO el pedido "+(p.numero||"")+" · "+(p.proveedor_texto||"")+".\n\n¿Pedimos la orden?")) return;
+  const est=new Map(); try{ const d=await SB.from("ingreso_documento").select("pedido_id,estado").eq("pedido_id",id); (d.data||[]).forEach(x=>est.set(x.pedido_id,x.estado)); }catch(e){}
+  if(!(await ingresoReintentarElegidos([p],est))) return;
+  const r=await SB.from("ordenes").insert({tipo:"ingresos",estado:"pendiente",pedida_por:usuario.id,pedido_ids:[id]});
+  if(r.error){ alert(msgPedirOrden(r.error)); return; }
+  await cargarOrdenes();
+  alert("✅ Orden enviada solo para "+(p.numero||"")+".\n\nEl VIGILANTE la toma en menos de 30 segundos (si está encendido en tu PC).");
 }
 function numFacturaDe(p){
   if(p && p.numero_factura) return p.numero_factura;
