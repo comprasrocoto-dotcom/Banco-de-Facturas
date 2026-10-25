@@ -2488,6 +2488,30 @@ async function abrirPedido(id){
   },0);
   const hayPrecios=lineas.some(x=>prec[x.codigo]!=null);
   const totalArts=lineas.reduce((t,x)=>t+Number(x.cantidad||0),0);
+  // (25/10/2026) pedido del usuario: ver las CANTIDADES y PRECIOS que la sede digito en la cuenta de cobro, junto al pedido
+  let ccHtml="";
+  { const fAm=p.factura_cufe?(facturas||[]).find(x=>x.cufe===p.factura_cufe):null;
+    const esCC=p.factura_cufe && ((fAm&&fAm.tipo==="cuenta_cobro") || /^CC-/.test(p.factura_cufe));
+    if(esCC){
+      const rc=await SB.from("cuenta_cobro_linea").select("orden,codigo,articulo,cantidad,precio_unitario,subtotal").eq("factura_cufe",p.factura_cufe).order("orden");
+      const lc=(rc&&rc.data)||[];
+      const n=(x)=>x==null?"—":Number(x).toLocaleString("es-CO",{maximumFractionDigits:2});
+      const pedDe=(cod)=>lineas.find(x=>x.codigo&&cod&&String(x.codigo)===String(cod));
+      const marca=(dif)=>dif?' style="background:#fef3c7;font-weight:700"':"";
+      const totCC=lc.reduce((t,x)=>t+Number(x.subtotal||0),0);
+      ccHtml=`<div style="border:1px solid #fcd34d;background:#fffbeb;border-radius:12px;padding:12px 16px;margin-top:16px">
+        <div class="row" style="align-items:center;gap:10px"><div style="font-weight:700;color:#92400e">📷 CUENTA DE COBRO ${escAg(numFacturaDe(p)||"")} — lo que digitó la sede</div><span class="sp"></span>
+          ${fAm&&fAm.archivo_pdf?`<button onclick="verPdf('${fAm.cufe}')">${/\.pdf$/i.test(fAm.archivo_pdf)?"📄 Ver PDF":"📷 Ver foto"}</button>`:""}</div>
+        ${rc&&rc.error?`<div class="err">No pude cargar los artículos: ${escAg(rc.error.message)}</div>`:!lc.length?'<div class="mut" style="margin-top:6px">Esta cuenta de cobro no tiene artículos guardados.</div>':
+        `<div style="overflow:auto;margin-top:8px"><table style="font-size:13px"><thead><tr><th>Código</th><th>Artículo</th><th class="num">Cant. sede</th><th class="num">Precio sede</th><th class="num">Total sede</th><th class="num">Cant. pedido</th><th class="num">Precio catálogo</th></tr></thead><tbody>${
+          lc.map(x=>{ const pe=pedDe(x.codigo), cp=pe&&pe.cantidad!=null?Number(pe.cantidad):null, pc=prec[x.codigo];
+            const difC=cp!=null&&Math.abs(cp-Number(x.cantidad||0))>0.001, difP=pc!=null&&Math.abs(pc-Number(x.precio_unitario||0))>0.5;
+            return `<tr><td class="mut">${escAg(x.codigo||"—")}</td><td>${escAg(x.articulo||"")}</td><td class="num"${marca(difC)}>${n(x.cantidad)}</td><td class="num"${marca(difP)}>$ ${n(x.precio_unitario)}</td><td class="num" style="font-weight:700">${money(Number(x.subtotal||0))}</td><td class="num mut">${n(cp)}</td><td class="num mut">${pc!=null?money(pc):"—"}</td></tr>`; }).join("")
+        }</tbody><tfoot><tr><td colspan="4" style="text-align:right;font-weight:700">Total cuenta de cobro</td><td class="num" style="font-weight:700">${money(totCC)}</td><td colspan="2" class="mut" style="font-size:12px">${hayPrecios?"Pedido: "+money(totalPlata):""}</td></tr></tfoot></table></div>
+          <div class="mut" style="font-size:12px;margin-top:4px">En amarillo: lo que la sede digitó distinto al pedido (cantidad) o al catálogo (precio).</div>`}
+      </div>`;
+    }
+  }
   c.dataset.on="1"; if(ch) ch.textContent="⌃";
   c.innerHTML=`
    <div class="ped-det" style="padding:0 16px 16px">
@@ -2531,6 +2555,7 @@ async function abrirPedido(id){
          <div><div class="mut" style="font-weight:700">NOTA DE CRÉDITO</div><div>${p.numero_nota_credito||"—"}</div></div>
        </div>
      </div>
+     ${ccHtml}
      <div id="env_${p.id}"></div>
      <div id="docs_${p.id}"></div>
      <div class="row" style="margin-top:14px">
