@@ -44,8 +44,16 @@
   // docs = filas de ingreso_documento en ERROR o PENDIENTE_REINTENTO
   function bloqueErrores(docs, opciones) {
     opciones = opciones || {};
-    const l = (docs || []).filter((d) => d.estado === 'ERROR' || d.estado === 'PENDIENTE_REINTENTO');
-    if (!l.length) return '';
+    const todos = (docs || []).filter((d) => d.estado === 'ERROR' || d.estado === 'PENDIENTE_REINTENTO');
+    if (!todos.length) return '';
+    // (25/10/2026) pedido del usuario: filtrar por sede (opciones.filtroSede = texto «marca · sede» elegido; '' = todas)
+    const sedeDe = (d) => (typeof opciones.sedeDe === 'function' ? opciones.sedeDe(d) : '') || 'Sin sede';
+    const conteo = new Map(); todos.forEach((d) => conteo.set(sedeDe(d), (conteo.get(sedeDe(d)) || 0) + 1));
+    const filtro = opciones.filtroSede && conteo.has(opciones.filtroSede) ? opciones.filtroSede : '';
+    const l = filtro ? todos.filter((d) => sedeDe(d) === filtro) : todos;
+    const selector = conteo.size > 1 || filtro ? `<div class="row" style="margin:6px 0;gap:6px;align-items:center"><span class="mut">Sede:</span>
+      <select style="width:auto;margin:0" onchange="filtrarNovedadSede(this.value)"><option value="">Todas (${todos.length})</option>${[...conteo.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([k, n]) => `<option value="${esc(k)}"${k === filtro ? ' selected' : ''}>${esc(k)} (${n})</option>`).join('')}</select></div>` : '';
+    const idsFiltro = filtro ? '[' + l.map((d) => Number(d.pedido_id)).filter(Boolean).join(',') + ']' : 'null';
     const errores = l.filter((d) => d.estado === 'ERROR');
     // (05/10/2026) "Quitar"/"Limpiar" = sacar de la cola (estado DESCARTADO, RPC ingreso_descartar): el agente deja de reintentarlo.
     const quitar = (d) => (opciones.puede && Number(d.pedido_id) ? `<button class="d" style="padding:3px 10px;font-size:12px" title="Sacar de la cola: el agente no lo vuelve a intentar" onclick="descartarIngreso([${Number(d.pedido_id)}])">✕ Quitar</button>` : '');
@@ -55,11 +63,12 @@
     const filas = l.slice(0, 30).map((d) => `<div style="border-top:1px solid var(--line);padding:5px 0;display:flex;gap:10px;align-items:flex-start"><div style="flex:1"><b>${esc(d.numero || d.pedido_id)}</b>${sedeTxt(d)} · ${d.estado === 'ERROR' ? '<span style="color:#b91c1c">ERROR</span>' : '<span style="color:#b45309">PENDIENTE DE REINTENTO</span>'}
       ${d.error_etapa ? ' · ' + esc(d.error_etapa) : ''}<div class="mut">${esc(d.etapa || '')}${d.error ? ' — ' + esc(d.error) : ''}</div></div><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${lanzar(d)}${quitar(d)}</div></div>`).join('');
     const botones = [
-      errores.length && opciones.puede ? `<button class="p" onclick="reintentarErroresIngreso()">🔁 REINTENTAR ERRORES (${errores.length})</button>` : '',
-      opciones.puede ? `<button onclick="descartarIngreso(null)" title="Sacar de la cola TODOS los de esta lista: el agente deja de intentarlos">🧹 LIMPIAR VENTANA (${l.length})</button>` : '',
+      filtro && opciones.puede ? `<button class="p" onclick="reintentarErroresIngreso(${idsFiltro})" title="Lanza solo los de esta sede (los que tienen error vuelven a la cola)">🔁 LANZAR ESTA SEDE (${l.length})</button>`
+        : errores.length && opciones.puede ? `<button class="p" onclick="reintentarErroresIngreso()">🔁 REINTENTAR ERRORES (${errores.length})</button>` : '',
+      opciones.puede ? `<button onclick="descartarIngreso(${idsFiltro})" title="Sacar de la cola TODOS los de esta lista: el agente deja de intentarlos">🧹 LIMPIAR VENTANA (${l.length})</button>` : '',
     ].filter(Boolean).join(' ');
-    return `<div class="card" style="border-left:5px solid #b45309;margin-top:8px"><div style="font-weight:700;color:#b45309">Documentos con novedad (${l.length})</div>
-      <div class="mut">Los COMPLETADOS no se vuelven a procesar. Corrige lo que indica cada uno y pulsa reintentar, o sácalo de la cola si ya lo resolviste a mano.</div>${filas}
+    return `<div class="card" style="border-left:5px solid #b45309;margin-top:8px"><div style="font-weight:700;color:#b45309">Documentos con novedad (${l.length}${filtro ? ' de ' + todos.length : ''})</div>
+      <div class="mut">Los COMPLETADOS no se vuelven a procesar. Corrige lo que indica cada uno y pulsa reintentar, o sácalo de la cola si ya lo resolviste a mano.</div>${selector}${filas}
       ${botones ? `<div class="row" style="margin-top:8px">${botones}</div>` : ''}</div>`;
   }
 
