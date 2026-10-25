@@ -49,8 +49,11 @@
     const errores = l.filter((d) => d.estado === 'ERROR');
     // (05/10/2026) "Quitar"/"Limpiar" = sacar de la cola (estado DESCARTADO, RPC ingreso_descartar): el agente deja de reintentarlo.
     const quitar = (d) => (opciones.puede && Number(d.pedido_id) ? `<button class="d" style="padding:3px 10px;font-size:12px" title="Sacar de la cola: el agente no lo vuelve a intentar" onclick="descartarIngreso([${Number(d.pedido_id)}])">✕ Quitar</button>` : '');
-    const filas = l.slice(0, 30).map((d) => `<div style="border-top:1px solid var(--line);padding:5px 0;display:flex;gap:10px;align-items:flex-start"><div style="flex:1"><b>${esc(d.numero || d.pedido_id)}</b> · ${d.estado === 'ERROR' ? '<span style="color:#b91c1c">ERROR</span>' : '<span style="color:#b45309">PENDIENTE DE REINTENTO</span>'}
-      ${d.error_etapa ? ' · ' + esc(d.error_etapa) : ''}<div class="mut">${esc(d.etapa || '')}${d.error ? ' — ' + esc(d.error) : ''}</div></div>${quitar(d)}</div>`).join('');
+    // (25/10/2026) pedido del usuario: cada uno se puede lanzar SOLO (🤖 Lanzar este) y se ve de que sede es (opciones.sedeDe(d) -> texto)
+    const lanzar = (d) => (opciones.puede && Number(d.pedido_id) ? `<button class="s" style="padding:3px 10px;font-size:12px;background:#1e3a8a;border-color:#1e3a8a;color:#fff" title="Pide una orden de ingreso al ERP solo para este pedido" onclick="ingresarSoloPedido(${Number(d.pedido_id)})">🤖 Lanzar este</button>` : '');
+    const sedeTxt = (d) => { const t = typeof opciones.sedeDe === 'function' ? opciones.sedeDe(d) : ''; return t ? ` · <span class="badge" style="background:#e0e7ff;color:#1e3a8a">${esc(t)}</span>` : ''; };
+    const filas = l.slice(0, 30).map((d) => `<div style="border-top:1px solid var(--line);padding:5px 0;display:flex;gap:10px;align-items:flex-start"><div style="flex:1"><b>${esc(d.numero || d.pedido_id)}</b>${sedeTxt(d)} · ${d.estado === 'ERROR' ? '<span style="color:#b91c1c">ERROR</span>' : '<span style="color:#b45309">PENDIENTE DE REINTENTO</span>'}
+      ${d.error_etapa ? ' · ' + esc(d.error_etapa) : ''}<div class="mut">${esc(d.etapa || '')}${d.error ? ' — ' + esc(d.error) : ''}</div></div><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${lanzar(d)}${quitar(d)}</div></div>`).join('');
     const botones = [
       errores.length && opciones.puede ? `<button class="p" onclick="reintentarErroresIngreso()">🔁 REINTENTAR ERRORES (${errores.length})</button>` : '',
       opciones.puede ? `<button onclick="descartarIngreso(null)" title="Sacar de la cola TODOS los de esta lista: el agente deja de intentarlos">🧹 LIMPIAR VENTANA (${l.length})</button>` : '',
