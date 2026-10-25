@@ -2860,8 +2860,12 @@ async function cargarErroresIngreso(){
     if(typeof can!=="function" || !(perfil && (perfil.rol==="admin"||perfil.rol==="pagos")) || !can("ingresos.iniciar")){ c.style.display="none"; return; }
     const r=await SB.from("ingreso_documento").select("pedido_id,numero,estado,etapa,error_etapa,error").in("estado",["ERROR","PENDIENTE_REINTENTO"]).order("actualizado_en",{ascending:false}).limit(50);
     ingresoDocs=r.data||[];
+    // (25/10/2026) de que sede/marca es cada uno (se ve al lado del numero)
+    const ids=ingresoDocs.map(d=>d.pedido_id).filter(Boolean);
+    if(ids.length){ const pq=await SB.from("pedidos").select("id,numero,proveedor_texto,sede_id,sede_texto,marca_id").in("id",ids); const mp=new Map((pq.data||[]).map(p=>[p.id,p])); ingresoDocs.forEach(d=>{ d._ped=mp.get(d.pedido_id)||null; }); }
   }catch(e){ ingresoDocs=[]; }
-  const h=IngresoPanel.bloqueErrores(ingresoDocs,{puede:can("ingresos.iniciar")});
+  const sedeDeDoc=(d)=>{ const p=d._ped; if(!p||typeof IngresoElegir==="undefined") return ""; const sd=typeof sedes!=="undefined"?sedes:[]; const m=IngresoElegir.marcaDe(p,sd).nombre, s2=IngresoElegir.sedeDe(p,sd).nombre; return (m?m+" · ":"")+s2; };
+  const h=IngresoPanel.bloqueErrores(ingresoDocs,{puede:can("ingresos.iniciar"),sedeDe:sedeDeDoc});
   c.innerHTML=h; c.style.display=h?"block":"none";
 }
 // DETENER: el agente termina el documento en curso y se para (nada a medias)
@@ -3011,13 +3015,17 @@ async function ingresoReintentarElegidos(lista,estados){
 }
 // (25/10/2026) «🤖 Ingresar solo este» desde el detalle del pedido
 async function ingresarSoloPedido(id){
-  const p=pedidos.find(x=>x.id===id); if(!p) return;
-  if(!confirm("Se va a ingresar al ERP SOLO el pedido "+(p.numero||"")+" · "+(p.proveedor_texto||"")+".\n\n¿Pedimos la orden?")) return;
+  // (25/10/2026) tambien desde la lista de documentos con novedad (el pedido puede no estar cargado en la pantalla)
+  let p=(typeof pedidos!=="undefined"&&pedidos.find(x=>x.id===id))||(((typeof ingresoDocs!=="undefined"?ingresoDocs:[]).find(d=>d.pedido_id===id)||{})._ped);
+  if(!p){ const q=await SB.from("pedidos").select("id,numero,proveedor_texto,sede_id,sede_texto,marca_id").eq("id",id).maybeSingle(); p=q.data; }
+  if(!p){ alert("No encontré ese pedido."); return; }
+  const sd=typeof sedes!=="undefined"?sedes:[], dondeP=(typeof IngresoElegir!=="undefined")?((IngresoElegir.marcaDe(p,sd).nombre?IngresoElegir.marcaDe(p,sd).nombre+" · ":"")+IngresoElegir.sedeDe(p,sd).nombre):"";
+  if(!confirm("Se va a ingresar al ERP SOLO el pedido "+(p.numero||"")+" · "+(p.proveedor_texto||"")+(dondeP?" ("+dondeP+")":"")+".\n\n¿Pedimos la orden?")) return;
   const est=new Map(); try{ const d=await SB.from("ingreso_documento").select("pedido_id,estado").eq("pedido_id",id); (d.data||[]).forEach(x=>est.set(x.pedido_id,x.estado)); }catch(e){}
   if(!(await ingresoReintentarElegidos([p],est))) return;
   const r=await SB.from("ordenes").insert({tipo:"ingresos",estado:"pendiente",pedida_por:usuario.id,pedido_ids:[id]});
   if(r.error){ alert(msgPedirOrden(r.error)); return; }
-  await cargarOrdenes();
+  await cargarOrdenes(); try{ await cargarErroresIngreso(); }catch(e){}
   alert("✅ Orden enviada solo para "+(p.numero||"")+".\n\nEl VIGILANTE la toma en menos de 30 segundos (si está encendido en tu PC).");
 }
 function numFacturaDe(p){
