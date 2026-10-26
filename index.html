@@ -755,6 +755,13 @@ async function filtrarArticulos(mantenerCant){
       const alt=await SB.from("proveedor_articulos").select("codigo,insumo,veces").ilike("proveedor",nom.split(" ")[0]+"%").order("veces",{ascending:false}).limit(500);
       provArts=alt.data||[];
     }
+    // (26/10/2026) el historico trae una fila por CODIGO + NOMBRE: si el mismo codigo se pidio con dos nombres (ORD594 «AGUACATE HASS X
+    // KILO» y «AGUACATE HASS X KILO (KILO)») salia dos veces. Una sola linea por codigo: se suman las compras y queda el nombre mas usado.
+    { const m=new Map(), sin=[];
+      for(const a of provArts){ if(!a.codigo){ sin.push(a); continue; }
+        const x=m.get(a.codigo); if(!x){ m.set(a.codigo,Object.assign({},a,{veces:Number(a.veces)||0,_max:Number(a.veces)||0})); continue; }
+        x.veces+=Number(a.veces)||0; if((Number(a.veces)||0)>x._max){ x._max=Number(a.veces)||0; x.insumo=a.insumo; } }
+      provArts=[...m.values(),...sin].map(a=>{ const b=Object.assign({},a); delete b._max; return b; }).sort((a,b)=>(b.veces||0)-(a.veces||0)); }
     if(!npMarcaPropia && typeof npNombresEditados!=="undefined" && npNombresEditados.size) provArts=provArts.map(a=>npNombresEditados.has(a.codigo)?Object.assign({},a,{insumo:npNombresEditados.get(a.codigo)}):a);
     const cc=npMarcaPropia?{data:cat.filter(c=>c.id_proveedor===id)}:await SB.from("catalogo_compras").select("codigo_barras").eq("id_proveedor",id);
     // (26/10/2026) pedido del usuario: «que salga solo lo aprobado». Si el proveedor tiene catalogo aprobado, la lista es SOLO eso
