@@ -757,6 +757,12 @@ async function filtrarArticulos(mantenerCant){
     }
     if(!npMarcaPropia && typeof npNombresEditados!=="undefined" && npNombresEditados.size) provArts=provArts.map(a=>npNombresEditados.has(a.codigo)?Object.assign({},a,{insumo:npNombresEditados.get(a.codigo)}):a);
     const cc=npMarcaPropia?{data:cat.filter(c=>c.id_proveedor===id)}:await SB.from("catalogo_compras").select("codigo_barras").eq("id_proveedor",id);
+    // (26/10/2026) pedido del usuario: «que salga solo lo aprobado». Si el proveedor tiene catalogo aprobado, la lista es SOLO eso
+    // (ordenado por lo que mas se le compra); lo que se le compro antes pero ya no esta aprobado no sale. Sin ningun aprobado, se
+    // muestra lo del historico como antes, con aviso.
+    const aprobados=new Set((cc.data||[]).map(c=>c.codigo_barras).filter(Boolean));
+    const soloAprobado=aprobados.size>0;
+    if(soloAprobado) provArts=provArts.filter(a=>aprobados.has(a.codigo));
     const existentes=new Set(provArts.map(a=>a.codigo||a.insumo));
     for(const c of (cc.data||[])){
       const cod=c.codigo_barras;
@@ -766,9 +772,11 @@ async function filtrarArticulos(mantenerCant){
         existentes.add(cod);
       }
     }
-    $("np_arts_info").textContent = provArts.length
-      ? "✅ "+provArts.length+" artículos que le comprás a este proveedor (los más frecuentes primero)"
-      : "⚠️ Este proveedor no tiene compras en el histórico — te muestro todos los artículos";
+    $("np_arts_info").textContent = !provArts.length
+      ? "⚠️ Este proveedor no tiene compras en el histórico — te muestro todos los artículos"
+      : soloAprobado
+        ? "✅ "+provArts.length+" artículos aprobados para este proveedor (los más frecuentes primero)"
+        : "⚠️ "+provArts.length+" artículos que se le compraron antes: este proveedor todavía no tiene artículos aprobados en su catálogo";
   } else {
     $("np_arts_info").textContent="";
   }
