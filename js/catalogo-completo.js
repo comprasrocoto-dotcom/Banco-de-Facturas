@@ -173,7 +173,10 @@
       const prov = x.tipo === 'catalogo'
         ? (x.proveedor ? esc(x.proveedor) : '<span style="color:#b91c1c">— no existe —</span>')
         : '<span style="color:#b91c1c;font-weight:700">— sin proveedor —</span>' + (x.compradoA.length
-          ? '<div class="mut" style="font-size:11.5px;margin-top:3px">Se le ha comprado a: ' + x.compradoA.slice(0, 3).map((c) => `<b>${esc(c.nombre)}</b>${c.nit ? ' (NIT ' + esc(c.nit) + ')' : ''} · ${c.veces} ${c.veces === 1 ? 'vez' : 'veces'}`).join('; ') + (x.compradoA.length > 3 ? '; y ' + (x.compradoA.length - 3) + ' más' : '') + '</div>' : '');
+          ? '<div class="mut" style="font-size:11.5px;margin-top:3px">Se le ha comprado a: ' + x.compradoA.slice(0, 3).map((c) => `<b>${esc(c.nombre)}</b>${c.nit ? ' (NIT ' + esc(c.nit) + ')' : ''} · ${c.veces} ${c.veces === 1 ? 'vez' : 'veces'}`
+            // (26/10/2026) pedido del usuario: amarrar desde aqui. Con un clic al proveedor al que ya se le compro (queda elegido en la ventana)
+            + (o.amarrar && x.codigo && Number(c.id) > 0 ? ` <button class="s" style="padding:1px 7px;font-size:11px" title="Amarrarlo a este proveedor (con precio)" onclick="${o.amarrar}('${esc(String(x.codigo).replace(/['\\]/g, ''))}',${Number(c.id)})">＋ a este</button>` : '')).join('; ') + (x.compradoA.length > 3 ? '; y ' + (x.compradoA.length - 3) + ' más' : '') + '</div>' : '')
+          + (o.amarrar && x.codigo ? `<div style="margin-top:4px"><button class="s" style="padding:3px 10px;font-size:12px" title="Amarrarlo a un proveedor (con precio)" onclick="${o.amarrar}('${esc(String(x.codigo).replace(/['\\]/g, ''))}')">＋ Amarrar a un proveedor</button></div>` : '');
       const nit = x.tipo === 'catalogo' ? (x.nit ? esc(x.nit) : (x.proveedor ? '<span style="color:#b91c1c">sin NIT</span>' : '—')) : '—';
       const precio0 = x.precio != null ? pesos(x.precio) : (x.tipo === 'catalogo' ? '<span style="color:#b45309">sin precio</span>' : '—');
       // (23/10/2026) pedido del usuario: cambiar el precio de la linea del catalogo desde aqui (o.editarPrecio = funcion global)
