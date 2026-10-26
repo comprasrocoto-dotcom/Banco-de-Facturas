@@ -53,6 +53,7 @@ function orgHCalcular() {
   const banco = orgH.banco || { facturas: [], proveedores: [] };
   const dianFacturas = (orgH.dian || []).map((d) => ({ doc: d.doc, emisor: d.emisor, nit: d.nit, fuente: 'el reporte de la DIAN' }));
   const evidencia = OrganizadorHiopos.armarEvidencia({ facturas: [...banco.facturas, ...dianFacturas], proveedores: banco.proveedores });
+  orgH.evidencia = evidencia;   // (26/10/2026) la hoja contable saca de aqui el NIT de cada proveedor (nombre -> NIT)
   const cl = OrganizadorHiopos.clasificar(orgH.lectura.filas, orgHReglasLista(), evidencia, orgH.correcciones);
   // (09/10/2026) base, impuesto y total contra la factura (reporte de la DIAN), si se cargo
   const comparacion = orgH.dian ? OrganizadorHiopos.compararConDian(orgH.lectura.filas, orgH.dian) : null;
