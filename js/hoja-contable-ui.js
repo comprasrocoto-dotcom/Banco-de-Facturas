@@ -26,7 +26,7 @@ async function orgHCargarContable(forzar) {
     const [catalogo, reglas, facturas, pedidos, articulos, precios] = await Promise.all([
       orgCTodo('cuentas_contables', 'id,clasificacion,articulo,familia,subfamilia,grupo_cuenta,referencia,cuenta_contable,cuenta_devolucion'),
       orgCTodo('contable_regla_familia', '*'),
-      orgCTodo('facturas', 'cufe,num_ingreso,documento,prefijo,folio'),
+      orgCTodo('facturas', 'cufe,num_ingreso,documento,prefijo,folio,nit_emisor'),
       orgCTodo('pedidos', 'id,numero,factura_cufe,centro_costo', (q) => q.not('factura_cufe', 'is', null)),
       orgCTodo('articulos', 'codigo_barras,subfamilia'),
       orgCTodo('precio_historial', 'factura_cufe,codigo,articulo_texto,cantidad,precio', (q) => q.not('factura_cufe', 'is', null)),   // (10/10/2026) lineas de cada factura: valores por articulo
@@ -65,7 +65,9 @@ async function orgHInforme(input) {
 // el cruce (lo llama orgHCalcular): null hasta que esten los datos
 function orgHContableCalcular(cl) {
   if (!orgC.datos || typeof HojaContable === 'undefined') return null;
-  return HojaContable.armar({ documentos: cl.documentos, informe: orgC.informe || [], web: orgC.datos.web, catalogo: orgC.datos.catalogo, reglas: orgC.datos.reglas, dian: orgH.dian || null });
+  // (26/10/2026) NIT por el nombre del proveedor en Hiopos (nombres homologados del Banco: proveedores / proveedor_nombre_pos / facturas)
+  const ev = orgH.evidencia, nitDeProveedor = (nombre) => (ev && ev.conocidos && typeof OrganizadorHiopos !== 'undefined' ? ev.conocidos.get(OrganizadorHiopos.claveProveedor(nombre)) || '' : '');
+  return HojaContable.armar({ documentos: cl.documentos, informe: orgC.informe || [], web: orgC.datos.web, catalogo: orgC.datos.catalogo, reglas: orgC.datos.reglas, dian: orgH.dian || null, nitDeProveedor });
 }
 // reglas por familia: confirmar una propuesta, crear una a mano eligiendo el grupo del catalogo, activar/desactivar
 async function orgCGuardarRegla(fila) {
