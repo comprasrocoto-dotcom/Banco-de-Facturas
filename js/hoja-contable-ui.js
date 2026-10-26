@@ -26,7 +26,7 @@ async function orgHCargarContable(forzar) {
     const [catalogo, reglas, facturas, pedidos, articulos, precios] = await Promise.all([
       orgCTodo('cuentas_contables', 'id,clasificacion,articulo,familia,subfamilia,grupo_cuenta,referencia,cuenta_contable,cuenta_devolucion'),
       orgCTodo('contable_regla_familia', '*'),
-      orgCTodo('facturas', 'cufe,num_ingreso,documento,prefijo,folio,nit_emisor'),
+      orgCTodo('facturas', 'cufe,num_ingreso,documento,prefijo,folio,nit_emisor,fecha_emision'),
       orgCTodo('pedidos', 'id,numero,factura_cufe,centro_costo', (q) => q.not('factura_cufe', 'is', null)),
       orgCTodo('articulos', 'codigo_barras,subfamilia'),
       orgCTodo('precio_historial', 'factura_cufe,codigo,articulo_texto,cantidad,precio', (q) => q.not('factura_cufe', 'is', null)),   // (10/10/2026) lineas de cada factura: valores por articulo
@@ -135,6 +135,6 @@ function orgHContableVista(x) {
   return `<div style="font-weight:700;margin:6px 0">Vista previa · Contabilidad (${filas.length} líneas)</div><div style="overflow:auto;max-height:56vh"><table><thead><tr>${HojaContable.COLUMNAS.map((c) => `<th>${c}</th>`).join('')}</tr></thead><tbody>` +
     filas.slice(0, 400).map((f) => `<tr${f.obs ? ' style="background:#fff7ed"' : ''}>${f.celdas.map((c, i) => ['Base', 'Impuestos', 'Neto'].includes(HojaContable.COLUMNAS[i])
       ? `<td class="num">${c == null ? '' : money(c)}</td>`   // Base, Impuestos, Neto (de cada artículo)
-      : `<td${i === HojaContable.IX.Observacion ? ' style="color:#b91c1c;font-size:12px"' : ''}>${escAg(i === HojaContable.IX.Fecha && c ? String(c).split('-').reverse().join('/') : (c == null ? '' : c))}</td>`).join('')}</tr>`).join('') +
+      : `<td${i === HojaContable.IX.Observacion ? ' style="color:#b91c1c;font-size:12px"' : ''}>${escAg((i === HojaContable.IX.Fecha || i === HojaContable.IX['Fecha factura']) && c ? String(c).split('-').reverse().join('/') : (c == null ? '' : c))}</td>`).join('')}</tr>`).join('') +
     `</tbody></table></div>${filas.length > 400 ? `<div class="mut">… y ${filas.length - 400} más (todas van en el Excel)</div>` : ''}`;
 }
