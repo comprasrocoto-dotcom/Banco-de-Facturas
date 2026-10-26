@@ -193,6 +193,7 @@
     const cPre = col('Prefijo'), cFol = col('Folio'), cTot = col('Total'), cEmi = col('Nombre Emisor'), cNit = col('NIT Emisor'), cGru = col('Grupo'), cTipo = col('Tipo de documento');
     const cImp = IMPUESTOS_DIAN.map((n) => [n, col(n)]).filter(([, i]) => i >= 0);
     const cRet = ['Rete IVA', 'Rete Renta', 'Rete ICA'].map((n) => col(n)).filter((i) => i >= 0);   // (10/10/2026) retenciones de la factura
+    const cFec = H.findIndex((h) => /^fecha emisi/.test(h));   // (26/10/2026) fecha de la factura (hoja contable)
     const registros = [];
     for (let i = fe + 1; i < datos.length; i++) {
       const r = datos[i];
@@ -205,7 +206,7 @@
       impuestos = Math.round(impuestos * 100) / 100;
       registros.push({ doc, emisor: String(cEmi >= 0 ? r[cEmi] || '' : '').trim(), nit: String(cNit >= 0 ? r[cNit] || '' : '').replace(/\D/g, ''),
         tipo: String(cTipo >= 0 ? r[cTipo] || '' : '').trim(), total, impuestos, base: Math.round((total - impuestos) * 100) / 100, desglose,
-        retenciones: Math.round(cRet.reduce((s, ix) => s + Math.abs(aNumero(r[ix]) || 0), 0) * 100) / 100 });
+        retenciones: Math.round(cRet.reduce((s, ix) => s + Math.abs(aNumero(r[ix]) || 0), 0) * 100) / 100, fecha: cFec >= 0 ? aFecha(r[cFec]) : null });
     }
     return { registros, error: registros.length ? null : 'El reporte de la DIAN no trae facturas recibidas.' };
   }
