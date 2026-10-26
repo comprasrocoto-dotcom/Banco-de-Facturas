@@ -1857,9 +1857,10 @@ async function guardarProveedorAdmin(id){
   const g=(typeof provs!=="undefined"&&provs||[]).find(x=>x.id===id); if(g) Object.assign(g,cambios);   // la lista de "Nuevo pedido" ya cargada
   adminEdit=null; pintarAdmin();
 }
-function amarrarA(codigo){
+function amarrarA(codigo, pidSugerido){
   if(!codigo) return;
-  abrirElegirProveedor("¿A qué proveedor le amarrás "+codigo+"?", MarcaProv.proveedoresDelGeneral(adminProv,adminVinc,adminMarcas), (pv,pr)=>{
+  const lista=MarcaProv.proveedoresDelGeneral(adminProv,adminVinc,adminMarcas);
+  abrirElegirProveedor("¿A qué proveedor le amarrás "+codigo+"?", lista, (pv,pr)=>{
     // upsert: si el articulo YA esta amarrado a ese proveedor, actualiza el precio en vez de fallar
     SB.from("catalogo_compras").upsert({codigo_barras:codigo, id_proveedor:pv.id, prioridad:1,
         precio_negociado:pr?Number(String(pr).replace(/[^0-9.]/g,"")):null, estado:"Aprobado"},
@@ -1868,6 +1869,8 @@ function amarrarA(codigo){
         adminCargado=false; await cargarAdmin();
         alert("¡Listo! "+codigo+" quedó con "+(pv.razon_social||"")+(pr?" a $"+pr:" (sin precio)")); });
   });
+  // (26/10/2026) desde Catálogo completo: «＋ a este» deja ya elegido al proveedor al que se le ha comprado (solo hay que poner el precio)
+  if(pidSugerido && lista.some(p=>p.id===Number(pidSugerido))) provModalSel(Number(pidSugerido));
 }
 // Ventana para elegir un proveedor: buscador por nombre o NIT, lista y precio opcional (reemplaza el cuadro que pedía el número)
 let provModal=null;
