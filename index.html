@@ -1250,17 +1250,27 @@ function pintarAdmin(){
     l=l.filter(x=>filtraFechaAdmin(x.k||{}));
     { const nomProv=(adminProv.find(p=>p.id===pid)||{}); EXPORTAR.actual.admin_cat=l.map(x=>({...x,_prov:nomProv.razon_social||nomProv.nombre_comercial||""})); }
     const nomDe=cd=>(adminArt.find(a=>a.codigo_barras===cd)||{}).articulo_hiopos||cd;
-    c.innerHTML = '<div class="card">'+( l.length? l.map(x=>{
+    // (26/10/2026) pedido del usuario: «cada proveedor queda solo con lo que tiene aprobado» y se puede quitar lo que ya cambio de
+    // proveedor. Arriba SOLO lo aprobado (catalogo_compras), con ✕ para sacarlo. Lo que se le compro antes pero no esta aprobado va
+    // aparte (plegado), con «＋ Aprobar». Antes salia todo mezclado y al quitar algo seguia apareciendo por el historico de compras.
+    const fila=(x,aprobado)=>{
         const k=x.k||{}, precio=k.precio_negociado, iid="pp_"+pid+"_"+x.codigo;
         return `<div class="row" style="border-bottom:1px solid var(--line);padding:7px 0">
         <div style="flex:3">${x.nombre} <span class="mut">(${x.codigo})</span>${x.veces?`<span class="mut"> · ${x.veces} compras</span>`:""}</div>
         <div style="flex:1.2;display:flex;gap:6px;align-items:center;justify-content:flex-end">
           <span class="mut">precio</span>
           <input id="${iid}" value="${precio!=null?precio:""}" placeholder="s/precio" style="width:120px;margin:0;text-align:right">
-          <button class="s" title="Guardar precio" onclick="guardarPrecio(${pid},'${x.codigo}', numEs(document.getElementById('${iid}').value), this)">💾</button>
+          <button class="s" title="${aprobado?"Guardar precio":"Aprobar este artículo para este proveedor (con el precio escrito)"}" onclick="guardarPrecio(${pid},'${x.codigo}', numEs(document.getElementById('${iid}').value), this)">${aprobado?"💾":"＋ Aprobar"}</button>
         </div>
-        ${k.id?`<button class="d" onclick="quitarDelCatalogo(${k.id})">✕</button>`:""}</div>`;}).join("")
-      : '<div class="mut">Este proveedor no tiene compras en el histórico ni artículos en el catálogo todavía.</div>') + '</div>';
+        ${aprobado&&k.id?`<button class="d" title="Sacar del catálogo de este proveedor (ya no se le compra)" onclick="quitarDelCatalogo(${k.id},${pid})">✕</button>`:""}</div>`;};
+    const aprob=l.filter(x=>x.k&&x.k.id), sinAprob=l.filter(x=>!(x.k&&x.k.id));
+    c.innerHTML = '<div class="card">'+
+      `<div style="font-weight:700;margin-bottom:4px">✅ Aprobados para este proveedor (${aprob.length})</div>`+
+      (aprob.length? aprob.map(x=>fila(x,true)).join("") : '<div class="mut">Este proveedor no tiene artículos aprobados en el catálogo.</div>')+
+      (sinAprob.length? `<details style="margin-top:12px"><summary style="cursor:pointer;font-weight:700">🕓 Comprados antes, sin aprobar (${sinAprob.length})</summary>
+        <div class="mut" style="margin:4px 0">Salen del histórico de compras. No están en su catálogo: si se le siguen comprando, escribe el precio y pulsa «＋ Aprobar».</div>
+        ${sinAprob.map(x=>fila(x,false)).join("")}</details>` : '')+
+      (!l.length? '<div class="mut">Este proveedor no tiene compras en el histórico ni artículos en el catálogo todavía.</div>' : '')+'</div>';
   }
 }
 // ══ AGENTE (18/09/2026): unidades por decidir, decisiones del agente y reglas aprendidas ══
@@ -1929,11 +1939,16 @@ function adminNuevo(){
       .then(async r=>{ if(r.error){alert("No se pudo: "+r.error.message);return;} adminCargado=false; await cargarAdmin(); });
   }
 }
-async function quitarDelCatalogo(id){
-  if(!confirm("¿Sacar este artículo del catálogo de ese proveedor?")) return;
-  const r=await SB.from("catalogo_compras").delete().eq("id",id);
+async function quitarDelCatalogo(id, pid){
+  if(!confirm("¿Sacar este artículo del catálogo de ese proveedor?\n\nYa no saldrá como aprobado para él (el histórico de compras no se borra).")) return;
+  // (26/10/2026) se confirma que SI se borro (sin permiso la base no da error: simplemente no borra nada)
+  const r=await SB.from("catalogo_compras").delete().eq("id",id).select("id");
   if(r.error){alert("No se pudo: "+r.error.message);return;}
+  if(!(r.data||[]).length){ alert("No se quitó: ya no existía o tu usuario no tiene permiso para quitar artículos del catálogo."); return; }
+  SB.from("historial").insert({accion:"catálogo: línea quitada", detalle:"catalogo_compras id "+id+(pid?" · proveedor "+pid:""), usuario:usuario.id}).then(()=>{},()=>{});
+  provs=[]; marcaCat=[];   // Nuevo pedido vuelve a leer catalogo y proveedores
   adminCargado=false; await cargarAdmin();
+  if(pid && $("catProv")){ $("catProv").value=pid; pintarAdmin(); }
 }
 function setModulo(m){
   modulo=m;
@@ -2464,10 +2479,12 @@ async function abrirPedido(id){
   let docProv=null;
   if(p.proveedor_id && !p.factura_cufe){ try{ const rp=await SB.from("proveedores").select("documento").eq("id",p.proveedor_id).maybeSingle(); docProv=(rp&&rp.data&&rp.data.documento)||null; }catch(e){ docProv=null; } }
   const bot=(typeof FacturaFoto!=="undefined"&&FacturaFoto.botonesPedido)?FacturaFoto.botonesPedido(docProv):{foto:true,amarrar:true,cuenta:true};
-  let uni={};
+  // (26/10/2026) pedido del usuario: la MISMA unidad del PDF (orden de compra): la de la lista de la marca del pedido y, si el
+  // articulo tiene unidad del proveedor, esa (con la cantidad convertida, como en el PDF). Antes: solo articulos.unimedida_compra.
+  let uni={}, ucDet={};
   if(cds.length){
-    const a=await SB.from("articulos").select("codigo_barras,unimedida_compra").in("codigo_barras",cds.slice(0,300));
-    (a.data||[]).forEach(x=>{uni[x.codigo_barras]=x.unimedida_compra;});
+    try{ ucDet=await unidadesDelPedido(p,cds); }catch(e){ ucDet={}; }
+    for(const k in ucDet) uni[k]=ucDet[k].conf?ucDet[k].conf.unidad:ucDet[k].unidadPos;
   }
   let prec={};
   if(p.proveedor_id && cds.length){
@@ -2478,9 +2495,11 @@ async function abrirPedido(id){
   const filas=lineas.map(x=>{
     const pr = prec[x.codigo];
     const cant = x.cantidad!=null? Number(x.cantidad):null;
+    // cantidad como en el PDF (en la unidad del proveedor si el articulo la tiene); debajo, la del pedido
+    const u = ucDet[x.codigo], cantProv = (u&&u.conf&&cant!=null&&typeof UnidadProveedor!=="undefined") ? UnidadProveedor.paraProveedor(cant,u.unidadPos,u.conf).cantidad : null;
     return `<tr><td class="mut">${x.codigo||""}</td><td style="text-align:center">${x.insumo||""}</td>
       <td class="mut">${uni[x.codigo]||x.unidad||"—"}</td>
-      <td style="text-align:center;font-weight:700">${cant!=null?cant:""}</td>
+      <td style="text-align:center;font-weight:700">${cantProv!=null&&cantProv!==cant?`${cantProv}<div class="mut" style="font-weight:400;font-size:11px">pedido: ${cant} ${escAg(u.unidadPos||"")}</div>`:(cant!=null?cant:"")}</td>
       <td class="num">${pr!=null? money(pr):"—"}</td>
       <td class="num" style="font-weight:700">${(pr!=null&&cant!=null)? money(pr*cant):"—"}</td></tr>`;
   }).join("");
