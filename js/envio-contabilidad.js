@@ -118,10 +118,11 @@
     return grupos;
   }
 
-  // referencia del envio por correo (hora Colombia): ENV-20261027-0930
+  // referencia del envio por correo (hora Colombia, con segundos): ENV-20261027-093015
+  // (27/10/2026) antes solo hora y minuto: dos envios en el mismo minuto compartian carpeta y uno pisaba los archivos del otro
   function referencia(ahoraMs) {
     const co = new Date((ahoraMs || Date.now()) - 5 * 3600000).toISOString();
-    return 'ENV-' + co.slice(0, 10).replace(/-/g, '') + '-' + co.slice(11, 13) + co.slice(14, 16);
+    return 'ENV-' + co.slice(0, 10).replace(/-/g, '') + '-' + co.slice(11, 13) + co.slice(14, 16) + co.slice(17, 19);
   }
 
   // estado de los correos de un lote: filas de correo_cola -> { total, enviados, errores, pendientes, texto }
