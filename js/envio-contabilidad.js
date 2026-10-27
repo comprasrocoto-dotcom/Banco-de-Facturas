@@ -148,6 +148,23 @@
     return f.sede_id == null ? 'Ingresada, sin sede en el banco' : 'Ingresada, sin sellar';
   }
 
+  // (27/10/2026, pedido del usuario) asunto del correo: «Envío de Facturas Rocoto Provenza Lote 33 27 de Octubre».
+  // sedes: [{ marca, sede }] de los documentos. Varias sedes de la misma marca: «Rocoto Provenza y Laureles»; de varias marcas:
+  // «Rocoto Provenza, Arrebatao Malanga Laureles»; mas de 3: «Varias sedes».
+  const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+  function fechaLetras(ms) { const co = new Date((ms || Date.now()) - 5 * 3600000); return co.getUTCDate() + ' de ' + MESES[co.getUTCMonth()]; }
+  function asuntoEnvio(o) {
+    o = o || {};
+    const porMarca = new Map();
+    (o.sedes || []).forEach((x) => { if (!x) return; const m = String(x.marca || '').trim(), s = String(x.sede || '').trim(); if (!porMarca.has(m)) porMarca.set(m, []); if (s && !porMarca.get(m).includes(s)) porMarca.get(m).push(s); });
+    const total = [...porMarca.values()].reduce((a, l) => a + l.length, 0);
+    const y = (l) => (l.length > 1 ? l.slice(0, -1).join(', ') + ' y ' + l[l.length - 1] : l.join(''));
+    const donde = total > 3 ? 'Varias sedes' : [...porMarca.entries()].map(([m, l]) => ((m ? m + ' ' : '') + y(l)).trim()).filter(Boolean).join(', ');
+    return ('Envío de Facturas ' + (donde ? donde + ' ' : '') + (o.lote ? 'Lote ' + o.lote + ' ' : '') + fechaLetras(o.fechaMs)).replace(/\s+/g, ' ').trim();
+  }
+  // nombre de archivo seguro a partir del asunto (sin tildes ni signos raros)
+  function nombreArchivo(t) { return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9 ._-]+/g, '').replace(/\s+/g, ' ').trim().slice(0, 120); }
+
   return { indexar, pendientes, diasSinEnviar, porLote, etiqueta, firma, preparar, vigentes, seleccion, marcar, marcarTodos, puedeConfirmar,
-    listoParaEnviar, sinSellar, partir, referencia, estadoCorreos, situacion };
+    listoParaEnviar, sinSellar, partir, referencia, estadoCorreos, situacion, asuntoEnvio, fechaLetras, nombreArchivo };
 });
