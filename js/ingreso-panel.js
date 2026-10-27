@@ -44,7 +44,10 @@
   // docs = filas de ingreso_documento en ERROR o PENDIENTE_REINTENTO
   function bloqueErrores(docs, opciones) {
     opciones = opciones || {};
-    const todos = (docs || []).filter((d) => d.estado === 'ERROR' || d.estado === 'PENDIENTE_REINTENTO');
+    // (27/10/2026) pedido del usuario: un documento con novedad NO se sale de esta ventana hasta que se ingrese (COMPLETADO) o alguien lo
+    // saque a mano (✕ Quitar). Mientras el agente lo reintenta sigue aqui como «REINTENTANDO» (antes desaparecia y no se veia si volvia a fallar).
+    const reintentando = (d) => ['PROCESANDO', 'PEDIDO_CREADO', 'FACTURANDO'].includes(d.estado) && Number(d.intentos || 0) > 1;
+    const todos = (docs || []).filter((d) => d.estado === 'ERROR' || d.estado === 'PENDIENTE_REINTENTO' || reintentando(d));
     if (!todos.length) return '';
     // (25/10/2026) pedido del usuario: filtrar por sede (opciones.filtroSede = texto «marca · sede» elegido; '' = todas)
     const sedeDe = (d) => (typeof opciones.sedeDe === 'function' ? opciones.sedeDe(d) : '') || 'Sin sede';
@@ -56,19 +59,20 @@
     const idsFiltro = filtro ? '[' + l.map((d) => Number(d.pedido_id)).filter(Boolean).join(',') + ']' : 'null';
     const errores = l.filter((d) => d.estado === 'ERROR');
     // (05/10/2026) "Quitar"/"Limpiar" = sacar de la cola (estado DESCARTADO, RPC ingreso_descartar): el agente deja de reintentarlo.
-    const quitar = (d) => (opciones.puede && Number(d.pedido_id) ? `<button class="d" style="padding:3px 10px;font-size:12px" title="Sacar de la cola: el agente no lo vuelve a intentar" onclick="descartarIngreso([${Number(d.pedido_id)}])">✕ Quitar</button>` : '');
+    const quitar = (d) => (opciones.puede && Number(d.pedido_id) && !reintentando(d) ? `<button class="d" style="padding:3px 10px;font-size:12px" title="Sacar de la cola: el agente no lo vuelve a intentar" onclick="descartarIngreso([${Number(d.pedido_id)}])">✕ Quitar</button>` : '');
     // (25/10/2026) pedido del usuario: cada uno se puede lanzar SOLO (🤖 Lanzar este) y se ve de que sede es (opciones.sedeDe(d) -> texto)
-    const lanzar = (d) => (opciones.puede && Number(d.pedido_id) ? `<button class="s" style="padding:3px 10px;font-size:12px;background:#1e3a8a;border-color:#1e3a8a;color:#fff" title="Pide una orden de ingreso al ERP solo para este pedido" onclick="ingresarSoloPedido(${Number(d.pedido_id)})">🤖 Lanzar este</button>` : '');
+    const lanzar = (d) => (opciones.puede && Number(d.pedido_id) && !reintentando(d) ? `<button class="s" style="padding:3px 10px;font-size:12px;background:#1e3a8a;border-color:#1e3a8a;color:#fff" title="Pide una orden de ingreso al ERP solo para este pedido" onclick="ingresarSoloPedido(${Number(d.pedido_id)})">🤖 Lanzar este</button>` : '');
     const sedeTxt = (d) => { const t = typeof opciones.sedeDe === 'function' ? opciones.sedeDe(d) : ''; return t ? ` · <span class="badge" style="background:#e0e7ff;color:#1e3a8a">${esc(t)}</span>` : ''; };
-    const filas = l.slice(0, 30).map((d) => `<div style="border-top:1px solid var(--line);padding:5px 0;display:flex;gap:10px;align-items:flex-start"><div style="flex:1"><b>${esc(d.numero || d.pedido_id)}</b>${sedeTxt(d)} · ${d.estado === 'ERROR' ? '<span style="color:#b91c1c">ERROR</span>' : '<span style="color:#b45309">PENDIENTE DE REINTENTO</span>'}
+    const etiqueta = (d) => (d.estado === 'ERROR' ? '<span style="color:#b91c1c">ERROR</span>' : reintentando(d) ? '<span style="color:#1e3a8a">🔄 REINTENTANDO (intento ' + Number(d.intentos) + ')</span>' : '<span style="color:#b45309">PENDIENTE DE REINTENTO</span>');
+    const filas = l.map((d) => `<div style="border-top:1px solid var(--line);padding:5px 0;display:flex;gap:10px;align-items:flex-start"><div style="flex:1"><b>${esc(d.numero || d.pedido_id)}</b>${sedeTxt(d)} · ${etiqueta(d)}
       ${d.error_etapa ? ' · ' + esc(d.error_etapa) : ''}<div class="mut">${esc(d.etapa || '')}${d.error ? ' — ' + esc(d.error) : ''}</div></div><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${lanzar(d)}${quitar(d)}</div></div>`).join('');
     const botones = [
       filtro && opciones.puede ? `<button class="p" onclick="reintentarErroresIngreso(${idsFiltro})" title="Lanza solo los de esta sede (los que tienen error vuelven a la cola)">🔁 LANZAR ESTA SEDE (${l.length})</button>`
         : errores.length && opciones.puede ? `<button class="p" onclick="reintentarErroresIngreso()">🔁 REINTENTAR ERRORES (${errores.length})</button>` : '',
-      opciones.puede ? `<button onclick="descartarIngreso(${idsFiltro})" title="Sacar de la cola TODOS los de esta lista: el agente deja de intentarlos">🧹 LIMPIAR VENTANA (${l.length})</button>` : '',
+      opciones.puede && opciones.admin ? `<button onclick="descartarIngreso(${idsFiltro})" title="Solo administrador: sacar de la cola TODOS los de esta lista (el agente deja de intentarlos)">🧹 LIMPIAR VENTANA (${l.length})</button>` : '',
     ].filter(Boolean).join(' ');
     return `<div class="card" style="border-left:5px solid #b45309;margin-top:8px"><div style="font-weight:700;color:#b45309">Documentos con novedad (${l.length}${filtro ? ' de ' + todos.length : ''})</div>
-      <div class="mut">Los COMPLETADOS no se vuelven a procesar. Corrige lo que indica cada uno y pulsa reintentar, o sácalo de la cola si ya lo resolviste a mano.</div>${selector}${filas}
+      <div class="mut">Cada documento se queda aquí hasta que entre al ERP o alguien lo saque a mano con «✕ Quitar». Corrige lo que indica y lánzalo otra vez, o quítalo si ya lo resolviste a mano. Los COMPLETADOS no se vuelven a procesar.</div>${selector}<div style="max-height:520px;overflow-y:auto">${filas}</div>
       ${botones ? `<div class="row" style="margin-top:8px">${botones}</div>` : ''}</div>`;
   }
 
