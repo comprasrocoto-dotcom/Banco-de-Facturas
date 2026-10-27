@@ -53,8 +53,8 @@ function escanearFoto(file) {
     const url = URL.createObjectURL(file), img = new Image();
     img.onload = () => {
       URL.revokeObjectURL(url);
-      // copia de trabajo (lado mayor <= 2400 px): rapida y con detalle suficiente para la hoja
-      const k = Math.min(1, 2400 / Math.max(img.width, img.height)), c = document.createElement('canvas');
+      // copia de trabajo (lado mayor <= 3200 px; antes 2400): con detalle para la letra pequeña de la factura
+      const k = Math.min(1, 3200 / Math.max(img.width, img.height)), c = document.createElement('canvas');
       c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
       c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
       ESC.img = c; ESC.esq = Escaner.esquinasIniciales(c.width, c.height); ESC.resolver = resolver; ESC.resultado = null;
@@ -114,7 +114,7 @@ function escVer() {
   setTimeout(() => {
     try {
       const src = ESC.img.getContext('2d').getImageData(0, 0, W, H);
-      ESC.derecha = Escaner.enderezar(src, ESC.esq, 1600);
+      ESC.derecha = Escaner.enderezar(src, ESC.esq, 2200);   // (27/10/2026) antes 1600: la letra pequeña quedaba ilegible
       escProcesar();
       $('escPaso1').style.display = 'none'; $('escPaso2').style.display = 'flex';
       $('escTitulo').textContent = '📄 Así queda escaneada';
@@ -127,14 +127,14 @@ function escProcesar() {
   c.width = r.width; c.height = r.height;
   c.getContext('2d').putImageData(new ImageData(r.data, r.width, r.height), 0, 0);
   ESC.resultado = c;
-  $('escRes').src = c.toDataURL('image/jpeg', 0.85);
+  $('escRes').src = c.toDataURL('image/jpeg', 0.9);
   $('escModoBn').className = ESC.modo === 'bn' ? 'p' : ''; $('escModoColor').className = ESC.modo === 'color' ? 'p' : '';
 }
 function escModo(m) { ESC.modo = m === 'color' ? 'color' : 'bn'; if (ESC.derecha) escProcesar(); }
 function escAtras() { $('escPaso2').style.display = 'none'; $('escPaso1').style.display = 'flex'; $('escTitulo').textContent = '📄 Escanear: mueve los 4 puntos a las esquinas de la hoja'; escDibujar(); }
 function escUsar() {
   if (!ESC.resultado) return;
-  ESC.resultado.toBlob((b) => escTerminar(b ? { blob: b } : 'original'), 'image/jpeg', 0.85);
+  ESC.resultado.toBlob((b) => escTerminar(b ? { blob: b } : 'original'), 'image/jpeg', 0.9);
 }
 function escTerminar(valor) {
   const m = $('modalEsc'); if (m) m.style.display = 'none';
