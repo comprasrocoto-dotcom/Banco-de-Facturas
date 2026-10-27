@@ -93,5 +93,60 @@
     return { ok: true, motivo: '' };
   }
 
-  return { indexar, pendientes, diasSinEnviar, porLote, etiqueta, firma, preparar, vigentes, seleccion, marcar, marcarTodos, puedeConfirmar };
+  // ---------------------------------------------------------------- (27/10/2026, pedido del usuario)
+  // «Todas ya estan ingresadas al ERP y se supone que estan enviadas»: 48 documentos con ingreso ERP seguian «asignada» (sin sellar)
+  // y por eso NUNCA salian en «Por enviar». Ahora basta el ingreso al ERP: va lo terminado de siempre (sellado o nota credito)
+  // y tambien lo ingresado que aun no se sello, si ya tiene sede (asi no entran las de 123 Wok «Sin asignar», que van aparte).
+  const conIngreso = (f) => !!f && !!f.num_ingreso && String(f.num_ingreso).trim() !== '' && String(f.num_ingreso) !== 'null';
+  function listoParaEnviar(f, esTerminada) {
+    if (!conIngreso(f) || f.estado === 'rechazada') return false;
+    if (esTerminada && esTerminada(f)) return true;
+    return f.estado === 'asignada' && f.sede_id != null;
+  }
+  const sinSellar = (f, esTerminada) => listoParaEnviar(f, esTerminada) && !(esTerminada && esTerminada(f));
+
+  // reparte archivos [{ tam }] en grupos que no pasen de max bytes (un correo de Gmail aguanta ~25 MB con el adjunto
+  // en base64): -> [[indices]]. Un archivo mas grande que max va solo en su grupo.
+  function partir(tamanos, max) {
+    const grupos = []; let g = [], suma = 0;
+    (tamanos || []).forEach((t, i) => {
+      t = Number(t) || 0;
+      if (g.length && suma + t > max) { grupos.push(g); g = []; suma = 0; }
+      g.push(i); suma += t;
+    });
+    if (g.length) grupos.push(g);
+    return grupos;
+  }
+
+  // referencia del envio por correo (hora Colombia): ENV-20261027-0930
+  function referencia(ahoraMs) {
+    const co = new Date((ahoraMs || Date.now()) - 5 * 3600000).toISOString();
+    return 'ENV-' + co.slice(0, 10).replace(/-/g, '') + '-' + co.slice(11, 13) + co.slice(14, 16);
+  }
+
+  // estado de los correos de un lote: filas de correo_cola -> { total, enviados, errores, pendientes, texto }
+  function estadoCorreos(filas) {
+    const l = filas || [];
+    const enviados = l.filter((c) => c.estado === 'enviado').length, errores = l.filter((c) => c.estado === 'agotado' || c.estado === 'error').length;
+    const pendientes = l.length - enviados - errores;
+    const texto = !l.length ? '' : enviados === l.length ? '✅ ' + enviados + ' correo(s) enviados' :
+      enviados + ' de ' + l.length + ' correo(s) enviados' + (pendientes ? ' · ' + pendientes + ' en cola' : '') + (errores ? ' · ⚠️ ' + errores + ' con error (se reintenta)' : '');
+    return { total: l.length, enviados, errores, pendientes, texto };
+  }
+
+  // situacion de un documento para el Excel de TODOS los documentos
+  function situacion(f, enviados, esTerminada) {
+    if (!f) return '';
+    if (enviados && enviados.has(f.cufe)) return 'Enviada a contabilidad';
+    if (f.estado === 'rechazada') return 'Rechazada';
+    if (!conIngreso(f)) return 'Sin ingreso ERP';
+    if (listoParaEnviar(f, esTerminada)) {
+      const pdf = f.archivo_pdf || f.archivo_pdf_sellado ? '' : ' (SIN PDF en la web)';
+      return (sinSellar(f, esTerminada) ? 'Por enviar (ingresada, sin sellar)' : 'Por enviar') + pdf;
+    }
+    return f.sede_id == null ? 'Ingresada, sin sede en el banco' : 'Ingresada, sin sellar';
+  }
+
+  return { indexar, pendientes, diasSinEnviar, porLote, etiqueta, firma, preparar, vigentes, seleccion, marcar, marcarTodos, puedeConfirmar,
+    listoParaEnviar, sinSellar, partir, referencia, estadoCorreos, situacion };
 });
