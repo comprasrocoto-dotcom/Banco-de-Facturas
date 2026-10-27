@@ -10,6 +10,9 @@ var CONT_ENV = new Map(), CONT_LOTES = [], CONT_OK = false;
 // documentos de la sede elegida; un analista con sedes asignadas, solo los de sus sedes (16/10/2026: el ZIP y el Excel salen de aqui)
 function contBase() { const l = facturas.filter((f) => sedeOk(f.sede_id)); return typeof listaParaBajar === 'function' ? listaParaBajar(l) : l; }
 
+// (27/10/2026) que va a contabilidad: con ingreso al ERP (sellado o no, si ya tiene sede). Logica en EnvioContabilidad.listoParaEnviar
+function contListo(f) { return EnvioContabilidad.listoParaEnviar(f, BancoUtils.esTerminada); }
+
 function contEnvioPuede() { return typeof perfil !== 'undefined' && perfil && (perfil.rol === 'admin' || perfil.rol === 'pagos'); }
 
 async function cargarEnvioContabilidad() {
@@ -18,22 +21,24 @@ async function cargarEnvioContabilidad() {
     const r = await SB.from('contabilidad_envio').select('factura_cufe,lote_id,enviada_en').limit(20000);
     if (r.error) { CONT_OK = false; return; }   // base sin las tablas: no se muestra nada
     CONT_ENV = EnvioContabilidad.indexar(r.data || []);
-    const l = await SB.from('contabilidad_lote').select('id,creado_en,creado_por,cantidad,nota,anulado').order('id', { ascending: false }).limit(300);
+    let l = await SB.from('contabilidad_lote').select('id,creado_en,creado_por,cantidad,nota,anulado,correo_para,correo_ids,referencia').order('id', { ascending: false }).limit(300);
+    if (l.error) l = await SB.from('contabilidad_lote').select('id,creado_en,creado_por,cantidad,nota,anulado').order('id', { ascending: false }).limit(300);   // base sin las columnas del correo (27/10/2026)
     CONT_LOTES = (l.data || []);
+    if (typeof contCargarEstadoCorreos === 'function') await contCargarEstadoCorreos();
     CONT_OK = true;
   } catch (e) { CONT_OK = false; }
   ['v-envio', 'v-enviadas'].forEach((id) => { const b = $(id); if (b) b.style.display = CONT_OK ? '' : 'none'; });
   const n = $('nEnvio');
-  if (n && CONT_OK) { const p = EnvioContabilidad.pendientes(contBase(), CONT_ENV, BancoUtils.esTerminada); const c = p.lista.length + p.sinPdf.length; n.textContent = c ? '(' + c + ')' : '(0)'; n.style.color = c ? '#b91c1c' : ''; }
+  if (n && CONT_OK) { const p = EnvioContabilidad.pendientes(contBase(), CONT_ENV, contListo); const c = p.lista.length + p.sinPdf.length; n.textContent = c ? '(' + c + ')' : '(0)'; n.style.color = c ? '#b91c1c' : ''; }
 }
 
 function envioBadge(f) {
   if (!CONT_OK || !f) return '';
   const e = CONT_ENV.get(f.cufe);
   if (e) return `<span class="badge" style="color:#1e3a8a;background:#eff6ff;border-color:#93c5fd;font-weight:700">${escAg(EnvioContabilidad.etiqueta(e))}</span>`;
-  if (vista === 'envio' && BancoUtils.esTerminada(f)) {
+  if (vista === 'envio' && contListo(f)) {
     const d = EnvioContabilidad.diasSinEnviar(f, BancoUtils.hoyColombia());
-    return `<span class="badge" style="${d >= 2 ? 'color:#991b1b;background:#fee2e2;border-color:#fca5a5' : 'color:#92400e;background:#fffbeb;border-color:#fcd34d'};font-weight:700">⏰ Por enviar${d ? ' · ' + d + ' día(s) desde el ingreso' : ' · ingresada hoy'}${(f.archivo_pdf || f.archivo_pdf_sellado) ? '' : ' · SIN PDF'}</span>`;
+    return `<span class="badge" style="${d >= 2 ? 'color:#991b1b;background:#fee2e2;border-color:#fca5a5' : 'color:#92400e;background:#fffbeb;border-color:#fcd34d'};font-weight:700">⏰ Por enviar${d ? ' · ' + d + ' día(s) desde el ingreso' : ' · ingresada hoy'}${EnvioContabilidad.sinSellar(f, BancoUtils.esTerminada) ? ' · sin sellar' : ''}${(f.archivo_pdf || f.archivo_pdf_sellado) ? '' : ' · SIN PDF'}</span>`;
   }
   return '';
 }
@@ -43,14 +48,15 @@ function pintarPanelEnvio(v) {
   if (!v || !CONT_OK) { caja.innerHTML = ''; return; }
   const todas = contBase();
   if (v === 'envio') {
-    const p = EnvioContabilidad.pendientes(todas, CONT_ENV, BancoUtils.esTerminada);
+    const p = EnvioContabilidad.pendientes(todas, CONT_ENV, contListo);
     if (CONT_PREP === null) contPrepLeer();
     if (CONT_PREP) { caja.innerHTML = contPrepHtml(p); return; }   // nunca se cierra solo: solo al confirmar o descartar
     const viejos = p.lista.filter((f) => EnvioContabilidad.diasSinEnviar(f, BancoUtils.hoyColombia()) >= 2).length;
     caja.innerHTML = `<div class="card" style="border-left:5px solid #1e3a8a;margin-bottom:12px">
       <div class="row" style="gap:10px;align-items:center">
         <div style="flex:1 1 300px"><div style="font-weight:700;color:#1e3a8a">📤 ${p.lista.length} documento(s) por enviar a contabilidad</div>
-          <div class="mut">Todo lo que tiene el proceso terminado (ingresado al ERP y sellado, o nota crédito ingresada) y aún no se ha enviado, sea de la fecha que sea.${viejos ? ` <b style="color:#b91c1c">${viejos} llevan 2 días o más sin enviar.</b>` : ''}${p.sinPdf.length ? ` <b style="color:#b45309">${p.sinPdf.length} sin PDF en la web (no entran al ZIP).</b>` : ''}</div></div>
+          <div class="mut">Todo lo que ya tiene ingreso al ERP (sellado o todavía sin sellar, y las notas crédito) y aún no se ha enviado, sea de la fecha que sea.${p.lista.filter((f) => EnvioContabilidad.sinSellar(f, BancoUtils.esTerminada)).length ? ` ${p.lista.filter((f) => EnvioContabilidad.sinSellar(f, BancoUtils.esTerminada)).length} aún sin sellar.` : ''}${viejos ? ` <b style="color:#b91c1c">${viejos} llevan 2 días o más sin enviar.</b>` : ''}${p.sinPdf.length ? ` <b style="color:#b45309">${p.sinPdf.length} sin PDF en la web (no entran al ZIP).</b>` : ''}</div></div>
+        <button onclick="contExcelTodos()" title="Todos los documentos del banco con su ingreso ERP y si ya se enviaron a contabilidad (lote, fecha, correo)">📊 Excel de TODOS los documentos</button>
         ${p.lista.length ? `<button class="p" id="btnEnviarCont" onclick="contPrepIniciar()" title="Saca la lista FIJA de lo que se va a enviar; cada documento con su casilla">📋 Preparar envío (${p.lista.length})</button>` : '<span class="badge st-sellada">✅ Nada pendiente</span>'}
       </div><div class="mut" id="envioRes" style="margin-top:6px"></div></div>`;
     return;
@@ -59,10 +65,11 @@ function pintarPanelEnvio(v) {
   const info = new Map(CONT_LOTES.map((l) => [Number(l.id), l]));
   const esAdmin = perfil && perfil.rol === 'admin';
   caja.innerHTML = `<div class="card" style="border-left:5px solid #15803d;margin-bottom:12px">
-    <div style="font-weight:700;color:#166534">📦 Envíos a contabilidad (${grupos.length} lote(s))</div>
+    <div class="row" style="gap:8px;align-items:center"><div style="font-weight:700;color:#166534;flex:1">📦 Envíos a contabilidad (${grupos.length} lote(s))</div><button onclick="contExcelTodos()" title="Todos los documentos del banco con su ingreso ERP y si ya se enviaron a contabilidad (lote, fecha, correo)">📊 Excel de TODOS los documentos</button></div>
     ${grupos.length ? grupos.slice(0, 40).map((g) => { const l = info.get(g.lote) || {}; const fe = l.creado_en ? new Date(l.creado_en).toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''; return `<div class="row" style="gap:8px;padding:6px 0;border-bottom:1px solid var(--line)">
-      <b>Lote ${g.lote}</b><span class="mut">${escAg(fe)}${l.creado_por ? ' · ' + escAg(l.creado_por) : ''} · ${g.docs.length} documento(s)${l.nota ? ' · ' + escAg(l.nota) : ''}</span><span class="sp"></span>
+      <b>Lote ${g.lote}</b><span class="mut">${escAg(fe)}${l.creado_por ? ' · ' + escAg(l.creado_por) : ''} · ${g.docs.length} documento(s)${l.nota ? ' · ' + escAg(l.nota) : ''}</span>${typeof contCorreoLoteHtml === 'function' ? contCorreoLoteHtml(l) : ''}<span class="sp"></span>
       <button onclick="rebajarLote(${g.lote})">⬇ Volver a bajar</button>
+      ${typeof contReenviarLote === 'function' ? `<button onclick="contReenviarLote(${g.lote})" title="Manda otra vez el Excel y el ZIP de este lote al correo de contabilidad (no cambia nada)">📧 Enviar por correo</button>` : ''}
       ${esAdmin ? `<button class="d" title="Se marcó por error: los documentos vuelven a «Por enviar»" onclick="deshacerLote(${g.lote})">↩ Deshacer</button>` : ''}</div>`; }).join('') : '<div class="mut">Todavía no hay envíos.</div>'}
     <div class="mut" id="envioRes" style="margin-top:6px"></div></div>`;
 }
@@ -76,7 +83,7 @@ var CONT_PREP = null;
 function contPrepClave() { return 'bf_envio_prep_' + ((typeof usuario !== 'undefined' && usuario && usuario.id) || 'x'); }
 function contPrepLeer() { try { const s = localStorage.getItem(contPrepClave()); CONT_PREP = s ? JSON.parse(s) : null; } catch (e) { /* sin storage: solo no se recuerda */ } }
 function contPrepGuardar() { try { if (CONT_PREP) localStorage.setItem(contPrepClave(), JSON.stringify(CONT_PREP)); else localStorage.removeItem(contPrepClave()); } catch (e) { /* sin storage */ } }
-function contPendientes() { return EnvioContabilidad.pendientes(contBase(), CONT_ENV, BancoUtils.esTerminada); }
+function contPendientes() { return EnvioContabilidad.pendientes(contBase(), CONT_ENV, contListo); }
 // (19/10/2026) al marcar / desmarcar, la lista se vuelve a pintar: se guarda y se repone donde iba el scroll
 // (antes saltaba al inicio de la lista con cada casilla)
 function contPrepRefrescar() {
@@ -112,6 +119,9 @@ function contPrepHtml(p) {
     <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
       <button class="p" id="btnEnvioBajar" onclick="contPrepBajar()" ${sel.length ? '' : 'disabled'}>⬇ 1. Bajar ZIP + Excel de los marcados (${sel.length})</button>
       <button class="p" id="btnEnvioConfirmar" style="background:#15803d;border-color:#15803d" onclick="contPrepConfirmar()" ${ok.ok ? '' : 'disabled'} title="${escAg(ok.motivo)}">✅ 2. Ya los envié: marcar ${sel.length} como enviados</button>
+    </div>
+    ${typeof contCorreoCajaHtml === 'function' ? contCorreoCajaHtml(sel.length) : ''}
+    <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap;align-items:center">
       <span class="sp"></span><button class="d" onclick="contPrepDescartar()">✖ Descartar este envío</button>
     </div>
     <div class="mut" id="envioRes" style="margin-top:6px">${ok.ok ? '✅ Lo bajado coincide con lo marcado: cuando lo envíes, confirma con el botón verde.' : escAg(ok.motivo)}</div></div>`;
@@ -188,7 +198,7 @@ async function deshacerLote(lote) {
 // pero solo con los documentos del envio. Los datos salen de la copia del reporte «Documentos» de Hiopos que se carga en
 // Conciliacion (erp_documento); lo que no este ahi sale con los datos de la web y la Nota lo marca para verificar en Hiopos.
 // No toca Hiopos ni crea nada: solo arma el Excel (y deja el registro en hiopos_organizador_ejecucion, igual que el modulo).
-async function contOrganizadoHiopos(docs, nombre) {
+async function contOrganizadoHiopos(docs, nombre, opc) {   // (27/10/2026) opc.devolver: devuelve el Excel (Blob) para el correo, sin descargarlo
   if (typeof OrganizadorHiopos === 'undefined' || typeof orgHCargarExcelJS !== 'function') throw new Error('el Organizador Hiopos no está cargado en esta página');
   const lista = (docs || []).filter((f) => f && f.num_ingreso);
   if (!lista.length) return null;
@@ -216,16 +226,19 @@ async function contOrganizadoHiopos(docs, nombre) {
   const ExcelJS = await orgHCargarExcelJS();
   const wb = OrganizadorHiopos.armarLibro(ExcelJS, { lectura, clasificacion: cl, nombreArchivo: nombre + '.xlsx', ahora: new Date().toLocaleString('es-CO'), comparacion: null });
   const buf = await wb.xlsx.writeBuffer();
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-  a.download = nombre + ' - ORGANIZADO HIOPOS.xlsx';
-  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  const xlsx = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  if (!(opc && opc.devolver)) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(xlsx);
+    a.download = nombre + ' - ORGANIZADO HIOPOS.xlsx';
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  }
   const R = OrganizadorHiopos.resumen(lectura, cl);
   try {
     await SB.from('hiopos_organizador_ejecucion').insert({ huella: 'envio:' + EnvioContabilidad.firma(cufes), archivo: nombre + ' (envío a contabilidad)', documentos: R.validos, neto: R.neto.total, usuario: orgHUsuario(),
       resumen: { cuentasCobro: R.cuentasCobro, cajaMenor: R.cajaMenor, porRevisar: R.revision, errores: R.errores, porTipo: R.porTipo, deWeb: t.deWeb.length } });
   } catch (e) { /* el Excel ya se descargo: el registro es solo informativo */ }
-  return { documentos: R.validos, deWeb: t.deWeb, revision: R.revision, cuentasCobro: R.cuentasCobro, cajaMenor: R.cajaMenor };
+  return { documentos: R.validos, deWeb: t.deWeb, revision: R.revision, cuentasCobro: R.cuentasCobro, cajaMenor: R.cajaMenor, blob: xlsx };
 }
 // lo llama el envio: nunca rompe el ZIP ni el Excel de contabilidad (ya bajaron); solo avisa
 async function contOrganizadoAviso(docs, nombre) {
