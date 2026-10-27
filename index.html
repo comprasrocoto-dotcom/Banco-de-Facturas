@@ -433,6 +433,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/codigo-marca.js"></script>
 <script src="js/envio-contabilidad.js"></script>
 <script src="js/envio-contabilidad-ui.js"></script>
+<script src="js/envio-correo-contabilidad.js"></script>
 <script src="js/un-pedido-factura.js"></script>
 <script src="js/revisar-amarre.js"></script>
 <script src="js/ingreso-elegir.js"></script>
@@ -502,6 +503,7 @@ async function sesion(u){
   }
   aplicarPermisosUI();      // mostrar/ocultar segun los permisos del perfil
   const {data:ms}=await SB.from("marcas").select("id,nombre").order("nombre");
+  MARCA_NOMBRE=new Map((ms||[]).map(m=>[Number(m.id),m.nombre]));   // (27/10/2026) marca arriba en las facturas sin sede
   if(typeof dianCargarNitsMarca==="function") dianCargarNitsMarca();   // (15/10/2026) NIT de la empresa para "Abrir en DIAN"
   // (29/09/2026) "Subir facturas": un analista con sedes de VARIAS marcas (ej. Deiby: 123 wok y Rocoto) podia dejar aca la marca de la
   // ultima vez sin darse cuenta -> el PDF se intentaba desbloquear con el NIT de OTRA marca. Ahora el selector: (a) solo ofrece SUS
@@ -2896,15 +2898,18 @@ async function cargarErroresIngreso(){
   const c=$("erroresIngreso"); if(!c) return;
   try{
     // (13/10/2026) la cola de ingresos es para quien lanza el agente (permiso ingresos.iniciar): un perfil "solo pedidos" no la ve
-    if(typeof can!=="function" || !(perfil && (perfil.rol==="admin"||perfil.rol==="pagos")) || !can("ingresos.iniciar")){ c.style.display="none"; return; }
-    const r=await SB.from("ingreso_documento").select("pedido_id,numero,estado,etapa,error_etapa,error").in("estado",["ERROR","PENDIENTE_REINTENTO"]).order("actualizado_en",{ascending:false}).limit(50);
+    // (27/10/2026) pedido del usuario: TODOS los analistas (admin/pagos) ven la cola con errores (cada uno solo sus sedes: lo filtra la base)
+    // aunque no lancen el agente (sin ese permiso no ven los botones). Antes: solo con ingresos.iniciar y como mucho 50 (y 30 en pantalla).
+    if(typeof can!=="function" || !(perfil && (perfil.rol==="admin"||perfil.rol==="pagos"))){ c.style.display="none"; return; }
+    // los que se estan reintentando (intentos > 1) tambien se ven: no se salen de la ventana hasta que se ingresen o alguien los quite
+    const r=await SB.from("ingreso_documento").select("pedido_id,numero,estado,etapa,error_etapa,error,intentos,actualizado_en").in("estado",["ERROR","PENDIENTE_REINTENTO","PROCESANDO","PEDIDO_CREADO","FACTURANDO"]).order("actualizado_en",{ascending:false}).limit(1000);
     ingresoDocs=r.data||[];
     // (25/10/2026) de que sede/marca es cada uno (se ve al lado del numero)
     const ids=ingresoDocs.map(d=>d.pedido_id).filter(Boolean);
     if(ids.length){ const pq=await SB.from("pedidos").select("id,numero,proveedor_texto,sede_id,sede_texto,marca_id").in("id",ids); const mp=new Map((pq.data||[]).map(p=>[p.id,p])); ingresoDocs.forEach(d=>{ d._ped=mp.get(d.pedido_id)||null; }); }
   }catch(e){ ingresoDocs=[]; }
   const sedeDeDoc=(d)=>{ const p=d._ped; if(!p||typeof IngresoElegir==="undefined") return ""; const sd=typeof sedes!=="undefined"?sedes:[]; const m=IngresoElegir.marcaDe(p,sd).nombre, s2=IngresoElegir.sedeDe(p,sd).nombre; return (m?m+" · ":"")+s2; };
-  const h=IngresoPanel.bloqueErrores(ingresoDocs,{puede:can("ingresos.iniciar"),sedeDe:sedeDeDoc,filtroSede:novedadSede});
+  const h=IngresoPanel.bloqueErrores(ingresoDocs,{puede:can("ingresos.iniciar"),admin:!!(perfil&&perfil.rol==="admin"),sedeDe:sedeDeDoc,filtroSede:novedadSede});
   c.innerHTML=h; c.style.display=h?"block":"none";
 }
 // DETENER: el agente termina el documento en curso y se para (nada a medias)
@@ -2941,7 +2946,7 @@ async function reintentarErroresIngreso(ids){
 // (05/10/2026) "Quitar" / "Limpiar ventana": SACA de la cola los documentos con novedad (estado DESCARTADO, RPC ingreso_descartar).
 // El agente no los vuelve a intentar (ingreso_tomar solo toma pendientes). ids=null -> todos los de la lista.
 async function descartarIngreso(ids){
-  const lista=ids ? ingresoDocs.filter(d=>ids.includes(d.pedido_id)) : ingresoDocs.slice();
+  const lista=(ids ? ingresoDocs.filter(d=>ids.includes(d.pedido_id)) : ingresoDocs.slice()).filter(d=>d.estado==="ERROR"||d.estado==="PENDIENTE_REINTENTO");   // (27/10/2026) uno que se esta procesando no se saca
   if(!lista.length) return;
   const nombres=lista.slice(0,10).map(d=>d.numero||d.pedido_id).join(", ")+(lista.length>10?" y "+(lista.length-10)+" más":"");
   if(!confirm("Se van a SACAR DE LA COLA "+lista.length+" documento(s): "+nombres+".\n\nEl agente NO los vuelve a intentar (ni con \"Reintentar errores\"). Si después le amarras OTRA factura a uno de esos pedidos, vuelve a la cola solo. Hazlo solo si ya los revisaste o los resolviste a mano en el ERP.\n\n¿Continuar?")) return;
@@ -3311,9 +3316,11 @@ function panelSinSellar(base){
     +(vieja>=2?"La más antigua lleva "+vieja+" días.":"Compras ya hizo su parte; falta que la sede las tome y las selle.")+'</div></div><span class="sp"></span><button class="p" onclick="setVista(\'listas\')">Verlas</button></div></div>';
 }
 // (14/10/2026) "📍 Provenza · Rocoto" arriba en la tarjeta de la factura: su sede, o la de su pedido si aun no tiene
+// (27/10/2026) sin sede: igual sale de que MARCA es (Rocoto, Arrebatao, Sin Par, 123 wok...), la marca con la que se subio la factura
+var MARCA_NOMBRE=new Map();
 function sedeChip(f,mapa){
   const s=SinSellar.sedeDe(f,mapa), sd=s.id!=null?(sedes||[]).find(x=>x.id===s.id):null;
-  if(!sd) return '<span class="badge" style="font-size:12px;vertical-align:middle">📍 Sin sede</span>';
+  if(!sd){ const mn=f&&f.marca_id!=null?MARCA_NOMBRE.get(Number(f.marca_id)):""; return (mn?'<span class="badge" style="background:#fef3c7;color:#92400e;border-color:#fcd34d;font-weight:700;font-size:12px;vertical-align:middle" title="Marca de la factura">🏷️ '+escAg(mn)+'</span> ':'')+'<span class="badge" style="font-size:12px;vertical-align:middle">📍 Sin sede</span>'; }
   return '<span class="badge" style="background:#eff6ff;color:#1e3a8a;border-color:#bfdbfe;font-weight:700;font-size:12px;vertical-align:middle" title="'+(s.origen==="pedido"?"Sede de su pedido":"Sede de la factura")+'">📍 '+escAg(sd.nombre)+(sd.marcas&&sd.marcas.nombre?" · "+escAg(sd.marcas.nombre):"")+'</span>';
 }
 function filtrarListasSede(k){ listasSede=(k===null||k==="null")?null:(k==="none"?"none":Number(k)); pintar(); }
@@ -3343,7 +3350,7 @@ function pintar(){
   const esEnvio=(vista=="envio"||vista=="enviadas") && typeof EnvioContabilidad!=="undefined";
   if(esEnvio){
     const todas=facturas.filter(f=>sedeOk(f.sede_id));
-    if(vista=="envio"){ const p=EnvioContabilidad.pendientes(todas,CONT_ENV,BancoUtils.esTerminada); l=p.lista.concat(p.sinPdf).sort((a,b)=>String(a.fecha_ingreso||"").localeCompare(String(b.fecha_ingreso||""))); }
+    if(vista=="envio"){ const p=EnvioContabilidad.pendientes(todas,CONT_ENV,contListo); l=p.lista.concat(p.sinPdf).sort((a,b)=>String(a.fecha_ingreso||"").localeCompare(String(b.fecha_ingreso||""))); }
     else l=todas.filter(f=>CONT_ENV.has(f.cufe)).sort((a,b)=>CONT_ENV.get(b.cufe).lote-CONT_ENV.get(a.cufe).lote);
   }
   if(typeof pintarPanelEnvio==="function") pintarPanelEnvio(esEnvio?vista:null);
@@ -3653,7 +3660,9 @@ async function pdfDeFotoFactura(f){
   }catch(e){ console.warn("foto de la factura a PDF:",e); return null; }
 }
 async function bajarPdfsEnZip(lista, nombreFn, nombreZip, res, opc){
-  const zip=new JSZip(); const usados=new Set(); let ok=0, conFoto=0; const fallidas=[], fallCufes=[];   // fallCufes: los que NO entraron al ZIP (16/10/2026)
+  // (27/10/2026) opc.devolver: no descarga, devuelve los ZIP (partes) para mandarlos por CORREO; opc.maxBytes: parte el ZIP para que quepa en un correo
+  const archivos=[];   // { nombre, blob } en el orden de la lista
+  const zip={ file:(nombre,blob)=>archivos.push({nombre,blob}) }; const usados=new Set(); let ok=0, conFoto=0; const fallidas=[], fallCufes=[];   // fallCufes: los que NO entraron al ZIP (16/10/2026)
   for(const f of lista){
     res.textContent="Preparando "+(ok+fallidas.length+1)+" de "+lista.length+"...";
     if(opc&&opc.foto&&f.archivo_recibo){   // (19/10/2026) contabilidad: la foto del pedido en vez del PDF de la DIAN
@@ -3671,13 +3680,22 @@ async function bajarPdfsEnZip(lista, nombreFn, nombreZip, res, opc){
     let nombreArch=nombreFn(f); if(conv.ext) nombreArch=nombreArch.replace(/\.pdf$/i,"."+conv.ext);
     zip.file(BancoUtils.nombreUnico(nombreArch,usados), blob); ok++;
   }
+  const partes=[];
   if(ok){
-    const out=await zip.generateAsync({type:"blob"});
-    const a=document.createElement("a");
-    a.href=URL.createObjectURL(out); a.download=nombreZip;
-    document.body.appendChild(a); a.click(); a.remove();
+    const grupos=(opc&&opc.maxBytes&&typeof EnvioContabilidad!=="undefined")?EnvioContabilidad.partir(archivos.map(x=>x.blob.size),opc.maxBytes):[archivos.map((x,i)=>i)];
+    for(let g=0;g<grupos.length;g++){
+      if(res) res.textContent="Armando el ZIP"+(grupos.length>1?" "+(g+1)+" de "+grupos.length:"")+"...";
+      const z=new JSZip(); grupos[g].forEach(i=>z.file(archivos[i].nombre,archivos[i].blob));
+      partes.push({blob:await z.generateAsync({type:"blob"}), n:grupos[g].length, extra:[]});
+    }
+    if(!(opc&&opc.devolver)){
+      const out=partes[0].blob;
+      const a=document.createElement("a");
+      a.href=URL.createObjectURL(out); a.download=nombreZip;
+      document.body.appendChild(a); a.click(); a.remove();
+    }
   }
-  return {ok,fallidas,fallCufes,conFoto};
+  return {ok,fallidas,fallCufes,conFoto,partes};
 }
 const etiquetaRango=(desde,hasta)=>(desde||"inicio")+"_a_"+(hasta||BancoUtils.hoyColombia());
 const textoRango=(desde,hasta)=>desde||hasta?(" del "+(desde||"inicio")+" al "+(hasta||"hoy")):"";
@@ -3713,7 +3731,7 @@ async function descargarSelladas(){
 // Exporta un Excel/CSV listo para contabilidad (SIIGO o cualquier ERP)
 // con centro de costo, cuenta contable, base, IVA y total por factura
 // (16/10/2026) listaDada / nombreDado: el Excel del ENVIO A CONTABILIDAD (exactamente los documentos del envio). Sin ellos, como siempre (por fechas).
-async function descargarContabilidad(listaDada, nombreDado){
+async function descargarContabilidad(listaDada, nombreDado, opc){   // (27/10/2026) opc.devolver: devuelve el Excel (Blob) para mandarlo por correo, sin descargarlo
   const res=$("resdesc"); res.textContent="";
   const dado=Array.isArray(listaDada);
   const fd=dado?"":$("fdesde").value, fh=dado?"":$("fhasta").value;
@@ -3842,8 +3860,10 @@ async function descargarContabilidad(listaDada, nombreDado){
   ['Documentos','Base','IVA','Total'].forEach((c,i)=>{ws3.getColumn(i+4).numFmt='#,##0';ws3.getColumn(i+4).width=16;});
   // Descargar
   const buf=await wb.xlsx.writeBuffer();
+  const xlsx=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  if(opc&&opc.devolver){ res.textContent="✅ Excel de contabilidad listo ("+l.length+" factura(s))."; return {blob:xlsx, n:l.length}; }
   const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+  a.href=URL.createObjectURL(xlsx);
   a.download=nombreDado||("contabilidad_"+(fd||"inicio")+"_"+(fh||"hoy")+".xlsx");
   a.click();a.remove();
   res.textContent="✅ "+l.length+" factura(s) exportadas para contabilidad.";
