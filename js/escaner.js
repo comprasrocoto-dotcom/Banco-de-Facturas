@@ -92,27 +92,60 @@
     return { data: out, width: t.w, height: t.h };
   }
 
-  // «escaneado»: corrige la luz dispareja (sombra del celular) dividiendo por el fondo (promedio local grande) y estira el
-  // contraste. modo 'bn' = blanco y negro (texto negro sobre blanco); 'color' = color con fondo blanqueado.
-  function mejorar(img, modo) {
-    const { width: W, height: H, data } = img, n = W * H, gris = new Float32Array(n);
-    for (let i = 0; i < n; i++) gris[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
-    // fondo = promedio en una ventana grande (imagen integral)
-    const r = Math.max(8, Math.round(Math.max(W, H) / 24)), I = new Float64Array((W + 1) * (H + 1));
-    for (let y = 0; y < H; y++) { let fila = 0; for (let x = 0; x < W; x++) { fila += gris[y * W + x]; I[(y + 1) * (W + 1) + x + 1] = I[y * (W + 1) + x + 1] + fila; } }
-    const fondo = (x, y) => {
-      const xa = Math.max(0, x - r), ya = Math.max(0, y - r), xb = Math.min(W, x + r + 1), yb = Math.min(H, y + r + 1);
-      return (I[yb * (W + 1) + xb] - I[ya * (W + 1) + xb] - I[yb * (W + 1) + xa] + I[ya * (W + 1) + xa]) / ((xb - xa) * (yb - ya));
+  // «escaneado» (27/10/2026, rehecho: «queda muy mal escaneado»: texto gris claro, borroso y lavado). Pasos:
+  //  1. enfoque suave (mascara de enfoque) para recuperar letra pequeña de una foto un poco movida;
+  //  2. FONDO = color del papel: por bloques se toma el percentil 90 (lo mas claro = papel, no la tinta). Antes era el PROMEDIO
+  //     y en las zonas con mucho texto (la tabla de la factura) el fondo salia oscuro y la letra quedaba lavada;
+  //  3. cada pixel se divide por su fondo (quita la sombra del celular) y se ESTIRA el contraste: tinta -> negro, papel -> blanco.
+  // modo 'bn' = blanco y negro (texto negro sobre blanco); 'color' = color con fondo blanco y colores reforzados.
+  function fondoPapel(gris, W, H) {
+    const B = Math.max(16, Math.round(Math.max(W, H) / 60)), bw = Math.ceil(W / B), bh = Math.ceil(H / B), blo = new Float32Array(bw * bh);
+    const tmp = new Float32Array(B * B);
+    for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
+      let n = 0;
+      for (let y = by * B; y < Math.min(H, by * B + B); y += 2) for (let x = bx * B; x < Math.min(W, bx * B + B); x += 2) tmp[n++] = gris[y * W + x];
+      const v = tmp.subarray(0, n).sort(); blo[by * bw + bx] = v[Math.min(n - 1, Math.floor(n * 0.9))];
+    }
+    // bloques casi todo tinta (logo, sello): se toma el mas claro de los vecinos; luego se suaviza
+    const dil = new Float32Array(bw * bh), suave = new Float32Array(bw * bh);
+    for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+      let m = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const yy = y + dy, xx = x + dx; if (yy >= 0 && yy < bh && xx >= 0 && xx < bw) m = Math.max(m, blo[yy * bw + xx]); }
+      dil[y * bw + x] = m;
+    }
+    for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+      let s = 0, n = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const yy = y + dy, xx = x + dx; if (yy >= 0 && yy < bh && xx >= 0 && xx < bw) { s += dil[yy * bw + xx]; n++; } }
+      suave[y * bw + x] = s / n;
+    }
+    // valor en cada pixel: interpolacion bilineal entre centros de bloque
+    return (x, y) => {
+      const fx = Math.max(0, Math.min(bw - 1.001, x / B - 0.5)), fy = Math.max(0, Math.min(bh - 1.001, y / B - 0.5));
+      const x0 = Math.floor(fx), y0 = Math.floor(fy), x1 = Math.min(bw - 1, x0 + 1), y1 = Math.min(bh - 1, y0 + 1), ax = fx - x0, ay = fy - y0;
+      return (suave[y0 * bw + x0] * (1 - ax) + suave[y0 * bw + x1] * ax) * (1 - ay) + (suave[y1 * bw + x0] * (1 - ax) + suave[y1 * bw + x1] * ax) * ay;
     };
+  }
+  function mejorar(img, modo) {
+    const { width: W, height: H, data } = img, n = W * H, g0 = new Float32Array(n);
+    for (let i = 0; i < n; i++) g0[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
+    // 1. enfoque: g = g0 + 0.6 * (g0 - promedio 3x3)
+    const gris = new Float32Array(n), K = 0.6;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      let s = 0, c = 0;
+      for (let dy = -1; dy <= 1; dy++) { const yy = y + dy; if (yy < 0 || yy >= H) continue; for (let dx = -1; dx <= 1; dx++) { const xx = x + dx; if (xx < 0 || xx >= W) continue; s += g0[yy * W + xx]; c++; } }
+      const p = y * W + x; gris[p] = g0[p] + K * (g0[p] - s / c);
+    }
+    const fondo = fondoPapel(g0, W, H);
+    const LO = 0.45, HI = 0.84;  // relacion pixel/papel: <= LO es tinta plena (negro), >= HI es papel (blanco)
+    const curva = (v) => { const t = Math.max(0, Math.min(1, (v - LO) / (HI - LO))); return Math.pow(t, 1.2); };
     const out = new Uint8ClampedArray(n * 4);
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
-        const p = y * W + x, f = Math.max(30, fondo(x, y) * 1.02), i = p * 4;
+        const p = y * W + x, f = Math.max(40, fondo(x, y)), i = p * 4;
         if (modo === 'color') {
-          for (let k = 0; k < 3; k++) out[i + k] = Math.min(255, (data[i + k] / f) * 255);
+          // cada color dividido por el papel (sin sombra) y con el mismo estirado: papel blanco, tinta y sellos con su color pero mas fuertes
+          const realce = gris[p] / Math.max(1, g0[p]);
+          for (let k = 0; k < 3; k++) out[i + k] = Math.round(255 * curva((data[i + k] * realce) / f));
         } else {
-          const v = Math.min(1, gris[p] / f);                 // 1 = papel, < 1 = tinta
-          out[i] = out[i + 1] = out[i + 2] = v > 0.86 ? 255 : Math.max(0, Math.round(255 * Math.pow(v / 0.86, 2.2)));
+          out[i] = out[i + 1] = out[i + 2] = Math.round(255 * curva(gris[p] / f));
         }
         out[i + 3] = 255;
       }
@@ -120,5 +153,5 @@
     return { data: out, width: W, height: H };
   }
 
-  return { homografia, aplicar, ordenar, tamano, valido, esquinasIniciales, enderezar, mejorar };
+  return { homografia, aplicar, ordenar, tamano, valido, esquinasIniciales, enderezar, mejorar, fondoPapel };
 });
