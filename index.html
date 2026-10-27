@@ -3787,7 +3787,11 @@ async function descargarContabilidad(listaDada, nombreDado, opc){   // (27/10/20
   const wb=new ExcelJS.Workbook();wb.creator='Banco de Facturas';
   // ---- HOJA 1: Contabilidad (una fila por factura) ----
   const ws1=wb.addWorksheet('Contabilidad',{views:[{state:'frozen',ySplit:1}]});
-  const COLS=['Marca','Fecha Ingreso','N. Factura','Proveedor','NIT Emisor','Sede','Centro de Costo','Grupo Cuenta','Base','IVA','Total','N. Ingreso ERP','N. Pedido ERP'];
+  // (27/10/2026) envio a contabilidad: opc.numeros (cufe -> N°) = el numero con que empieza cada PDF del ZIP: va en la columna «N° PDF»
+  // (primera) y las filas salen en ese orden, asi la fila 1 del Excel es el PDF 001 del ZIP
+  const nPdf=(opc&&opc.numeros)||null; if(nPdf) l=l.slice().sort((a,b)=>(nPdf.get(a.cufe)||1e9)-(nPdf.get(b.cufe)||1e9));
+  const conN=(fila,f)=>nPdf?[nPdf.has(f.cufe)?String(nPdf.get(f.cufe)).padStart(3,"0"):""].concat(fila):fila;
+  const COLS=conN(['Marca','Fecha Ingreso','N. Factura','Proveedor','NIT Emisor','Sede','Centro de Costo','Grupo Cuenta','Base','IVA','Total','N. Ingreso ERP','N. Pedido ERP'],{cufe:null}).map(c=>c===""?"N° PDF":c);
   ws1.addRow(COLS);
   const marcaNombre=(id)=>{const s=sedes.find(x=>x.id===id);return s&&s.marcas?s.marcas.nombre:"";};
   for(const f of l){
@@ -3802,7 +3806,7 @@ async function descargarContabilidad(listaDada, nombreDado, opc){   // (27/10/20
     let centro=centroDeLineas(f.cufe);if(!centro)centro="POR REVISAR";
     const grupo=grupoDeCentro(centro);
     const numPed=pedidosMap[f.cufe]?(pedidosMap[f.cufe].erp||pedidosMap[f.cufe].numero||""):(f.pedido_erp||"");
-    ws1.addRow([marca,fecha,num,f.emisor||"",f.nit_emisor||"",sede,centro,grupo,base,ivaVal,total,f.num_ingreso||"",numPed]);
+    ws1.addRow(conN([marca,fecha,num,f.emisor||"",f.nit_emisor||"",sede,centro,grupo,base,ivaVal,total,f.num_ingreso||"",numPed],f));
   }
   const enc1=ws1.getRow(1);enc1.font={bold:true,color:{argb:'FFFFFFFF'}};enc1.alignment={vertical:'middle',horizontal:'center'};
   enc1.eachCell(c=>{c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF1E40AF'}}});
@@ -3810,7 +3814,7 @@ async function descargarContabilidad(listaDada, nombreDado, opc){   // (27/10/20
   ws1.autoFilter={from:{row:1,column:1},to:{row:1,column:COLS.length}};
   // ---- HOJA 2: Detalle por artículo ----
   const ws2=wb.addWorksheet('Detalle por artículo',{views:[{state:'frozen',ySplit:1}]});
-  const COLS2=['Marca','Fecha Ingreso','N. Factura','Proveedor','Sede','Insumo','Cantidad','Unidad','Código','Centro de Costo','Grupo Cuenta','Cuenta Contable'];
+  const COLS2=conN(['Marca','Fecha Ingreso','N. Factura','Proveedor','Sede','Insumo','Cantidad','Unidad','Código','Centro de Costo','Grupo Cuenta','Cuenta Contable'],{cufe:null}).map(c=>c===""?"N° PDF":c);
   ws2.addRow(COLS2);
   for(const f of l){
     const fecha=f.fecha_ingreso||f.fecha_emision||"";
@@ -3820,7 +3824,7 @@ async function descargarContabilidad(listaDada, nombreDado, opc){   // (27/10/20
     const p=pedidosMap[f.cufe];
     const lineas=p&&p.id?lineasPorPedido[p.id]||[]:[];
     if(!lineas.length){
-      ws2.addRow([marca,fecha,num,f.emisor||"",sede,"(sin items)","","","","POR REVISAR","",""]);
+      ws2.addRow(conN([marca,fecha,num,f.emisor||"",sede,"(sin items)","","","","POR REVISAR","",""],f));
       continue;
     }
     for(const it of lineas){
@@ -3828,7 +3832,7 @@ async function descargarContabilidad(listaDada, nombreDado, opc){   // (27/10/20
       const c=cuentas[key]||{};
       const centro=c.centro||"POR REVISAR";
       const grupo=c.grupo||"";
-      ws2.addRow([marca,fecha,num,f.emisor||"",sede,it.insumo||"",it.cant||"",it.unidad||"",it.codigo||"",centro,grupo,""]);
+      ws2.addRow(conN([marca,fecha,num,f.emisor||"",sede,it.insumo||"",it.cant||"",it.unidad||"",it.codigo||"",centro,grupo,""],f));
     }
   }
   const enc2=ws2.getRow(1);enc2.font={bold:true,color:{argb:'FFFFFFFF'}};enc2.alignment={vertical:'middle',horizontal:'center'};
