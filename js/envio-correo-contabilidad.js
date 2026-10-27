@@ -37,7 +37,7 @@ function contCorreoCajaHtml(n) {
     <span style="font-weight:700;color:#1e3a8a">📧 O mándalo directo desde el banco:</span>
     <input id="contCorreoPara" style="flex:1 1 240px;min-width:200px" placeholder="correo de contabilidad (varios: separados con coma)" value="${escAg(contCorreoGuardado())}">
     <button class="p" id="btnEnvioCorreo" onclick="contPrepEnviarCorreo()" ${n ? '' : 'disabled'} title="Manda el Excel y el ZIP de los marcados al correo (con copia a ${CONT_COPIA}) y los marca como enviados en un lote">📧 Enviar por correo y marcar (${n})</button>
-    <div class="mut" style="flex-basis:100%">Sale del correo del banco con copia a ${CONT_COPIA}. Si el ZIP pesa mucho, se manda en varias partes. Queda registrado en el lote: a qué correo, cuándo y si salió.</div></div>`;
+    <div class="mut" style="flex-basis:100%">Sale del correo del banco con copia a ${CONT_COPIA}. Va UN correo con un ZIP que trae el Excel de contabilidad, el Excel organizado de Hiopos y los PDF (solo si pesa demasiado se parte en varios correos). Queda registrado en el lote: a qué correo, cuándo y si salió.</div></div>`;
 }
 
 async function contCargarEstadoCorreos() {
@@ -57,7 +57,7 @@ function contCorreoLoteHtml(l) {
 
 // ---- armar y poner en la cola los correos de un grupo de documentos -> { ids, archivos, fallCufes, enZip }
 async function contEnviarPorCorreo(docs, o) {
-  const res = o.res || { textContent: '' }, ref = o.ref, carpeta = 'contabilidad/' + ref + '/';
+  const res = o.res || { textContent: '' }, ref = o.ref;
   const base = 'Envio_contabilidad_' + ref.replace(/^ENV-/, '');
   // 1. ZIP (en partes si pesa mucho)
   const z = await bajarPdfsEnZip(docs, BancoUtils.nombreArchivoCiclo, base + '.zip', res, { foto: true, devolver: true, maxBytes: CONT_MAX_ZIP });
@@ -70,14 +70,21 @@ async function contEnviarPorCorreo(docs, o) {
   if (!x1 || !x1.blob) throw new Error('no pude armar el Excel de contabilidad');
   let x2 = null;
   try { res.textContent = 'Armando el Excel organizado de Hiopos...'; x2 = await contOrganizadoHiopos(enZip, base, { devolver: true }); } catch (e) { x2 = null; }
-  // 3. guardar los archivos en el banco (bucket facturas) -> la cola los adjunta desde ahi
-  const archivos = [{ nombre: base + '.xlsx', blob: x1.blob, que: 'Excel de contabilidad' }];
-  if (x2 && x2.blob) archivos.push({ nombre: base + '_ORGANIZADO_HIOPOS.xlsx', blob: x2.blob, que: 'Excel organizado de Hiopos' });
+  // 3. (27/10/2026, pedido del usuario: «todo debe llegar en el mismo correo») los Excel van DENTRO del ZIP, junto a los PDF:
+  //    un solo correo con un solo adjunto. Solo si el ZIP pesa demasiado para un correo se manda en partes (los Excel van en la parte 1).
+  const excels = [{ nombre: base + '.xlsx', blob: x1.blob }];
+  if (x2 && x2.blob) excels.push({ nombre: base + '_ORGANIZADO_HIOPOS.xlsx', blob: x2.blob });
+  const z1 = await JSZip.loadAsync(z.partes[0].blob);
+  excels.forEach((x) => z1.file(x.nombre, x.blob));
+  z.partes[0].blob = await z1.generateAsync({ type: 'blob' });
   const nZ = z.partes.length;
-  z.partes.forEach((p, i) => archivos.push({ nombre: base + (nZ > 1 ? '_parte' + (i + 1) + 'de' + nZ : '') + '.zip', blob: p.blob, que: 'ZIP de PDFs' + (nZ > 1 ? ' (parte ' + (i + 1) + ' de ' + nZ + ', ' + p.n + ' documento(s))' : ' (' + p.n + ' documento(s))') }));
+  const archivos = z.partes.map((p, i) => ({ nombre: base + (nZ > 1 ? '_parte' + (i + 1) + 'de' + nZ : '') + '.zip', blob: p.blob, n: p.n,
+    que: (i === 0 ? 'Excel de contabilidad' + (x2 && x2.blob ? ' + Excel organizado de Hiopos' : '') + ' + ' : '') + p.n + ' PDF' + (nZ > 1 ? ' (parte ' + (i + 1) + ' de ' + nZ + ')' : '') }));
+  // carpeta propia de este envio (referencia con segundos + lote): nunca pisa los archivos de otro envio
+  const carpeta = 'contabilidad/' + ref + (o.lote ? '-lote' + o.lote : '') + '/';
   for (let i = 0; i < archivos.length; i++) {
     const a = archivos[i]; res.textContent = 'Guardando en el banco ' + (i + 1) + ' de ' + archivos.length + ': ' + a.nombre + '...';
-    const up = await SB.storage.from('facturas').upload(carpeta + a.nombre, a.blob, { upsert: true, contentType: /\.zip$/.test(a.nombre) ? 'application/zip' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const up = await SB.storage.from('facturas').upload(carpeta + a.nombre, a.blob, { upsert: false, contentType: 'application/zip' });
     if (up.error) throw new Error('no pude guardar ' + a.nombre + ' en el banco: ' + up.error.message);
     a.ruta = carpeta + a.nombre;
   }
@@ -88,16 +95,17 @@ async function contEnviarPorCorreo(docs, o) {
   const lineas = enZip.map((f) => [(f.documento || ((f.prefijo || '') + (f.folio || ''))), f.emisor || '', sedeN(f.sede_id), f.num_ingreso || '', money0(f.total)].join(' | '));
   const cab = 'Envío a contabilidad desde el Banco de Facturas\nReferencia: ' + ref + (o.lote ? '  ·  Lote ' + o.lote : '') + '\nDocumentos: ' + enZip.length + '  ·  Total: ' + money0(total) +
     '\nEnviado por: ' + ((typeof perfil !== 'undefined' && perfil && perfil.nombre) || (typeof usuario !== 'undefined' && usuario && usuario.email) || '') +
-    '\n\nEste envío va en ' + archivos.length + ' correo(s), uno por archivo:\n' + archivos.map((a, i) => '  ' + (i + 1) + '. ' + a.nombre + ' — ' + a.que).join('\n');
+    '\n\nAdjunto: ' + (nZ > 1 ? 'el envío pesa mucho para un solo correo y va en ' + nZ + ' correos.\n' : '') + archivos.map((a) => '  ' + a.nombre + ' — ' + a.que).join('\n') +
+    '\nDentro del ZIP' + (nZ > 1 ? ' (parte 1)' : '') + ' van: ' + excels.map((x) => x.nombre).join(', ') + ' y los PDF de cada documento.';
   const lista = '\n\nDocumentos (Factura | Proveedor | Sede | Ingreso ERP | Total):\n' + lineas.join('\n');
-  // 5. a la cola: un correo por archivo
+  // 5. a la cola: UN correo (o uno por parte si pesa mucho)
   const ids = [];
   for (let i = 0; i < archivos.length; i++) {
     const a = archivos[i];
-    const asunto = '📤 Contabilidad ' + ref + (o.lote ? ' · lote ' + o.lote : '') + ' · ' + (i + 1) + ' de ' + archivos.length + ' · ' + a.que + ' · ' + enZip.length + ' doc(s)';
-    const cuerpo = cab + '\n\nEste correo: ' + a.nombre + ' — ' + a.que + (i === 0 ? lista : '');
+    const asunto = '📤 Contabilidad ' + ref + (o.lote ? ' · lote ' + o.lote : '') + ' · ' + enZip.length + ' doc(s) · ' + money0(total) + (nZ > 1 ? ' · parte ' + (i + 1) + ' de ' + nZ : '');
+    const cuerpo = cab + (i === 0 ? lista : '\n\nEste correo: ' + a.nombre + ' — ' + a.que);
     const r = await SB.rpc('correo_encolar', { p_para: o.para, p_asunto: asunto, p_cuerpo: cuerpo, p_cufe: null, p_pedido: null, p_orden: null, p_archivo_pdf: a.ruta, p_cc: o.para.includes(CONT_COPIA) ? null : CONT_COPIA });
-    if (r.error) throw new Error('no pude poner en la cola el correo ' + (i + 1) + ' de ' + archivos.length + ': ' + r.error.message + (ids.length ? ' (' + ids.length + ' ya quedaron en la cola)' : ''));
+    if (r.error) throw new Error('no pude poner en la cola el correo' + (nZ > 1 ? ' ' + (i + 1) + ' de ' + nZ : '') + ': ' + r.error.message + (ids.length ? ' (' + ids.length + ' ya quedaron en la cola)' : ''));
     const fila = Array.isArray(r.data) ? r.data[0] : r.data; if (fila && fila.correo_id != null) ids.push(Number(fila.correo_id));
   }
   if (typeof csEnviarCola === 'function') csEnviarCola(true);   // que el servidor los mande ya (si no, el vigilante)
