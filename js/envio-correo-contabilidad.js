@@ -57,16 +57,23 @@ function contCorreoLoteHtml(l) {
 
 // ---- (27/10/2026) el envio en dos pasos: ARMAR (ZIP de PDF + Excel; asi se sabe que PDF no bajaron) y MANDAR (ya con el numero de lote,
 // que va en el asunto: «Envío de Facturas Rocoto Provenza Lote 33 27 de Octubre»).
+// (27/10/2026, pedido del usuario) el ZIP y los Excel en el MISMO ORDEN: los documentos se ordenan una vez (por proveedor y numero de
+// factura) y cada PDF empieza con su numero («001 1FEV_1379574 JUAN D HOYOS….pdf»); los dos Excel traen la columna «N° PDF» con ese
+// mismo numero y sus filas van en ese orden: la fila 1 del Excel es el PDF 001 del ZIP.
 async function contArmarPaquete(docs, res) {
-  const z = await bajarPdfsEnZip(docs, BancoUtils.nombreArchivoCiclo, 'envio.zip', res, { foto: true, devolver: true, maxBytes: CONT_MAX_ZIP });
+  const num = (f) => String(f.documento || ((f.prefijo || '') + (f.folio || '')) || '');
+  docs = docs.slice().sort((a, b) => String(a.emisor || '').localeCompare(String(b.emisor || ''), 'es', { sensitivity: 'base' }) || num(a).localeCompare(num(b), 'es', { numeric: true }));
+  const numeros = new Map(docs.map((f, i) => [f.cufe, i + 1]));
+  const ancho = Math.max(3, String(docs.length).length), n3 = (f) => String(numeros.get(f.cufe)).padStart(ancho, '0');
+  const z = await bajarPdfsEnZip(docs, (f) => n3(f) + ' ' + BancoUtils.nombreArchivoCiclo(f), 'envio.zip', res, { foto: true, devolver: true, maxBytes: CONT_MAX_ZIP });
   const fall = new Set(z.fallCufes || []);
   const enZip = docs.filter((f) => !fall.has(f.cufe));
   if (!enZip.length) throw new Error('no pude bajar ningún PDF de estos documentos');
   res.textContent = 'Armando el Excel de contabilidad...';
-  const x1 = await descargarContabilidad(enZip, 'contabilidad.xlsx', { devolver: true });
+  const x1 = await descargarContabilidad(enZip, 'contabilidad.xlsx', { devolver: true, numeros });
   if (!x1 || !x1.blob) throw new Error('no pude armar el Excel de contabilidad');
   let x2 = null;
-  try { res.textContent = 'Armando el Excel organizado de Hiopos...'; x2 = await contOrganizadoHiopos(enZip, 'envio', { devolver: true }); } catch (e) { x2 = null; }
+  try { res.textContent = 'Armando el Excel organizado de Hiopos...'; x2 = await contOrganizadoHiopos(enZip, 'envio', { devolver: true, numeros }); } catch (e) { x2 = null; }
   return { enZip, fallCufes: [...fall], partes: z.partes, xls: x1.blob, xlsHiopos: x2 && x2.blob ? x2.blob : null };
 }
 
