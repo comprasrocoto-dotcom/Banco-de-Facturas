@@ -225,6 +225,7 @@ async function contOrganizadoHiopos(docs, nombre, opc) {   // (27/10/2026) opc.d
   const cl = OrganizadorHiopos.clasificar(lectura.filas, [...orgH.reglas.values()], evidencia, new Map());
   const ExcelJS = await orgHCargarExcelJS();
   const wb = OrganizadorHiopos.armarLibro(ExcelJS, { lectura, clasificacion: cl, nombreArchivo: nombre + '.xlsx', ahora: new Date().toLocaleString('es-CO'), comparacion: null });
+  if (opc && opc.numeros) contNumerarHojas(wb, lista, opc.numeros);   // (27/10/2026) columna «N° PDF», igual al numero del PDF en el ZIP
   const buf = await wb.xlsx.writeBuffer();
   const xlsx = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   if (!(opc && opc.devolver)) {
@@ -250,4 +251,24 @@ async function contOrganizadoAviso(docs, nombre) {
       (r.deWeb.length ? ' ⚠️ ' + r.deWeb.length + ' no estaban en el último reporte de Hiopos cargado en Conciliación: salen con datos de la web y la Nota dice «VERIFICAR EN HIOPOS».' : '');
     if (res) res.textContent = ((res.textContent || '') + ' ' + txt).trim();
   } catch (e) { alert('El ZIP y el Excel de contabilidad sí bajaron, pero no pude armar el Excel organizado de Hiopos: ' + e.message + '\n\nPuedes hacerlo como antes en «📊 Organizador Hiopos».'); }
+}
+
+// (27/10/2026) Excel organizado de Hiopos del envio: en las hojas con documentos (Documentos, Caja menor, Por revisar, Clasificacion) se
+// agrega al principio la columna «N° PDF» = el numero con que empieza el PDF de ese documento en el ZIP (por INGRESO o, si no, por Su Doc).
+function contNumerarHojas(wb, lista, numeros) {
+  const al = (t) => String(t == null ? '' : (t && t.richText ? t.richText.map((x) => x.text).join('') : t)).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const porIngreso = new Map(), porDoc = new Map();
+  (lista || []).forEach((f) => { const n = numeros.get(f.cufe); if (!n) return; if (f.num_ingreso) porIngreso.set(al(f.num_ingreso), n); porDoc.set(al(f.documento || ((f.prefijo || '') + (f.folio || ''))), n); });
+  const ancho = Math.max(3, String(numeros.size).length);
+  wb.worksheets.forEach((ws) => {
+    const enc = ws.getRow(1).values.map((v) => String(v || '').trim());
+    const ci = enc.findIndex((v) => v === 'INGRESO' || v === 'Serie / Número'), cd = enc.indexOf('Su Doc');
+    if (ci < 0 && cd < 0) return;
+    const filas = [];
+    ws.eachRow((r, i) => { if (i === 1) return; const n = (ci > 0 && porIngreso.get(al(r.getCell(ci).value))) || (cd > 0 && porDoc.get(al(r.getCell(cd).value))) || ''; filas.push([i, n]); });
+    ws.spliceColumns(1, 0, []);
+    const h = ws.getRow(1).getCell(1); h.value = 'N° PDF'; h.font = Object.assign({}, ws.getRow(1).getCell(2).font || {}); h.fill = ws.getRow(1).getCell(2).fill; h.alignment = { horizontal: 'center' };
+    filas.forEach(([i, n]) => { const c = ws.getRow(i).getCell(1); c.value = n ? String(n).padStart(ancho, '0') : ''; c.alignment = { horizontal: 'center' }; });
+    ws.getColumn(1).width = 9;
+  });
 }
