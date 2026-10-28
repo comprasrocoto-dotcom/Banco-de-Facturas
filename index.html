@@ -2910,7 +2910,43 @@ async function cargarErroresIngreso(){
   }catch(e){ ingresoDocs=[]; }
   const sedeDeDoc=(d)=>{ const p=d._ped; if(!p||typeof IngresoElegir==="undefined") return ""; const sd=typeof sedes!=="undefined"?sedes:[]; const m=IngresoElegir.marcaDe(p,sd).nombre, s2=IngresoElegir.sedeDe(p,sd).nombre; return (m?m+" · ":"")+s2; };
   const h=IngresoPanel.bloqueErrores(ingresoDocs,{puede:can("ingresos.iniciar"),admin:!!(perfil&&perfil.rol==="admin"),sedeDe:sedeDeDoc,filtroSede:novedadSede});
-  c.innerHTML=h; c.style.display=h?"block":"none";
+  const hAv=await avisosUltimasCorridas();   // (28/10/2026) lo que el agente SALTO (no queda en la cola como error)
+  c.innerHTML=h+hAv; c.style.display=(h||hAv)?"block":"none";
+}
+// (28/10/2026, pedido del usuario: «los analistas no pueden ver los pedidos que tienen error») Hay pedidos que el agente SALTA sin
+// dejarlos en la cola como ERROR (ej. «no sé a qué almacén del ERP corresponde Oviedo (se omite)»): solo quedaban en el informe de la
+// corrida. Aqui se leen los «⚠️ PED-xxxx: …» de las ultimas corridas y se muestran los que siguen SIN facturar (cada analista ve los de
+// sus sedes: la base filtra los pedidos). Se vuelve a leer solo cuando hay una corrida nueva.
+var AVISOS_CORRIDA={ultima:null,lista:[]};
+async function avisosUltimasCorridas(){
+  try{
+    const ult=(ordenesUlt[0]||{}).id||null;
+    if(ult!==AVISOS_CORRIDA.ultima){
+      AVISOS_CORRIDA.ultima=ult;
+      const r=await SB.from("ordenes").select("id,terminada_en,log,resultado").in("estado",["terminado","hecho","error"]).order("id",{ascending:false}).limit(8);
+      const porPed=new Map();
+      for(const o of (r.data||[]).slice().reverse()){   // de la mas vieja a la mas nueva: queda el aviso mas reciente de cada pedido
+        const txt=String(o.log||"")+"\n"+String(o.resultado||"");
+        for(const lin of txt.split(/\n|\s\|\s/)){
+          const m=lin.match(/⚠️\s*(PED-\d+)\s*:\s*(.+)$/); if(!m) continue;
+          porPed.set(m[1],{numero:m[1],motivo:m[2].trim().slice(0,220),cuando:o.terminada_en});
+        }
+      }
+      let lista=[...porPed.values()];
+      if(lista.length){
+        const pq=await SB.from("pedidos").select("numero,estado,sede_id,sede_texto,marca_id,factura_cufe").in("numero",lista.map(x=>x.numero));
+        const pm=new Map((pq.data||[]).map(p=>[p.numero,p]));
+        lista=lista.filter(x=>{ const p=pm.get(x.numero); if(!p) return false; x.ped=p; return !/facturado|anulado/i.test(p.estado||""); });
+      }
+      AVISOS_CORRIDA.lista=lista;
+    }
+    const L=AVISOS_CORRIDA.lista; if(!L.length) return "";
+    const sd=typeof sedes!=="undefined"?sedes:[];
+    const donde=(p)=>{ if(typeof IngresoElegir==="undefined") return p.sede_texto||""; const m=IngresoElegir.marcaDe(p,sd).nombre, s2=IngresoElegir.sedeDe(p,sd).nombre; return (m?m+" · ":"")+(s2||p.sede_texto||""); };
+    return `<div class="card" style="border-left:5px solid #b91c1c;margin-top:8px"><div style="font-weight:700;color:#b91c1c">⚠️ Pedidos que el agente no pudo ingresar en sus últimas corridas (${L.length})</div>
+      <div class="mut">No quedaron en la cola como error: el agente los saltó. Corrige lo que dice cada uno y lánzalo otra vez; desaparecen de aquí cuando quedan facturados.</div>
+      <div style="max-height:360px;overflow-y:auto">${L.map(x=>`<div style="border-top:1px solid var(--line);padding:5px 0"><b>${escAg(x.numero)}</b> <span class="badge" style="background:#e0e7ff;color:#1e3a8a">${escAg(donde(x.ped))}</span><div class="mut">${escAg(x.motivo)}</div></div>`).join("")}</div></div>`;
+  }catch(e){ return ""; }
 }
 // DETENER: el agente termina el documento en curso y se para (nada a medias)
 async function detenerIngreso(id){
@@ -3155,6 +3191,11 @@ async function guardarEdicion(){
   const filasForm=[...$("editLineas").querySelectorAll("div.row")].map(r=>{ const ins=r.querySelectorAll("input"); return {id:r.dataset.id, cod:r.dataset.cod, texto:ins[0]?ins[0].value:"", cantidad:ins[1]?numEs(ins[1].value):0}; });
   const vn=EditarPedidoLista.validarNuevas(filasForm.filter(f=>f.cantidad>0), edLista);
   if(!vn.ok){ alert(vn.errores.join("\n")); return; }
+  // (27/10/2026) insumos y material de aseo/empaque NUNCA en el mismo pedido (Nuevo pedido ya los separa; aqui no se pueden juntar)
+  if(EditarPedidoLista.mezclaCategorias&&typeof SepararPedido!=="undefined"){
+    const mz=EditarPedidoLista.mezclaCategorias(filasForm.filter(f=>f.cantidad>0),edLista,SepararPedido.categoria);
+    if(mz.mezcla){ alert("❌ Este pedido no puede llevar insumos junto con material de aseo / empaque: van en órdenes separadas.\n\nInsumos: "+mz.insumos.join(", ")+"\nAseo / empaque: "+mz.otros.join(", ")+"\n\nQuita lo que no corresponde y pídelo en otro pedido (o anéxalo al pedido de su tipo)."); return; }
+  }
   const campos=["responsable","forma_pago","numero_factura","pedido_erp","numero_nota_credito","observacion_factura"];
   const upd={}; campos.forEach(k=>upd[k]=$("ed_"+k).value.trim()||null);
   // (13/10/2026) en "N° pedido en el ERP" solo el numero (incidente PED-0493: una nota ahi hizo que el agente buscara un pedido que no existe)
@@ -3238,8 +3279,8 @@ async function cargar(){
     if(data.length<1000) break;
   }
   facturas=f;
-  const {data:n}=await SB.from("novedades").select("cufe,motivo,texto,created_at");
-  novedades=n||[];
+  // (28/10/2026) por paginas: hay mas de 1.000 novedades y solo llegaban las primeras 1.000
+  novedades=await traerTodo("novedades","cufe,motivo,texto,created_at",["id"]);
   await cargarNotaLinks();   // notas credito amarradas a sus facturas (si falla, todo sigue igual)
   if(typeof cargarEnvioContabilidad==="function") await cargarEnvioContabilidad();   // (16/10/2026) que ya se envio a contabilidad
   pintar();
