@@ -58,7 +58,10 @@ function pintarPanelEnvio(v) {
   if (v === 'envio') {
     const p = EnvioContabilidad.pendientes(todas, CONT_ENV, contListo);
     if (CONT_PREP === null) contPrepLeer();
-    if (CONT_PREP) { caja.innerHTML = contPrepHtml(p); return; }   // nunca se cierra solo: solo al confirmar o descartar
+    // (28/10/2026) un envio preparado cuyos documentos YA NO estan pendientes en NINGUNA sede (se enviaron por otro lado) se cierra
+    // solo: antes se quedaba guardado en el navegador y tapaba la lista (Arrebatao: 153 pendientes ocultos detras de un envio vacio)
+    if (CONT_PREP && !contPrepVivo()) { CONT_PREP = null; contPrepGuardar(); }
+    if (CONT_PREP) { caja.innerHTML = contPrepHtml(p); return; }   // si aun tiene pendientes: solo se cierra al confirmar o descartar
     const viejos = p.lista.filter((f) => EnvioContabilidad.diasSinEnviar(f, BancoUtils.hoyColombia()) >= 2).length;
     caja.innerHTML = `<div class="card" style="border-left:5px solid #1e3a8a;margin-bottom:12px">
       <div class="row" style="gap:10px;align-items:center">
@@ -123,7 +126,7 @@ function contPrepHtml(p) {
     </div>
     ${v.docs.length ? `<div id="envioLista" style="overflow-x:auto;max-height:420px;overflow-y:auto;margin-top:8px"><table style="width:100%;font-size:13px;border-collapse:collapse">
       <tr class="mut" style="text-align:left"><th></th><th>Documento</th><th>Proveedor</th><th>Sede</th><th>Ingreso ERP</th><th style="text-align:right">Total</th><th></th></tr>${filas}</table></div>`
-    : `<div class="mut" style="margin-top:8px">Ninguno de los ${CONT_PREP.cufes.length} documento(s) de este envío está pendiente con el filtro de sede actual: cambia a «Todas las sedes» o descártalo.</div>`}
+    : `<div class="mut" style="margin-top:8px">Ninguno de los ${CONT_PREP.cufes.length} documento(s) de este envío es de la sede que estás viendo: cambia a «Todas las sedes» para verlos.${p.lista.length ? ` <button class="p" style="margin-left:6px" onclick="contPrepNuevo()">📋 Dejar este y preparar los ${p.lista.length} de esta sede</button>` : ''}</div>`}
     <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
       <button class="p" id="btnEnvioBajar" onclick="contPrepBajar()" ${sel.length ? '' : 'disabled'}>⬇ 1. Bajar ZIP + Excel de los marcados (${sel.length})</button>
       <button class="p" id="btnEnvioConfirmar" style="background:#15803d;border-color:#15803d" onclick="contPrepConfirmar()" ${ok.ok ? '' : 'disabled'} title="${escAg(ok.motivo)}">✅ 2. Ya los envié: marcar ${sel.length} como enviados</button>
@@ -144,6 +147,19 @@ function contPrepIniciar() {
 function enviarAContabilidad() { contPrepIniciar(); }
 function contPrepMarcar(cufe, valor) { if (!CONT_PREP) return; CONT_PREP = EnvioContabilidad.marcar(CONT_PREP, cufe, valor); contPrepGuardar(); contPrepRefrescar(); }
 function contPrepTodos(valor) { if (!CONT_PREP) return; const v = EnvioContabilidad.vigentes(CONT_PREP, contPendientes().lista); CONT_PREP = EnvioContabilidad.marcarTodos(CONT_PREP, v.docs, valor); contPrepGuardar(); contPrepRefrescar(); }
+// ¿al envio preparado le queda algun documento pendiente (en cualquier sede, sin el filtro de sede)?
+function contPrepVivo() {
+  if (!CONT_PREP || !CONT_PREP.cufes || !CONT_PREP.cufes.length) return false;
+  const todas = typeof listaParaBajar === 'function' ? listaParaBajar(facturas) : facturas;
+  const pend = new Set(EnvioContabilidad.pendientes(todas, CONT_ENV, contListo).lista.map((f) => f.cufe));
+  return CONT_PREP.cufes.some((c) => pend.has(c));
+}
+// el envio preparado es de otra sede: se cierra y se prepara uno nuevo con lo de la sede que se ve (el anterior
+// sigue pendiente y vuelve a salir en «Por enviar» de su sede, nada se pierde ni se marca)
+function contPrepNuevo() {
+  if (!confirm('¿Preparar un envío nuevo con los pendientes de la sede que estás viendo?\n\nEl envío preparado anterior se cierra SIN marcar nada: sus documentos siguen pendientes en su sede.')) return;
+  CONT_PREP = null; contPrepGuardar(); contPrepIniciar();
+}
 function contPrepDescartar() { if (!confirm('¿Descartar este envío preparado? No se marca nada: todo sigue pendiente.')) return; CONT_PREP = null; contPrepGuardar(); contPrepRefrescar(); }
 
 async function contPrepBajar() {
