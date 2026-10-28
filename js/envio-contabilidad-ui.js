@@ -18,9 +18,17 @@ function contEnvioPuede() { return typeof perfil !== 'undefined' && perfil && (p
 async function cargarEnvioContabilidad() {
   if (!contEnvioPuede() || typeof EnvioContabilidad === 'undefined') return;
   try {
-    const r = await SB.from('contabilidad_envio').select('factura_cufe,lote_id,enviada_en').limit(20000);
-    if (r.error) { CONT_OK = false; return; }   // base sin las tablas: no se muestra nada
-    CONT_ENV = EnvioContabilidad.indexar(r.data || []);
+    // (28/10/2026) POR PAGINAS: la base entrega como mucho 1.000 filas por consulta. Al pasar de 1.000 documentos enviados (hoy 1.039)
+    // los enviados mas nuevos ya no se leian y volvian a salir en «Por enviar» aunque estuvieran marcados (y al marcarlos de nuevo
+    // la base respondia «ya estaban enviados»).
+    const filas = [];
+    for (let i = 0; ; i += 1000) {
+      const r = await SB.from('contabilidad_envio').select('factura_cufe,lote_id,enviada_en').order('factura_cufe').range(i, i + 999);
+      if (r.error) { CONT_OK = false; return; }   // base sin las tablas: no se muestra nada
+      filas.push(...(r.data || []));
+      if (!r.data || r.data.length < 1000) break;
+    }
+    CONT_ENV = EnvioContabilidad.indexar(filas);
     let l = await SB.from('contabilidad_lote').select('id,creado_en,creado_por,cantidad,nota,anulado,correo_para,correo_ids,referencia').order('id', { ascending: false }).limit(300);
     if (l.error) l = await SB.from('contabilidad_lote').select('id,creado_en,creado_por,cantidad,nota,anulado').order('id', { ascending: false }).limit(300);   // base sin las columnas del correo (27/10/2026)
     CONT_LOTES = (l.data || []);
