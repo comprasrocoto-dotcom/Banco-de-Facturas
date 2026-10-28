@@ -48,5 +48,21 @@
     return { ok: !errores.length, errores, nuevas };
   }
 
-  return { armar, buscar, validarNuevas };
+  // (27/10/2026, pedido del usuario: «no está separando material de empaque y aseo de insumos») Nuevo pedido ya los parte en dos
+  // órdenes, pero en «Editar» se podía anexar un insumo a la orden de empaque (PED-1497: la cidra quedó con los mezcladores y la
+  // orden de insumos PED-1496 quedó vacía). Ahora un pedido no puede quedar con insumos Y aseo/empaque a la vez.
+  // filas [{cod, texto}] + lista (con subfamilia) + categoria(subfamilia) -> { mezcla, insumos: [nombres], otros: [nombres] }
+  function mezclaCategorias(filas, lista, categoria) {
+    const porCod = new Map((lista || []).map((a) => [String(a.codigo || ''), a]));
+    const insumos = [], otros = [];
+    for (const f of filas || []) {
+      const a = (f.cod && porCod.get(String(f.cod))) || buscar(lista, f.texto);
+      if (!a) continue;                                // sin datos del articulo: no se puede decidir, no se bloquea
+      const nombre = String(a.nombre || f.texto || a.codigo).replace(/ \([^()]*\)$/, '');
+      (categoria(a.subfamilia) === 'insumos' ? insumos : otros).push(nombre);
+    }
+    return { mezcla: insumos.length > 0 && otros.length > 0, insumos, otros };
+  }
+
+  return { armar, buscar, validarNuevas, mezclaCategorias };
 });
