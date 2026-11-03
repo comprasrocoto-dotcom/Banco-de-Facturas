@@ -2906,7 +2906,7 @@ async function cargarErroresIngreso(){
     ingresoDocs=r.data||[];
     // (25/10/2026) de que sede/marca es cada uno (se ve al lado del numero)
     const ids=ingresoDocs.map(d=>d.pedido_id).filter(Boolean);
-    if(ids.length){ const pq=await SB.from("pedidos").select("id,numero,proveedor_texto,sede_id,sede_texto,marca_id").in("id",ids); const mp=new Map((pq.data||[]).map(p=>[p.id,p])); ingresoDocs.forEach(d=>{ d._ped=mp.get(d.pedido_id)||null; }); }
+    if(ids.length){ const pq=await SB.from("pedidos").select("id,numero,proveedor_texto,sede_id,sede_texto,marca_id,fecha,factura_cufe,numero_factura").in("id",ids); const mp=new Map((pq.data||[]).map(p=>[p.id,p])); ingresoDocs.forEach(d=>{ d._ped=mp.get(d.pedido_id)||null; }); }
   }catch(e){ ingresoDocs=[]; }
   const sedeDeDoc=(d)=>{ const p=d._ped; if(!p||typeof IngresoElegir==="undefined") return ""; const sd=typeof sedes!=="undefined"?sedes:[]; const m=IngresoElegir.marcaDe(p,sd).nombre, s2=IngresoElegir.sedeDe(p,sd).nombre; return (m?m+" · ":"")+s2; };
   const h=IngresoPanel.bloqueErrores(ingresoDocs,{puede:can("ingresos.iniciar"),admin:!!(perfil&&perfil.rol==="admin"),sedeDe:sedeDeDoc,filtroSede:novedadSede});
@@ -2947,6 +2947,42 @@ async function avisosUltimasCorridas(){
       <div class="mut">No quedaron en la cola como error: el agente los saltó. Corrige lo que dice cada uno y lánzalo otra vez; desaparecen de aquí cuando quedan facturados.</div>
       <div style="max-height:360px;overflow-y:auto">${L.map(x=>`<div style="border-top:1px solid var(--line);padding:5px 0"><b>${escAg(x.numero)}</b> <span class="badge" style="background:#e0e7ff;color:#1e3a8a">${escAg(donde(x.ped))}</span><div class="mut">${escAg(x.motivo)}</div></div>`).join("")}</div></div>`;
   }catch(e){ return ""; }
+}
+// (03/11/2026, pedido del usuario) «⬇ Excel» de la ventana «Documentos con novedad»: cada documento con su pedido, factura, sede,
+// marca, fechas y el error; respeta el filtro de sede elegido. Una segunda hoja trae los pedidos que el agente salto en sus corridas.
+async function excelNovedadesIngreso(){
+  try{
+    const sd=typeof sedes!=="undefined"?sedes:[];
+    const reint=d=>["PROCESANDO","PEDIDO_CREADO","FACTURANDO"].includes(d.estado)&&Number(d.intentos||0)>1;
+    const sedeDeDoc=(p)=>{ if(!p||typeof IngresoElegir==="undefined") return {marca:"",sede:p&&p.sede_texto||""}; return {marca:IngresoElegir.marcaDe(p,sd).nombre||"",sede:IngresoElegir.sedeDe(p,sd).nombre||p.sede_texto||""}; };
+    let docs=(ingresoDocs||[]).filter(d=>d.estado==="ERROR"||d.estado==="PENDIENTE_REINTENTO"||reint(d));
+    const clave=p=>{ if(!p||typeof IngresoElegir==="undefined") return ""; const m=IngresoElegir.marcaDe(p,sd).nombre, s2=IngresoElegir.sedeDe(p,sd).nombre; return (m?m+" · ":"")+s2; };
+    if(novedadSede && docs.some(d=>clave(d._ped)===novedadSede)) docs=docs.filter(d=>clave(d._ped)===novedadSede);
+    const fDe=new Map((typeof facturas!=="undefined"?facturas:[]).map(f=>[f.cufe,f]));
+    const fecha=t=>t?String(t).slice(0,10):"";
+    const hora=t=>{ const x=t?Date.parse(t):NaN; return isNaN(x)?"":new Date(x-5*3600000).toISOString().slice(0,16).replace("T"," "); };
+    const ExcelJS=await new Promise((res,rej)=>{if(window.ExcelJS)return res(window.ExcelJS);const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';s.onload=()=>window.ExcelJS?res(window.ExcelJS):rej(new Error('ExcelJS no cargó'));s.onerror=()=>rej(new Error('No se pudo cargar ExcelJS'));document.head.appendChild(s);});
+    const wb=new ExcelJS.Workbook(); wb.creator="Banco de Facturas";
+    const hoja=(nombre,cols,filas,anchos)=>{ const ws=wb.addWorksheet(nombre,{views:[{state:"frozen",ySplit:1}]}); ws.addRow(cols);
+      const e=ws.getRow(1); e.font={bold:true,color:{argb:"FFFFFFFF"}}; e.eachCell(c=>{c.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFB45309"}};});
+      filas.forEach(f=>ws.addRow(f)); cols.forEach((c,i)=>{ ws.getColumn(i+1).width=anchos[i]||14; if(/Total/.test(c)) ws.getColumn(i+1).numFmt="#,##0"; });
+      ws.getColumn(cols.length).alignment={wrapText:true,vertical:"top"}; ws.autoFilter={from:{row:1,column:1},to:{row:1,column:cols.length}}; };
+    const C1=["Pedido","Marca","Sede","Proveedor","Fecha pedido","N° factura","Fecha factura","Total factura","Estado en la cola","Intentos","Última actualización","Tipo de error","Detalle"];
+    hoja("Documentos con novedad",C1,docs.map(d=>{ const p=d._ped||{}, x=sedeDeDoc(p), f=fDe.get(p.factura_cufe)||{};
+      return [d.numero||p.numero||"",x.marca,x.sede,p.proveedor_texto||f.emisor||"",fecha(p.fecha),p.numero_factura||f.documento||((f.prefijo||"")+(f.folio||""))||"",fecha(f.fecha_emision),Number(f.total||0)||null,
+        d.estado==="ERROR"?"ERROR":reint(d)?"REINTENTANDO":"PENDIENTE DE REINTENTO",Number(d.intentos||0),hora(d.actualizado_en),d.error_etapa||"",[d.etapa,d.error].filter(Boolean).join(" — ")]; }),
+      [12,12,22,34,12,16,12,14,20,9,17,26,90]);
+    const av=(AVISOS_CORRIDA&&AVISOS_CORRIDA.lista)||[];
+    if(av.length){
+      const C2=["Pedido","Marca","Sede","Fecha pedido","N° factura","Última corrida","Motivo"];
+      hoja("Saltados por el agente",C2,av.map(a=>{ const p=a.ped||{}, x=sedeDeDoc(p), f=fDe.get(p.factura_cufe)||{};
+        return [a.numero,x.marca,x.sede,"",f.documento||((f.prefijo||"")+(f.folio||""))||"",hora(a.cuando),a.motivo]; }),[12,12,22,12,16,17,90]);
+    }
+    const buf=await wb.xlsx.writeBuffer(); const a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}));
+    a.download="Documentos_con_novedad_"+(novedadSede?novedadSede.replace(/[^A-Za-z0-9]+/g,"_")+"_":"")+BancoUtils.hoyColombia()+".xlsx";
+    document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },1500);
+  }catch(e){ alert("No pude armar el Excel: "+e.message); }
 }
 // DETENER: el agente termina el documento en curso y se para (nada a medias)
 async function detenerIngreso(id){
