@@ -12,6 +12,13 @@ async function cargarNombresDecidir() {
     const { data, error } = await SB.from('producto_revision').select('*').eq('estado', 'pendiente').order('creado_en', { ascending: false }).limit(200);
     if (error) throw new Error(error.message);
     ag.productos = data || [];
+    // (03/11/2026) de que marca es el pedido de cada fila (para enseñar la regla SOLO para esa marca)
+    const nums = [...new Set(ag.productos.map((r) => r.pedido_numero).filter(Boolean))];
+    if (nums.length) {
+      const [pq, mq] = await Promise.all([SB.from('pedidos').select('numero,marca_id').in('numero', nums), SB.from('marcas').select('id,nombre')]);
+      const mp = new Map((pq.data || []).map((p) => [p.numero, p.marca_id])), mn = new Map((mq.data || []).map((m) => [Number(m.id), m.nombre]));
+      ag.productos.forEach((r) => { const id = mp.get(r.pedido_numero); r._marca_id = id != null ? Number(id) : null; r._marca = id != null ? (mn.get(Number(id)) || '') : ''; });
+    }
   } catch (e) { ag.productos = ag.productos || []; }
 }
 
@@ -20,11 +27,12 @@ function agProductoElegir(i, nombre) { const e = $('agpn_' + i); if (e) e.value 
 async function agProductoEnsenar(i) {
   const r = (ag.productos || [])[i]; if (!r) return;
   const msg = (t) => { const e = $('agpm_' + i); if (e) e.textContent = t; };
-  const v = NombresPorDecidir.validarNombre($('agpn_' + i).value);
-  if (!v.ok) { msg(v.error); return; }
-  const params = NombresPorDecidir.armarEnsenar(r, v.nombre, (perfil && perfil.nombre) || (usuario && usuario.email) || 'admin');
+  // (03/11/2026) regla por marca: «Aplica a» (solo la marca del pedido o todas) y la equivalencia de unidades (opcional)
+  const val = (id) => { const e = $(id); return e ? e.value : ''; };
+  const x = NombresPorDecidir.armarRegla(r, val('agpn_' + i), (perfil && perfil.nombre) || (usuario && usuario.email) || 'admin', val('agpa_' + i), val('agpu_' + i), val('agpf_' + i));
+  if (!x.ok) { msg(x.error); return; }
   const btn = $('agpb_' + i); if (btn) btn.disabled = true;
-  const { error } = await SB.rpc('producto_alias_registrar', params);
+  const { error } = await SB.rpc(x.rpc, x.params);
   if (btn) btn.disabled = false;
   if (error) { msg('No se pudo guardar: ' + error.message); return; }
   await cargarNombresDecidir(); pintarAdmin();
