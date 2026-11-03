@@ -71,7 +71,7 @@
         : errores.length && opciones.puede ? `<button class="p" onclick="reintentarErroresIngreso()">🔁 REINTENTAR ERRORES (${errores.length})</button>` : '',
       opciones.puede && opciones.admin ? `<button onclick="descartarIngreso(${idsFiltro})" title="Solo administrador: sacar de la cola TODOS los de esta lista (el agente deja de intentarlos)">🧹 LIMPIAR VENTANA (${l.length})</button>` : '',
     ].filter(Boolean).join(' ');
-    return `<div class="card" style="border-left:5px solid #b45309;margin-top:8px"><div style="font-weight:700;color:#b45309">Documentos con novedad (${l.length}${filtro ? ' de ' + todos.length : ''})</div>
+    return `<div class="card" style="border-left:5px solid #b45309;margin-top:8px"><div class="row" style="gap:8px;align-items:center"><div style="font-weight:700;color:#b45309;flex:1">Documentos con novedad (${l.length}${filtro ? ' de ' + todos.length : ''})</div><button onclick="excelNovedadesIngreso()" title="Baja en Excel los documentos de esta lista (con el filtro de sede elegido): pedido, factura, sede, marca, fechas y el error">⬇ Excel</button></div>
       <div class="mut">Cada documento se queda aquí hasta que entre al ERP o alguien lo saque a mano con «✕ Quitar». Corrige lo que indica y lánzalo otra vez, o quítalo si ya lo resolviste a mano. Los COMPLETADOS no se vuelven a procesar.</div>${selector}<div style="max-height:520px;overflow-y:auto">${filas}</div>
       ${botones ? `<div class="row" style="margin-top:8px">${botones}</div>` : ''}</div>`;
   }
