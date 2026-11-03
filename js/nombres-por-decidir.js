@@ -29,5 +29,28 @@
   // Texto para el boton de una sugerencia (candidato que la conciliacion ya comparo): "AJI DULCE X KILO (33%)"
   const textoSugerencia = (s) => `${s && s.nombre || ''}${s && s.score != null ? ' (' + Math.round(s.score * 100) + '%)' : ''}`;
 
-  return { validarNombre, armarEnsenar, textoSugerencia };
+  // (03/11/2026) REGLA POR MARCA (pedido del usuario): el nombre puede aplicar solo a una marca y llevar la equivalencia de unidades
+  // de esa marca (ej. Arrebatao: 1 ATUN POR 130 GRAMOS = 0,13 KILO del proveedor).
+  // marcaId: id de la marca o '' / null = todas; unidadTexto + factorTexto: opcionales (los dos o ninguno).
+  // -> { ok, error?, rpc, params }. Sin marca y sin unidad se guarda como siempre (producto_alias_registrar).
+  function armarRegla(r, nombre, usuario, marcaId, unidadTexto, factorTexto) {
+    const v = validarNombre(nombre);
+    if (!v.ok) return v;
+    if (!r) return { ok: false, error: 'No encontré la fila.' };
+    const u = String(unidadTexto == null ? '' : unidadTexto).replace(/\s+/g, ' ').trim().toUpperCase();
+    const fTxt = String(factorTexto == null ? '' : factorTexto).trim().replace(',', '.');
+    if (!u && fTxt) return { ok: false, error: 'Escribe también la unidad del proveedor (ej. KILO).' };
+    let f = null;
+    if (u) {
+      f = Number(fTxt);
+      if (!fTxt || !(f > 0) || !isFinite(f)) return { ok: false, error: 'Escribe cuántos ' + u + ' del proveedor son 1 del pedido (ej. 0,13).' };
+      if (u.length > 30) return { ok: false, error: 'La unidad del proveedor es demasiado larga.' };
+    }
+    const m = marcaId === '' || marcaId == null ? null : Number(marcaId);
+    if (m === null && !u) return { ok: true, rpc: 'producto_alias_registrar', params: armarEnsenar(r, v.nombre, usuario) };
+    return { ok: true, rpc: 'producto_alias_marca_registrar', params: { p_proveedor_nit: r.proveedor_nit, p_texto_norm: r.texto_norm, p_marca_id: m,
+      p_nombre_pedido: v.nombre, p_unidad_proveedor: u || null, p_factor_proveedor: u ? f : null, p_usuario: usuario || null, p_revision_id: r.id } };
+  }
+
+  return { validarNombre, armarEnsenar, textoSugerencia, armarRegla };
 });
