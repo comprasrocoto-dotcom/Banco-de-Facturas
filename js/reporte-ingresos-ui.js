@@ -4,7 +4,34 @@
 //  falla del agente (para saber qué mejorar). Datos: rpc reporte_ingresos (supabase/reporte_ingresos.sql). Cálculos:
 //  js/reporte-ingresos.js. Excel con ExcelJS (mismo cargador que el resto de la web).
 // ============================================================
-var REPING = { desde: '', hasta: '', filas: null, cargando: false, error: '' };
+var REPING = { desde: '', hasta: '', filas: null, cargando: false, error: '', ver: null };
+
+// (04/11/2026, pedido del usuario) los numeros se pueden tocar: muestra cuales son esos documentos (pedido, factura, proveedor...)
+// ver = { como: 'PENDIENTE' | 'AGENTE' | 'ANALISTA_TRAS_FALLO' | 'ANALISTA_DIRECTO', analista: nombre | null (todos) }
+function reporteIngVer(como, analista) {
+  const v = REPING.ver;
+  REPING.ver = v && v.como === como && v.analista === (analista || null) ? null : { como, analista: analista || null };
+  reporteIngPintar();
+  setTimeout(() => { const e = document.getElementById('repIngLista'); if (e && REPING.ver) e.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50);
+}
+function repIngFiltrar(F, ver) {
+  return (F || []).filter((f) => f.como === ver.como && (!ver.analista ||
+    (ver.analista === ReporteIngresos.SIN_ANALISTA ? !String(f.analista || '').trim() : String(f.analista || '').split(',').map((x) => x.trim()).includes(ver.analista))));
+}
+function repIngListaHtml(F) {
+  const ver = REPING.ver; if (!ver) return '';
+  const e = repIngEsc, R = ReporteIngresos, L = repIngFiltrar(F, ver);
+  const titulo = `${R.COMO[ver.como] || ver.como}${ver.analista ? ' · ' + ver.analista : ''}`;
+  const filas = L.map((f) => `<tr style="border-top:1px solid var(--line)">
+      <td style="padding:3px 8px;white-space:nowrap">${e(f.dia || '')}</td><td style="padding:3px 8px;white-space:nowrap"><b>${e(f.pedido || '')}</b></td>
+      <td style="padding:3px 8px;white-space:nowrap"><b>${e(f.factura || '—')}</b></td><td style="padding:3px 8px">${e(f.proveedor || '')}</td>
+      <td style="padding:3px 8px">${e([f.marca, f.sede].filter(Boolean).join(' · '))}</td>
+      <td style="padding:3px 8px;text-align:right;white-space:nowrap">${f.total != null ? '$' + Number(f.total).toLocaleString('es-CO') : ''}</td>
+      <td style="padding:3px 8px">${f.num_ingreso ? e(f.num_ingreso) : ''}${ver.como !== 'AGENTE' && (f.etapa_error || f.error || f.estado_cola) ? `<div class="mut" style="font-size:12px">${e([f.estado_cola === 'PENDIENTE_REINTENTO' ? 'en cola (reintentando)' : f.estado_cola === 'ERROR' ? 'en cola con error' : (ver.como === 'PENDIENTE' && !f.estado_cola ? 'sin lanzar al agente' : ''), f.etapa_error, f.error].filter(Boolean).join(' · ').slice(0, 220))}</div>` : (ver.como === 'PENDIENTE' && !f.estado_cola ? '<span class="mut" style="font-size:12px">sin lanzar al agente</span>' : '')}</td></tr>`).join('');
+  return `<div id="repIngLista" style="margin-top:12px;border:2px solid #1d4ed8;border-radius:10px;padding:8px 10px">
+    <div class="row" style="align-items:center;gap:8px"><b style="flex:1">📄 ${e(titulo)} (${L.length})</b><button class="s" onclick="REPING.ver=null;reporteIngPintar()">✕ Cerrar</button></div>
+    ${L.length ? `<div style="overflow-x:auto;max-height:420px;overflow-y:auto;margin-top:6px"><table style="border-collapse:collapse;font-size:13px;min-width:100%"><tr class="mut" style="text-align:left"><th style="padding:3px 8px">Fecha</th><th style="padding:3px 8px">Pedido</th><th style="padding:3px 8px">Factura</th><th style="padding:3px 8px">Proveedor</th><th style="padding:3px 8px">Marca · sede</th><th style="padding:3px 8px;text-align:right">Total</th><th style="padding:3px 8px">${ver.como === 'AGENTE' || ver.como === 'ANALISTA_DIRECTO' ? 'N° ingreso ERP' : 'Estado / motivo'}</th></tr>${filas}</table></div>` : '<div class="mut">No hay documentos.</div>'}</div>`;
+}
 
 function repIngHoy() { return new Date(Date.now() - 5 * 3600000).toISOString().slice(0, 10); }
 function repIngMenos(d, dias) { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() - dias); return x.toISOString().slice(0, 10); }
@@ -32,14 +59,16 @@ function reporteIngHtml() {
     const r = R.resumen(F);
     const kpi = (titulo, valor, sub, color) => `<div style="flex:1;min-width:150px;border:1px solid var(--line);border-radius:10px;padding:8px 10px"><div class="mut" style="font-size:12px">${titulo}</div><div style="font-size:22px;font-weight:800;color:${color}">${valor}</div><div class="mut" style="font-size:12px">${sub}</div></div>`;
     h += `<div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">
-      ${kpi('Ingresados al ERP', r.ingresados.toLocaleString('es-CO'), `${r.pendiente} pendiente(s)`, 'inherit')}
+      ${kpi('Ingresados al ERP', r.ingresados.toLocaleString('es-CO'), r.pendiente ? `<a href="javascript:void 0" onclick="reporteIngVer('PENDIENTE',null)" style="color:#1d4ed8;font-weight:700">${r.pendiente} pendiente(s) — ver cuáles</a>` : '0 pendientes', 'inherit')}
       ${kpi('🤖 Los hizo el agente', r.pct_agente + '%', `${r.agente} documento(s)${r.reintentos ? ` · ${r.reintentos} necesitaron reintentos` : ''}`, '#15803d')}
       ${kpi('👤 Los terminó el analista', r.pct_analista + '%', `${r.tras_fallo} tras falla del agente · ${r.directo} sin pasar por el agente`, '#b45309')}
       ${kpi('Falla del agente', r.pct_falla_agente + '%', 'de lo que el agente intentó, lo que tuvo que terminar el analista', '#b91c1c')}</div>`;
     const tabla = (cols, filas) => `<div style="overflow-x:auto;margin-top:6px"><table style="border-collapse:collapse;font-size:13px;min-width:100%"><tr class="mut" style="text-align:left">${cols.map((c, i) => `<th style="padding:3px 8px;${i ? 'text-align:right' : ''}">${c}</th>`).join('')}</tr>${filas.map((f) => `<tr style="border-top:1px solid var(--line)">${f.map((v, i) => `<td style="padding:3px 8px;${i ? 'text-align:right' : ''}">${v}</td>`).join('')}</tr>`).join('')}</table></div>`;
     const barra = (p) => `<span style="display:inline-block;width:60px;height:8px;background:#fee2e2;border-radius:4px;vertical-align:middle;margin-right:6px"><span style="display:block;height:8px;width:${Math.min(100, p)}%;background:#16a34a;border-radius:4px"></span></span>${p}%`;
     h += `<h4 style="margin:14px 0 2px">Por analista</h4>` + tabla(['Analista', 'Ingresados', '🤖 Agente', '👤 Tras falla', '👤 Directo', 'Pendientes', '% agente'],
-      R.porAnalista(F).map((a) => [e(a.nombre), a.ingresados, a.agente, a.tras_fallo, a.directo, a.pendiente, barra(a.pct_agente)]));
+      R.porAnalista(F).map((a) => { const n = e(a.nombre).replace(/'/g, '&#39;'), lk = (como, v) => (v ? `<a href="javascript:void 0" onclick="reporteIngVer('${como}','${n}')" title="Ver cuáles son" style="color:#1d4ed8;font-weight:700;text-decoration:underline">${v}</a>` : '0');
+        return [e(a.nombre), a.ingresados, lk('AGENTE', a.agente), lk('ANALISTA_TRAS_FALLO', a.tras_fallo), lk('ANALISTA_DIRECTO', a.directo), lk('PENDIENTE', a.pendiente), barra(a.pct_agente)]; }))
+      + `<div class="mut" style="font-size:12px;margin-top:2px">Toca un número para ver cuáles son esos documentos.</div>` + repIngListaHtml(F);
     const mot = R.motivos(F);
     h += `<h4 style="margin:14px 0 2px">Por qué no lo terminó el agente <span class="mut" style="font-weight:400">(lo que mejorar primero)</span></h4>` + (mot.length ? tabla(['Etapa · motivo', 'Veces', 'Ejemplos'],
       mot.slice(0, 15).map((m) => [`<b>${e(m.etapa)}</b><div class="mut" style="font-size:12px">${e(m.detalle)}</div>`, m.cantidad, `<span class="mut" style="font-size:12px">${e(m.pedidos.join(', '))}</span>`])) : '<div class="mut">Sin fallas del agente en esas fechas. ✅</div>');
@@ -59,6 +88,7 @@ async function reporteIngCargar() {
   try {
     const r = await SB.rpc('reporte_ingresos', { p_desde: d, p_hasta: a });
     if (r.error) throw new Error(r.error.message);
+    REPING.ver = null;
     REPING.filas = (r.data || []).map((f) => (f.como === 'AGENTE' ? Object.assign(f, { error: null }) : f));   // en los del agente «error» es solo una nota
   } catch (e) { REPING.error = 'No pude armar el reporte: ' + e.message; REPING.filas = null; }
   REPING.cargando = false; reporteIngPintar();
