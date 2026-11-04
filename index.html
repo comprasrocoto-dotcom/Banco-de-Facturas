@@ -430,6 +430,7 @@ tr:hover td{background:#f1f5f9}
 <script src="js/factura-foto.js"></script>
 <script src="js/factura-foto-ui.js"></script>
 <script src="js/escaner.js"></script>
+<script src="js/calidad-foto.js"></script>
 <script src="js/escaner-ui.js"></script>
 <script src="js/codigo-marca.js"></script>
 <script src="js/envio-contabilidad.js"></script>
@@ -4080,6 +4081,13 @@ async function confirmarSello(){
   const cufe=selloActual;
   let rutaFoto=null;
   const arch=$("fotoRecibo").files[0];
+  // (04/11/2026, pedido del usuario) la foto del papelito firmado debe estar nitida y con luz: si no, no deja sellar hasta tomarla bien
+  if(arch&&typeof revisarFotoArchivo==="function"){
+    $("serr").textContent="Revisando la foto...";
+    const rv=await revisarFotoArchivo(arch);
+    if(!rv.ok){$("serr").textContent="🚫 La foto no sirve: "+rv.problemas.join(" ")+" Tómala de nuevo (o quítala, es opcional).";return;}
+    $("serr").textContent="";
+  }
   if(arch){
     const ext=(arch.name.split(".").pop()||"jpg").toLowerCase();
     rutaFoto=(perfil.sedes?perfil.sedes.nombre:"varios")+"/"+cufe+"_RECIBO."+ext;
