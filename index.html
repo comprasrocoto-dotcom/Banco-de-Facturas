@@ -256,6 +256,7 @@ tr:hover td{background:#f1f5f9}
         <button class="chip"    id="v-nov"      onclick="setVista('nov')">Con novedad</button>
         <button class="chip"    id="v-envio"    style="display:none" onclick="setVista('envio')" title="Todo lo que tiene el proceso terminado y AÚN NO se ha enviado a contabilidad, sea de la fecha que sea">📤 Por enviar a contabilidad <b id="nEnvio"></b></button>
         <button class="chip"    id="v-enviadas" style="display:none" onclick="setVista('enviadas')" title="Lotes ya enviados a contabilidad (se pueden volver a bajar)">📦 Enviadas a contabilidad</button>
+        <button class="chip"    id="v-servicios" onclick="setVista('servicios')" title="Facturas de proveedores marcados como de SERVICIOS (no son de insumo): apartadas, no borradas">🧾 Servicios <b id="nServicios"></b></button>
         <button class="chip"    id="v-listas"   onclick="setVista('listas')" title="Facturas que ya tienen Ingreso ERP pero siguen sin sellar: a la sede se le olvidó tomarlas o sellarlas">⏳ Ingresadas sin sellar</button>
         <span class="sp"></span>
         <button class="chip" id="btnFiltrosFac" style="display:none" onclick="toggleFiltros('Fac')">Filtros ▾</button>
@@ -3317,6 +3318,29 @@ async function amarrarPedido(id){
   f.pedido_num=p.numero; await cargar(); await cargarPedidos();
   alert("¡Amarrado! "+p.numero+" ↔ "+(numF||"la factura"));
 }
+var SERVICIO_NITS=new Map();
+const esDeServicio=f=>!!(f&&f.nit_emisor&&SERVICIO_NITS.has(String(f.nit_emisor).replace(/\D/g,"")));
+// (04/11/2026) marcar / desmarcar un proveedor (por NIT) como de servicios
+async function marcarServicio(cufe,marcar){
+  const f=facturas.find(x=>x.cufe===cufe); if(!f) return;
+  const nit=String(f.nit_emisor||"").replace(/\D/g,"");
+  if(!nit){ alert("Esta factura no trae el NIT del proveedor: no se puede marcar."); return; }
+  const n=facturas.filter(x=>String(x.nit_emisor||"").replace(/\D/g,"")===nit).length;
+  if(marcar){
+    if(!confirm("¿Marcar a "+(f.emisor||"este proveedor")+" (NIT "+nit+") como proveedor de SERVICIOS (no es de insumo)?\n\nSus "+n+" factura(s) salen de «Sin asignar» y de las demás listas y quedan en «🧾 Servicios». No se borra nada y se puede desmarcar cuando quieras.")) return;
+    const r=await SB.from("proveedor_servicio").insert({nit,nombre:f.emisor||null,marcado_por:(perfil&&perfil.nombre)||(usuario&&usuario.email)||null});
+    if(r.error&&!/duplicate|unique/i.test(r.error.message)){ alert("No se pudo marcar: "+r.error.message); return; }
+    SB.from("historial").insert({accion:"proveedor marcado como servicios",detalle:nit+" · "+(f.emisor||""),usuario:usuario.id}).then(()=>{},()=>{});
+    SERVICIO_NITS.set(nit,f.emisor||"");
+  } else {
+    if(!confirm("¿"+(f.emisor||"Este proveedor")+" (NIT "+nit+") SÍ es de insumo?\n\nSus "+n+" factura(s) vuelven a las listas normales.")) return;
+    const r=await SB.from("proveedor_servicio").delete().eq("nit",nit).select("nit");
+    if(r.error||!(r.data&&r.data.length)){ alert("No se pudo desmarcar"+(r.error?": "+r.error.message:" (sin permiso).")); return; }
+    SB.from("historial").insert({accion:"proveedor desmarcado de servicios",detalle:nit+" · "+(f.emisor||""),usuario:usuario.id}).then(()=>{},()=>{});
+    SERVICIO_NITS.delete(nit);
+  }
+  pintar();
+}
 async function cargar(){
   // (05/10/2026) por paginas: la base corta cada consulta en 1.000 filas (hoy ~740 facturas); sin esto, al pasar de
   // 1.000 las mas viejas desaparecian de la lista, de "Proceso terminado" y de los ZIP sin ningun aviso.
@@ -3328,6 +3352,8 @@ async function cargar(){
     if(data.length<1000) break;
   }
   facturas=f;
+  // (04/11/2026) proveedores de SERVICIOS (no son de insumo): sus facturas se apartan en «🧾 Servicios» (no se borran)
+  try{ const ps=await SB.from("proveedor_servicio").select("nit,nombre"); SERVICIO_NITS=ps.error?new Map():new Map((ps.data||[]).map(x=>[String(x.nit),x.nombre||""])); }catch(e){ SERVICIO_NITS=new Map(); }
   // (28/10/2026) por paginas: hay mas de 1.000 novedades y solo llegaban las primeras 1.000
   novedades=await traerTodo("novedades","cufe,motivo,texto,created_at",["id"]);
   await cargarNotaLinks();   // notas credito amarradas a sus facturas (si falla, todo sigue igual)
@@ -3372,7 +3398,7 @@ function sedesFiltro(){ return sedeFijaId?[Number(sedeFijaId)]:FM_SEL.fmSede.map
 function sedeOk(id){ const sf=sedesFiltro(); return !sf.length||sf.includes(Number(id)); }
 function setTipo(t){ FM_SEL.fmTipo=t?[t]:[]; fmPintar("fmTipo"); fmAlCambiar("fmTipo"); }
 fmPintar("fmTipo"); fmPintar("fmCat");
-function setVista(v){vista=v;if(v!=="listas") listasSede=null;["pool","mias","selladas","hecho","nov","listas","envio","enviadas"].forEach(x=>{ const b=$("v-"+x); if(b) b.classList.toggle("on",x==v); });pintar();}
+function setVista(v){vista=v;if(v!=="listas") listasSede=null;["pool","mias","selladas","hecho","nov","listas","envio","enviadas","servicios"].forEach(x=>{ const b=$("v-"+x); if(b) b.classList.toggle("on",x==v); });pintar();}
 function novDe(c){return novedades.find(n=>n.cufe===c);}
 // ── Ingresadas sin sellar (19/09/2026): ya tienen Ingreso ERP pero siguen en Sin asignar / Mías sin sellar ──
 // La logica vive en js/sin-sellar.js (probada con node). Las sedes solo ven las suyas; admin y pagos ven todas.
@@ -3427,7 +3453,10 @@ function pintar(){
   // (16/10/2026) en «Sin asignar» las facturas SIN sede se ven siempre (con filtro de sede o analista de una sola sede): los
   // analistas les hacen seguimiento. Antes el filtro de sede las escondia porque no tienen sede.
   const sinSedeVisible=f=>vista=="pool"&&(f.sede_id==null||f.sede_id==="");
-  const base=facturas.filter(f=>esDelTipo(f)&&FiltroMultiple.permite(FM_SEL.fmCat,f.categoria)&&(sedeOk(f.sede_id)||sinSedeVisible(f)));
+  // (04/11/2026) las de proveedores de SERVICIOS se apartan: solo salen en «🧾 Servicios»
+  const todasBase=facturas.filter(f=>esDelTipo(f)&&FiltroMultiple.permite(FM_SEL.fmCat,f.categoria)&&(sedeOk(f.sede_id)||(f.sede_id==null||f.sede_id==="")&&(vista=="pool"||vista=="servicios")));
+  { const ns=$("nServicios"); if(ns){ const k=todasBase.filter(esDeServicio).length; ns.textContent=k?"("+k+")":""; } }
+  const base=vista=="servicios"?todasBase.filter(esDeServicio):facturas.filter(f=>!esDeServicio(f)&&esDelTipo(f)&&FiltroMultiple.permite(FM_SEL.fmCat,f.categoria)&&(sedeOk(f.sede_id)||sinSedeVisible(f)));
   let l=base;
   panelSinSellar(base);
   if(vista=="listas")   l=SinSellar.ordenar(sinSellarVisibles(base).filter(f=>listasSede==null||sedeListaKey(f)===listasSede));
@@ -3496,6 +3525,7 @@ function pintar(){
         ${((typeof UnPedidoFactura!=="undefined")?UnPedidoFactura.mostrarBuscar(perfil.rol,f):(f.tipo=="factura"))?`<button class="s" onclick="abrirAmarre('factura','${f.cufe}')">🔗 Buscar pedido</button>`:""}
         ${((f.pedido_num||f.pedido_erp)&&typeof Desamarrar!=="undefined"&&Desamarrar.puede(perfil))?`<button class="d" title="Suelta esta factura de su pedido sin borrar nada" onclick="desamarrarFactura('${f.cufe}')">⛓ Desamarrar pedido</button>`:""}
         ${botonNotaCredito(f)}
+        ${(perfil.rol==="admin"||perfil.rol==="pagos")&&f.nit_emisor?(esDeServicio(f)?`<button class="s" title="Este proveedor SÍ es de insumo: sus facturas vuelven a las listas normales" onclick="marcarServicio('${f.cufe}',false)">↩ Sí es de insumo</button>`:(f.estado==="pool"?`<button class="s" title="El proveedor no es de insumo (servicios): aparta sus facturas en «🧾 Servicios» sin borrarlas" onclick="marcarServicio('${f.cufe}',true)">🧾 Es de servicios</button>`:"")):""}
         ${can("facturas.borrar")?`<button class="d" title="Borrar factura" onclick="borrarFactura('${f.cufe}')">🗑</button>`:""}
         ${(f.estado!="pagada")?`<button onclick="abrirNov('${f.cufe}')">Novedad</button>`:""}
       </div>
@@ -3578,12 +3608,15 @@ async function borrarFactura(cufe){
   let aviso = (f.estado==="sellada") ? "⚠️ OJO: esta factura YA ESTÁ SELLADA y aprobada.\n\n" : "";
   if(f.pedido_erp||f.pedido_num) aviso += "Está amarrada al pedido "+(f.pedido_erp||f.pedido_num)+". Si solo quieres soltarla del pedido, CANCELA y usa «⛓ Desamarrar pedido»: así la factura no se borra.\n\n";
   if(!confirm(aviso+"¿BORRAR la factura "+num+" de "+(f.emisor||"")+"?\n\nSe borra el registro y su PDF. No se puede deshacer.")) return;
+  // (04/11/2026) PRIMERO se borra el registro y se comprueba que de verdad se borro; solo entonces se quitan el pedido y los archivos.
+  // Antes se quitaban antes: si la base no dejaba borrar (sin permiso) la web decia «borrada» pero la factura seguia, sin PDF.
+  const r=await SB.from("facturas").delete().eq("cufe",cufe).select("cufe");
+  if(r.error){ alert("No se pudo borrar: "+r.error.message); return; }
+  if(!(r.data&&r.data.length)){ alert("No se borró la factura "+num+": no tienes permiso para borrar facturas (o es de una sede que no tienes asignada).\n\nPídele al administrador el permiso «Borrar facturas»."); return; }
   await SB.from("pedidos").update({factura_cufe:null}).eq("factura_cufe",cufe);
   if(f.archivo_pdf) { const x=await SB.storage.from("facturas").remove([f.archivo_pdf]); if(x.error) console.warn(x.error.message); }
   if(f.archivo_pdf_sellado) { await SB.storage.from("facturas").remove([f.archivo_pdf_sellado]); }
   if(f.archivo_recibo) { await SB.storage.from("facturas").remove([f.archivo_recibo]); }
-  const r=await SB.from("facturas").delete().eq("cufe",cufe);
-  if(r.error){ alert("No se pudo borrar: "+r.error.message); return; }
   await SB.from("historial").insert({accion:"factura borrada",detalle:num+" · "+(f.emisor||""),usuario:usuario.id}).then(()=>{},()=>{});
   await cargar();
   alert("Factura "+num+" borrada.");
