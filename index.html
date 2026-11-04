@@ -2135,6 +2135,8 @@ async function ordenCompra(id, opciones){
   const hayPrecios=lineas.some(x=>prec[x.codigo]!=null);
   const hoy=new Date().toLocaleDateString("es-CO");
   const cont=document.createElement("div");
+  // (03/11/2026) Rocoto y 123 wok comparten sedes (ej. Laureles): la orden dice en grande de que MARCA es
+  const marcaOC=(sede.marcas&&sede.marcas.nombre)||(p.marca_id!=null&&typeof MARCA_NOMBRE!=="undefined"?MARCA_NOMBRE.get(Number(p.marca_id)):"")||"";
   cont.style.cssText="position:absolute;left:-9999px;top:0;width:794px;background:#fff";
   cont.innerHTML=`<style>
    *{box-sizing:border-box}
@@ -2161,13 +2163,14 @@ async function ordenCompra(id, opciones){
    .pie{margin-top:24px;border-top:1px solid #e2e8f0;padding-top:8px;color:#94a3b8;font-size:10.5px;display:flex;justify-content:space-between}
   </style>
    <div class="top">
-     <h1>ORDEN DE COMPRA</h1>
+     <div><h1>ORDEN DE COMPRA</h1>${marcaOC?`<div style="display:inline-block;margin-top:6px;background:#fff;color:#12306b;font-weight:800;font-size:16px;letter-spacing:.8px;padding:3px 12px;border-radius:6px">MARCA: ${marcaOC.toUpperCase()}</div>`:""}</div>
      <div class="num">Pedido #${p.numero||""}<br>${fch(p.fecha)}<br>N. Pedido Sistema: ${p.pedido_erp||"—"}</div>
    </div>
    <div class="sub"><b>${p.proveedor_texto||prov.razon_social||""}</b><span>Medio de Pago: ${p.tipo||p.forma_pago||"—"}</span></div>
    <div class="box">
      <div class="cols">
        <div>
+         ${marcaOC?`<div class="lin"><span class="k">Marca:</span><b>${marcaOC}</b></div>`:""}
          <div class="lin"><span class="k">Sede:</span>${p.sede_texto||sede.nombre||""}</div>
          <div class="lin"><span class="k">Dirección:</span>${sede.direccion||"—"}</div>
          <div class="lin"><span class="k">Teléfono:</span>${sede.telefono||"—"}</div>
