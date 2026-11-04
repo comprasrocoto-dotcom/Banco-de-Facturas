@@ -38,11 +38,27 @@ async function concLeerDian(ev) {
 function concOtroDian() { conc.quiere = null; $('fileConcDian').click(); }
 
 // Reporte "Documentos" de Hiopos -> copia en la base (solo agrega o actualiza por N. de causacion; nunca borra)
+// (04/11/2026, pedido del usuario: «unos PC manejan punto y otros coma») En un Excel las celdas de VALOR se leen como numero (tal
+// cual las guarda Excel) y no como texto: el texto sale con el formato de miles del archivo ("271,428") y en un PC con punto o
+// coma se confundia con decimales (271.428 quedaba 271,43). Fechas y textos siguen igual que antes.
+async function concFilasErp(file) {
+  const nombre = file.name.toLowerCase();
+  if (!(nombre.endsWith('.xlsx') || nombre.endsWith('.xls'))) return concFilas(file);
+  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const texto = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+  const rango = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+  return texto.map((fila, r) => fila.map((val, i) => {
+    const cel = ws[XLSX.utils.encode_cell({ r: r + rango.s.r, c: i + rango.s.c })];
+    const esFecha = cel && cel.z && XLSX.SSF && XLSX.SSF.is_date && XLSX.SSF.is_date(cel.z);
+    return cel && cel.t === 'n' && !esFecha && /\d[.,]\d/.test(String(val)) ? cel.v : val;
+  }));
+}
 async function concLeerErp(ev) {
   const file = ev.target.files[0]; if (!file) return;
   try {
     conc.msg = 'Leyendo el reporte del ERP...'; concMsg();
-    const t = Conciliacion.interpretarTablaErp(await concFilas(file));
+    const t = Conciliacion.interpretarTablaErp(await concFilasErp(file));
     if (t.error) { alert(t.error); conc.msg = ''; concMsg(); return; }
     const s = t.resumen, modif = new Date(file.lastModified || Date.now()), edadH = Math.max(0, (Date.now() - modif.getTime()) / 3600000);
     if (!confirm('Reporte del ERP: ' + s.total + ' documentos (' + s.facturas + ' facturas y ' + s.notas + ' notas crédito) del ' + s.desde + ' al ' + s.hasta + '.' + (s.sinNumero ? '\n' + s.sinNumero + ' no traen número de factura en "Su Doc" (se comparan por proveedor y monto).' : '') +
