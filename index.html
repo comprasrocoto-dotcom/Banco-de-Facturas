@@ -435,6 +435,8 @@ tr:hover td{background:#f1f5f9}
 <script src="js/envio-contabilidad-ui.js"></script>
 <script src="js/envio-correo-contabilidad.js"></script>
 <script src="js/limpieza-nube-ui.js"></script>
+<script src="js/reporte-ingresos.js"></script>
+<script src="js/reporte-ingresos-ui.js"></script>
 <script src="js/un-pedido-factura.js"></script>
 <script src="js/revisar-amarre.js"></script>
 <script src="js/ingreso-elegir.js"></script>
@@ -1391,6 +1393,8 @@ function pintarAgente(c,q){
   let h="";
   // (03/11/2026) liberar espacio en la nube (solo administrador): js/limpieza-nube-ui.js
   if(esAdmin&&typeof limpiezaPintar==="function"){ h+='<div id="limpiezaCaja"></div>'; setTimeout(limpiezaPintar,0); }
+  // (03/11/2026) rendimiento del agente: cuantos ingresa el agente y cuantos termina el analista (js/reporte-ingresos-ui.js)
+  if(esAdmin&&typeof reporteIngPintar==="function"){ h+='<div id="reporteIngCaja"></div>'; setTimeout(reporteIngPintar,0); }
   if(ag.error) h+=`<div class="card" style="border-color:#b45309">⚠️ No pude leer todo: ${escAg(ag.error)} <button onclick="cargarAgente(true)">Reintentar</button></div>`;
   // 0) Avisos del agente: lo que le paso durante un ingreso y NO es "unidad" ni "nombre" sin decidir (esas tienen su propia lista mas abajo).
   //    Antes esto solo llegaba por correo; si a alguien se le pasaba, se perdia.
