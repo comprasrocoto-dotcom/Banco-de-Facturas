@@ -161,8 +161,10 @@ async function envioDatos(x, intento, opciones) {
     }
   }
   const sede = (typeof sedes !== 'undefined' ? sedes : []).find((s) => s.id === x.p.sede_id) || {};
-  const empresa = [x.p.sede_texto || sede.nombre].filter(Boolean).join(' ');
-  return EnvioPedido.armarMensajes({ pedido: x.p, proveedor: x.prov, lineas, unidades, empresa, intento, detalleWhatsapp: !(opciones && opciones.detalle === false), enlacePdf: opciones && opciones.enlacePdf });
+  // (03/11/2026) Rocoto y 123 wok comparten sedes: la marca va en el asunto, en los textos y en la firma
+  const marca = (sede.marcas && sede.marcas.nombre) || (typeof MARCA_NOMBRE !== 'undefined' && x.p.marca_id != null ? MARCA_NOMBRE.get(Number(x.p.marca_id)) : '') || '';
+  const empresa = [marca, x.p.sede_texto || sede.nombre].filter(Boolean).join(' - ');
+  return EnvioPedido.armarMensajes({ pedido: x.p, proveedor: x.prov, lineas, unidades, empresa, marca, intento, detalleWhatsapp: !(opciones && opciones.detalle === false), enlacePdf: opciones && opciones.enlacePdf });
 }
 
 // PDF de la orden (el MISMO de "⬇ PDF", con los codigos de producto): es el ADJUNTO del correo y el archivo que se pone en el chat de WhatsApp.
