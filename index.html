@@ -3461,7 +3461,9 @@ function pintar(){
   panelSinSellar(base);
   if(vista=="listas")   l=SinSellar.ordenar(sinSellarVisibles(base).filter(f=>listasSede==null||sedeListaKey(f)===listasSede));
   if(vista=="pool")     l=l.filter(f=>f.estado=="pool"||f.estado=="asignada");
-  if(vista=="mias")     l=l.filter(f=>f.estado=="asignada");
+  // (04/11/2026, pedido del usuario: «a cada analista en Mías le debe salir solo la información de las sedes de él») un analista con
+  // sedes asignadas ve en «Mías» SOLO las de sus sedes (la de la factura o, si aún no tiene, la de su pedido). Admin / analista sin sedes: igual.
+  if(vista=="mias")     l=listaParaBajar(l.filter(f=>f.estado=="asignada"));
   if(vista=="selladas") l=l.filter(f=>f.estado=="sellada"||f.estado=="pagada");
   if(vista=="hecho")    l=l.filter(f=>BancoUtils.esTerminada(f));   // (05/10/2026) con N° de ingreso y sellada, o nota credito (no se sellan)
   if(vista=="nov")      l=l.filter(f=>novDe(f.cufe));
