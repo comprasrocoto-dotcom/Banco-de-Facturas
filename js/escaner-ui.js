@@ -5,7 +5,7 @@
 // blanco y negro (o color) y elige «✅ Usar este escaneo». Tambien puede usar la foto tal cual o cancelar.
 // escanearFoto(file) -> Promise: { blob } (JPG escaneado) | 'original' (usar la foto sin escanear) | null (cancelo).
 // El calculo esta en js/escaner.js (sin IA, todo en el celular). Nombres globales con prefijo esc / ESC.
-const ESC = { img: null, esq: null, escala: 1, modo: 'bn', resolver: null, arrastre: -1, resultado: null };
+const ESC = { img: null, esq: null, escala: 1, modo: 'bn', resolver: null, arrastre: -1, resultado: null, calidad: null };
 
 function escModal() {
   let m = document.getElementById('modalEsc');
@@ -31,12 +31,13 @@ function escModal() {
         <button type="button" id="escModoBn" onclick="escModo('bn')">⚫ Blanco y negro</button>
         <button type="button" id="escModoColor" onclick="escModo('color')">🎨 Color</button>
         <button type="button" onclick="escAtras()">↩ Ajustar esquinas</button>
-        <button type="button" class="p" style="background:#15803d;border-color:#15803d" onclick="escUsar()">✅ Usar este escaneo</button>
+        <button type="button" class="p" id="escBtnUsar" style="background:#15803d;border-color:#15803d" onclick="escUsar()">✅ Usar este escaneo</button>
       </div>
+      <div id="escCalidad" style="display:none;max-width:560px;margin-top:10px;background:#fef2f2;color:#991b1b;border:2px solid #fca5a5;border-radius:10px;padding:10px 12px;font-size:14px"></div>
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:10px">
-      <button type="button" onclick="escTerminar('original')">Usar la foto sin escanear</button>
-      <button type="button" class="d" onclick="escTerminar(null)">✖ Cancelar</button>
+      <button type="button" id="escBtnOriginal" onclick="escTerminar('original')">Usar la foto sin escanear</button>
+      <button type="button" class="d" onclick="escTerminar(null)">✖ Cancelar / tomar otra foto</button>
     </div>
     <div id="escMsg" style="color:#fde68a;font-size:13px;text-align:center;margin-top:6px"></div>`;
   document.body.appendChild(m);
@@ -60,6 +61,7 @@ function escanearFoto(file) {
       ESC.img = c; ESC.esq = Escaner.esquinasIniciales(c.width, c.height); ESC.resolver = resolver; ESC.resultado = null;
       const m = escModal(); m.style.display = 'flex';
       $('escPaso1').style.display = 'flex'; $('escPaso2').style.display = 'none'; $('escMsg').textContent = '';
+      $('escBtnOriginal').style.display = typeof CalidadFoto !== 'undefined' ? 'none' : '';   // (04/11/2026) siempre se escanea: asi se revisa la hoja
       $('escTitulo').textContent = '📄 Escanear: mueve los 4 puntos a las esquinas de la hoja';
       escDibujar();
     };
@@ -116,6 +118,7 @@ function escVer() {
       const src = ESC.img.getContext('2d').getImageData(0, 0, W, H);
       ESC.derecha = Escaner.enderezar(src, ESC.esq, 2200);   // (27/10/2026) antes 1600: la letra pequeña quedaba ilegible
       escProcesar();
+      escRevisarCalidad();
       $('escPaso1').style.display = 'none'; $('escPaso2').style.display = 'flex';
       $('escTitulo').textContent = '📄 Así queda escaneada';
       $('escMsg').textContent = '';
@@ -130,15 +133,65 @@ function escProcesar() {
   $('escRes').src = c.toDataURL('image/jpeg', 0.9);
   $('escModoBn').className = ESC.modo === 'bn' ? 'p' : ''; $('escModoColor').className = ESC.modo === 'color' ? 'p' : '';
 }
+// (04/11/2026, pedido del usuario: «si las fotos no estan nitidas y bien centradas no los deje seguir hasta que no este bien
+// tomada») revisa la hoja enderezada (antes del blanco y negro): nitidez, luz, encuadre (las 4 esquinas) y resolucion.
+// Si algo falla, «Usar este escaneo» queda bloqueado: se ajustan las esquinas o se toma otra foto. Logica en js/calidad-foto.js.
+function escRevisarCalidad() {
+  const caja = $('escCalidad'), btn = $('escBtnUsar');
+  ESC.calidad = null;
+  if (typeof CalidadFoto === 'undefined' || !ESC.derecha) { caja.style.display = 'none'; btn.disabled = false; btn.style.opacity = ''; return; }
+  let problemas = [];
+  try {
+    const d = ESC.derecha, m = CalidadFoto.medir(...escGrisReducido(d));
+    problemas = problemas.concat(CalidadFoto.revisarImagen(m).problemas,
+      CalidadFoto.revisarEncuadre(Escaner.ordenar(ESC.esq), ESC.img.width, ESC.img.height).problemas,
+      CalidadFoto.revisarTamano(d.width, d.height).problemas);
+  } catch (e) { problemas = []; console.warn('calidad de la foto:', e); }   // si la revision falla, no se bloquea a nadie
+  ESC.calidad = { ok: !problemas.length, problemas };
+  btn.disabled = !!problemas.length; btn.style.opacity = problemas.length ? '.45' : '';
+  if (!problemas.length) { caja.style.display = 'none'; return; }
+  caja.style.display = 'block';
+  caja.innerHTML = '<b>🚫 Esta foto no sirve todavía:</b><ul style="margin:6px 0 6px 18px;padding:0">' + problemas.map((p) => '<li>' + escAg(p) + '</li>').join('') +
+    '</ul>Ajusta las esquinas (↩) o toma otra foto (✖). Hasta que quede bien no se puede seguir.';
+}
+// RGBA de la hoja -> [gris, W, H] con el lado corto <= 1000 px (asi se calibro la nitidez)
+function escGrisReducido(d) {
+  const k = Math.min(1, 1000 / Math.min(d.width, d.height)), c = document.createElement('canvas');
+  c.width = d.width; c.height = d.height; c.getContext('2d').putImageData(new ImageData(d.data, d.width, d.height), 0, 0);
+  const c2 = document.createElement('canvas'); c2.width = Math.max(1, Math.round(d.width * k)); c2.height = Math.max(1, Math.round(d.height * k));
+  const x = c2.getContext('2d'); x.drawImage(c, 0, 0, c2.width, c2.height);
+  const r = x.getImageData(0, 0, c2.width, c2.height);
+  return [CalidadFoto.gris(r.data, r.width, r.height), r.width, r.height];
+}
+// para una foto suelta (sin escanear: la del papelito firmado al sellar): nitidez y luz. { ok, problemas }
+function revisarFotoArchivo(file) {
+  return new Promise((ok) => {
+    if (typeof CalidadFoto === 'undefined' || !file || !/^image\//.test(file.type || '')) { ok({ ok: true, problemas: [] }); return; }
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      try {
+        const k = Math.min(1, 1000 / Math.min(img.width, img.height)), c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
+        const x = c.getContext('2d'); x.drawImage(img, 0, 0, c.width, c.height);
+        const r = x.getImageData(0, 0, c.width, c.height);
+        ok(CalidadFoto.revisarImagen(CalidadFoto.medir(CalidadFoto.gris(r.data, r.width, r.height), r.width, r.height)));
+      } catch (e) { ok({ ok: true, problemas: [] }); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); ok({ ok: false, problemas: ['No pude abrir la foto: tómala de nuevo.'] }); };
+    img.src = url;
+  });
+}
 function escModo(m) { ESC.modo = m === 'color' ? 'color' : 'bn'; if (ESC.derecha) escProcesar(); }
 function escAtras() { $('escPaso2').style.display = 'none'; $('escPaso1').style.display = 'flex'; $('escTitulo').textContent = '📄 Escanear: mueve los 4 puntos a las esquinas de la hoja'; escDibujar(); }
 function escUsar() {
   if (!ESC.resultado) return;
+  if (ESC.calidad && !ESC.calidad.ok) { $('escMsg').textContent = 'La foto no está bien tomada: corrige lo que dice el recuadro rojo o toma otra.'; return; }
   ESC.resultado.toBlob((b) => escTerminar(b ? { blob: b } : 'original'), 'image/jpeg', 0.9);
 }
 function escTerminar(valor) {
   const m = $('modalEsc'); if (m) m.style.display = 'none';
-  const r = ESC.resolver; ESC.resolver = null; ESC.img = null; ESC.derecha = null; ESC.resultado = null;
+  const r = ESC.resolver; ESC.resolver = null; ESC.img = null; ESC.derecha = null; ESC.resultado = null; ESC.calidad = null;
   if (r) r(valor);
 }
 window.addEventListener('resize', () => { const m = document.getElementById('modalEsc'); if (m && m.style.display !== 'none' && ESC.img && $('escPaso1').style.display !== 'none') escDibujar(); });
