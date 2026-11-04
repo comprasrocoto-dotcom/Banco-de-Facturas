@@ -18,6 +18,67 @@ function repIngFiltrar(F, ver) {
   return (F || []).filter((f) => f.como === ver.como && (!ver.analista ||
     (ver.analista === ReporteIngresos.SIN_ANALISTA ? !String(f.analista || '').trim() : String(f.analista || '').split(',').map((x) => x.trim()).includes(ver.analista))));
 }
+// (04/11/2026, pedido del usuario) la lista que se abrio al tocar un numero se puede bajar en Excel o PDF
+function repIngListaDatos() {
+  const ver = REPING.ver; if (!ver || !REPING.filas) return null;
+  const R = ReporteIngresos, L = repIngFiltrar(REPING.filas, ver);
+  const motivo = (f) => (ver.como === 'AGENTE' || ver.como === 'ANALISTA_DIRECTO') ? (f.num_ingreso || '') :
+    [f.estado_cola === 'PENDIENTE_REINTENTO' ? 'en cola (reintentando)' : f.estado_cola === 'ERROR' ? 'en cola con error' : (ver.como === 'PENDIENTE' && !f.estado_cola ? 'sin lanzar al agente' : ''), f.etapa_error, f.error].filter(Boolean).join(' · ');
+  const titulo = `${R.COMO[ver.como] || ver.como}${ver.analista ? ' · ' + ver.analista : ''}`;
+  const archivo = ('Documentos_' + titulo + '_' + REPING.desde + '_a_' + REPING.hasta).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9_-]+/g, '_').replace(/_+/g, '_');
+  const col5 = (ver.como === 'AGENTE' || ver.como === 'ANALISTA_DIRECTO') ? 'N° ingreso ERP' : 'Estado / motivo';
+  return { titulo, archivo, col5, filas: L.map((f) => ({ fecha: f.dia || '', pedido: f.pedido || '', factura: f.factura || '', proveedor: f.proveedor || '',
+    donde: [f.marca, f.sede].filter(Boolean).join(' · '), total: f.total != null ? Number(f.total) : null, motivo: motivo(f), analista: f.analista || R.SIN_ANALISTA })) };
+}
+function repIngBajar(blob, nombre) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nombre;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+}
+async function reporteIngListaExcel() {
+  const d = repIngListaDatos(); if (!d || !d.filas.length) return;
+  try {
+    const ExcelJS = await new Promise((res, rej) => { if (window.ExcelJS) return res(window.ExcelJS); const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js'; s.onload = () => (window.ExcelJS ? res(window.ExcelJS) : rej(new Error('ExcelJS no cargó'))); s.onerror = () => rej(new Error('No se pudo cargar ExcelJS')); document.head.appendChild(s); });
+    const wb = new ExcelJS.Workbook(); wb.creator = 'Banco de Facturas';
+    const ws = wb.addWorksheet('Documentos', { views: [{ state: 'frozen', ySplit: 3 }] });
+    ws.addRow([`${d.titulo} (${d.filas.length}) · ${REPING.desde} a ${REPING.hasta}`]).font = { bold: true, size: 13, color: { argb: 'FF1D4ED8' } };
+    ws.addRow([]);
+    const cols = ['Fecha', 'Pedido', 'Factura', 'Proveedor', 'Marca · sede', 'Analista de la sede', 'Total', d.col5];
+    const t = ws.addRow(cols); t.font = { bold: true, color: { argb: 'FFFFFFFF' } }; t.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1D4ED8' } }; });
+    d.filas.forEach((f) => ws.addRow([f.fecha, f.pedido, f.factura, f.proveedor, f.donde, f.analista, f.total, f.motivo]));
+    [11, 11, 14, 34, 24, 26, 14, 70].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+    ws.getColumn(7).numFmt = '#,##0'; ws.getColumn(8).alignment = { wrapText: true, vertical: 'top' };
+    ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: cols.length } };
+    repIngBajar(new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), d.archivo + '.xlsx');
+  } catch (e) { alert('No pude armar el Excel: ' + e.message); }
+}
+function reporteIngListaPdf() {
+  const d = repIngListaDatos(); if (!d || !d.filas.length) return;
+  try {
+    const { jsPDF } = window.jspdf || {}; if (!jsPDF) throw new Error('no cargó el generador de PDF (recarga la página)');
+    const pdf = new jsPDF('l', 'mm', 'a4'), W = 297, M = 10;
+    const cols = [{ t: 'Fecha', w: 20 }, { t: 'Pedido', w: 22 }, { t: 'Factura', w: 24 }, { t: 'Proveedor', w: 55 }, { t: 'Marca · sede', w: 40 }, { t: 'Total', w: 24, der: true }, { t: d.col5, w: W - 2 * M - 185 }];
+    let y = 0, pag = 0;
+    const encabezado = () => {
+      pag++; if (pag > 1) pdf.addPage();
+      pdf.setFillColor(29, 78, 216); pdf.rect(0, 0, W, 16, 'F'); pdf.setTextColor(255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(13);
+      pdf.text(`${d.titulo} (${d.filas.length})`, M, 10.5); pdf.setFontSize(9); pdf.setFont('helvetica', 'normal');
+      pdf.text(`Banco de Facturas · ${REPING.desde} a ${REPING.hasta} · página ${pag}`, W - M, 10.5, { align: 'right' });
+      y = 23; pdf.setFillColor(241, 245, 249); pdf.rect(M, y - 4.5, W - 2 * M, 6.5, 'F'); pdf.setTextColor(30, 41, 59); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8.5);
+      let x = M; cols.forEach((c) => { pdf.text(c.t, c.der ? x + c.w - 1.5 : x + 1.5, y, c.der ? { align: 'right' } : undefined); x += c.w; }); y += 6; pdf.setFont('helvetica', 'normal');
+    };
+    encabezado();
+    for (const f of d.filas) {
+      const vals = [f.fecha, f.pedido, f.factura, f.proveedor, f.donde, f.total != null ? '$' + f.total.toLocaleString('es-CO') : '', f.motivo];
+      const lineas = vals.map((v, i) => pdf.splitTextToSize(String(v || ''), cols[i].w - 3).slice(0, 4));
+      const alto = Math.max(...lineas.map((l) => l.length)) * 3.6 + 1.6;
+      if (y + alto > 200) encabezado();
+      let x = M; pdf.setFontSize(8); pdf.setTextColor(30, 41, 59);
+      lineas.forEach((l, i) => { const c = cols[i]; if (i === 1 || i === 2) pdf.setFont('helvetica', 'bold'); pdf.text(l, c.der ? x + c.w - 1.5 : x + 1.5, y, c.der ? { align: 'right' } : undefined); pdf.setFont('helvetica', 'normal'); x += c.w; });
+      y += alto; pdf.setDrawColor(226, 232, 240); pdf.line(M, y - 3, W - M, y - 3);
+    }
+    pdf.save(d.archivo + '.pdf');
+  } catch (e) { alert('No pude armar el PDF: ' + e.message); }
+}
 function repIngListaHtml(F) {
   const ver = REPING.ver; if (!ver) return '';
   const e = repIngEsc, R = ReporteIngresos, L = repIngFiltrar(F, ver);
@@ -29,7 +90,7 @@ function repIngListaHtml(F) {
       <td style="padding:3px 8px;text-align:right;white-space:nowrap">${f.total != null ? '$' + Number(f.total).toLocaleString('es-CO') : ''}</td>
       <td style="padding:3px 8px">${f.num_ingreso ? e(f.num_ingreso) : ''}${ver.como !== 'AGENTE' && (f.etapa_error || f.error || f.estado_cola) ? `<div class="mut" style="font-size:12px">${e([f.estado_cola === 'PENDIENTE_REINTENTO' ? 'en cola (reintentando)' : f.estado_cola === 'ERROR' ? 'en cola con error' : (ver.como === 'PENDIENTE' && !f.estado_cola ? 'sin lanzar al agente' : ''), f.etapa_error, f.error].filter(Boolean).join(' · ').slice(0, 220))}</div>` : (ver.como === 'PENDIENTE' && !f.estado_cola ? '<span class="mut" style="font-size:12px">sin lanzar al agente</span>' : '')}</td></tr>`).join('');
   return `<div id="repIngLista" style="margin-top:12px;border:2px solid #1d4ed8;border-radius:10px;padding:8px 10px">
-    <div class="row" style="align-items:center;gap:8px"><b style="flex:1">📄 ${e(titulo)} (${L.length})</b><button class="s" onclick="REPING.ver=null;reporteIngPintar()">✕ Cerrar</button></div>
+    <div class="row" style="align-items:center;gap:8px"><b style="flex:1">📄 ${e(titulo)} (${L.length})</b>${L.length ? '<button class="s" onclick="reporteIngListaExcel()">⬇ Excel</button><button class="s" onclick="reporteIngListaPdf()">⬇ PDF</button>' : ''}<button class="s" onclick="REPING.ver=null;reporteIngPintar()">✕ Cerrar</button></div>
     ${L.length ? `<div style="overflow-x:auto;max-height:420px;overflow-y:auto;margin-top:6px"><table style="border-collapse:collapse;font-size:13px;min-width:100%"><tr class="mut" style="text-align:left"><th style="padding:3px 8px">Fecha</th><th style="padding:3px 8px">Pedido</th><th style="padding:3px 8px">Factura</th><th style="padding:3px 8px">Proveedor</th><th style="padding:3px 8px">Marca · sede</th><th style="padding:3px 8px;text-align:right">Total</th><th style="padding:3px 8px">${ver.como === 'AGENTE' || ver.como === 'ANALISTA_DIRECTO' ? 'N° ingreso ERP' : 'Estado / motivo'}</th></tr>${filas}</table></div>` : '<div class="mut">No hay documentos.</div>'}</div>`;
 }
 
