@@ -71,10 +71,21 @@
 
   // ---------------------------------------------------------------- lector del reporte "Documentos" del ERP (Hiopos)
   // "145.500" -> 145500 ; "-18.320" -> -18320 ; "1.234,5" -> 1234.5
+  // (04/11/2026, pedido del usuario: «unos PC manejan punto y otros coma») tambien "145,500" -> 145500, "1,234.5" -> 1234.5 y un
+  // numero ya numero (celda numerica del Excel) se deja igual. Antes "271,428" (asi sale una celda #,##0 del Excel) quedaba 271.43.
+  // Regla: con punto Y coma, el ULTIMO es el decimal; con uno solo, si se repite o lleva exactamente 3 cifras despues, es de miles.
   function parseNumeroCo(v) {
-    const t = String(v == null ? '' : v).trim();
+    if (typeof v === 'number') return isFinite(v) ? v : 0;
+    let t = String(v == null ? '' : v).trim().replace(/[$\s]/g, '');
     if (!t || !/\d/.test(t)) return 0;
-    const n = Number(t.replace(/\./g, '').replace(',', '.'));
+    const p = t.lastIndexOf('.'), c = t.lastIndexOf(',');
+    if (p >= 0 && c >= 0) t = p > c ? t.replace(/,/g, '') : t.replace(/\./g, '').replace(',', '.');
+    else if (p >= 0 || c >= 0) {
+      const sep = p >= 0 ? '.' : ',', partes = t.split(sep);
+      if (partes.length > 2 || partes[partes.length - 1].length === 3) t = partes.join('');
+      else t = partes.join('.');
+    }
+    const n = Number(t);
     return isFinite(n) ? n : 0;
   }
   function fechaCoIso(v) {   // dd/mm/aaaa -> aaaa-mm-dd
@@ -120,7 +131,8 @@
       const causacion = causacionDe(sn[1], sn[2]);
       if (vistos.has(causacion)) { repetidos++; continue; }
       vistos.add(causacion);
-      const neto = parseNumeroCo(v(c, col.neto)), base = parseNumeroCo(v(c, col.base)), imp = parseNumeroCo(v(c, col.imp));
+      const crudo = (i) => (i >= 0 ? c[i] : '');   // (04/11/2026) el numero tal cual (celda numerica del Excel), sin pasarlo a texto
+      const neto = parseNumeroCo(crudo(col.neto)), base = parseNumeroCo(crudo(col.base)), imp = parseNumeroCo(crudo(col.imp));
       const suDoc = v(c, col.suDoc), contacto = v(c, col.contacto);
       const fechaIso = fechaCoIso(v(c, col.fecha)), hm = v(c, col.hora).match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
       const hora = hm ? hm[1].padStart(2, '0') + ':' + hm[2] + ':' + (hm[3] || '00') : null;
