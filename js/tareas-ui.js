@@ -47,6 +47,33 @@ function tarSedesResumen(id) {
   const l = tarSedesElegidas(id), r = d.querySelector('[data-tsres]');
   if (r) r.textContent = !l.length ? '— (ninguna)' : l.length === 1 ? tarSede(l[0]) : l.length + ' sedes marcadas';
 }
+// (04/11/2026, pedido del usuario: «quiero montar tareas por marca o por sede, pero si la monto por marca solo me llegue el correo
+// de marca, no un correo individual por sede») MARCA COMPLETA: una sola tarea para toda la marca y un solo correo por persona
+// (supabase/tareas_por_marca.sql). Si se elige marca, las casillas de sede no se usan.
+function tarMarcas() {
+  const m = new Map();
+  (typeof sedes !== 'undefined' ? sedes : []).forEach((s) => { if (s.marca_id && !m.has(Number(s.marca_id))) m.set(Number(s.marca_id), (s.marcas && s.marcas.nombre) || ('Marca ' + s.marca_id)); });
+  return [...m.entries()].map(([id, nombre]) => ({ id, nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre));
+}
+function tarMarca(id) { const m = tarMarcas().find((x) => x.id === Number(id)); return m ? m.nombre : ''; }
+function tarMarcaHtml(id, idSedes) {
+  return `<select id="${id}" style="width:auto;margin:0" onchange="tarMarcaCambio('${id}','${idSedes}')"><option value="">— (por sede)</option>${tarMarcas().map((m) => `<option value="${m.id}">🏷️ ${escAg(m.nombre)} (toda la marca)</option>`).join('')}</select>`;
+}
+function tarMarcaElegida(id) { const v = ($(id) || {}).value; return v ? Number(v) : null; }
+// con marca elegida, las sedes se apagan (no se mezclan: o toda la marca o sedes sueltas)
+function tarMarcaCambio(id, idSedes) {
+  const hay = !!tarMarcaElegida(id), d = $(idSedes);
+  if (!d) return;
+  if (hay) { tarSedesTodas(idSedes, false); d.open = false; }
+  d.style.opacity = hay ? '.4' : ''; d.style.pointerEvents = hay ? 'none' : '';
+  const r = d.querySelector('[data-tsres]'); if (r && hay) r.textContent = '— (toda la marca)';
+}
+// una sola llamada para toda la marca (no una por sede)
+async function tarAsignarMarca(a, marcaId) {
+  const r = await SB.rpc('tarea_asignar_marca', Object.assign({}, a, { p_marca: marcaId }));
+  if (r.error && tarFaltaFuncion(r.error, 'tarea_asignar_marca')) return { data: null, error: { message: r.error.message, aviso: 'Falta aplicar en la base supabase/tareas_por_marca.sql (tareas por marca).' } };
+  return r;
+}
 function tarSedesTodas(id, si) { document.querySelectorAll('#' + id + ' input[data-tsede]').forEach((x) => { x.checked = !!si; }); tarSedesResumen(id); }
 // asigna una vez por sede marcada (o una sola vez sin sede). a = parametros de tarAsignarRpc sin p_sede -> { data, error, hechas }
 async function tarAsignarPorSedes(a, sedesIds) {
@@ -94,11 +121,15 @@ function tarPasaFiltro(t) {
   const q = (TAR.busca || '').trim().toLowerCase();
   if (TAR.filtroPersona && t.asignada_a !== TAR.filtroPersona) return false;
   if (TAR.filtroTipo && tarTipoReal(t) !== TAR.filtroTipo) return false;
-  if (TAR.filtroSede === 'sin' ? !!t.sede_id : TAR.filtroSede && String(t.sede_id) !== TAR.filtroSede) return false;
+  // (04/11/2026) «m<id>» = la marca: sus tareas de marca completa y las de cada una de sus sedes
+  if (/^m\d+$/.test(TAR.filtroSede || '')) {
+    const mid = Number(TAR.filtroSede.slice(1)), s = (typeof sedes !== 'undefined' ? sedes : []).find((x) => Number(x.id) === Number(t.sede_id));
+    if (Number(t.marca_id) !== mid && !(s && Number(s.marca_id) === mid)) return false;
+  } else if (TAR.filtroSede === 'sin' ? !!(t.sede_id || t.marca_id) : TAR.filtroSede && String(t.sede_id) !== TAR.filtroSede) return false;
   const fin = String(t.fecha_limite).slice(0, 10), ini = Tareas.inicio(t) || fin;
   if (TAR.filtroDesde && fin < TAR.filtroDesde) return false;
   if (TAR.filtroHasta && ini > TAR.filtroHasta) return false;
-  if (q && !(t.titulo + ' ' + (t.descripcion || '') + ' ' + tarNombre(t.asignada_a) + ' ' + tarSede(t.sede_id) + ' ' + (Tareas.TIPOS[tarTipoReal(t)] || '')).toLowerCase().includes(q)) return false;
+  if (q && !(t.titulo + ' ' + (t.descripcion || '') + ' ' + tarNombre(t.asignada_a) + ' ' + tarSede(t.sede_id) + ' ' + (t.marca_id ? tarMarca(t.marca_id) : '') + ' ' + (Tareas.TIPOS[tarTipoReal(t)] || '')).toLowerCase().includes(q)) return false;
   return true;
 }
 const tarHayFiltro = () => !!(TAR.filtroPersona || TAR.filtroTipo || TAR.filtroSede || TAR.filtroDesde || TAR.filtroHasta || (TAR.busca || '').trim());
@@ -143,7 +174,7 @@ function tarPintar() {
     <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
       ${adm ? `<select onchange="TAR.filtroPersona=this.value;tarPintar()" style="width:auto;max-width:190px;margin:0"><option value="">👤 Todas las personas</option>${TAR.personas.map((p) => `<option value="${p.user_id}"${TAR.filtroPersona === p.user_id ? ' selected' : ''}>${escAg(p.nombre)}</option>`).join('')}</select>` : ''}
       <select onchange="TAR.filtroTipo=this.value;tarPintar()" style="width:auto;max-width:210px;margin:0"><option value="">📂 Todos los tipos</option>${Object.entries(Tareas.TIPOS).map(([k, v]) => `<option value="${k}"${TAR.filtroTipo === k ? ' selected' : ''}>${escAg(v)}</option>`).join('')}</select>
-      <select onchange="TAR.filtroSede=this.value;tarPintar()" style="width:auto;max-width:200px;margin:0"><option value="">🏪 Todas las sedes</option><option value="sin"${TAR.filtroSede === 'sin' ? ' selected' : ''}>— Sin sede</option>${TAR.filtroSede && TAR.filtroSede !== 'sin' ? tarSedeOpciones().replace('value="' + TAR.filtroSede + '"', 'value="' + TAR.filtroSede + '" selected') : tarSedeOpciones()}</select>
+      <select onchange="TAR.filtroSede=this.value;tarPintar()" style="width:auto;max-width:200px;margin:0"><option value="">🏪 Todas las sedes</option><option value="sin"${TAR.filtroSede === 'sin' ? ' selected' : ''}>— Sin sede ni marca</option>${(() => { const o = '<optgroup label="Marca completa (y sus sedes)">' + tarMarcas().map((m) => `<option value="m${m.id}">🏷️ ${escAg(m.nombre)}</option>`).join('') + '</optgroup>' + tarSedeOpciones(); return TAR.filtroSede && TAR.filtroSede !== 'sin' ? o.replace('value="' + TAR.filtroSede + '"', 'value="' + TAR.filtroSede + '" selected') : o; })()}</select>
       <span style="display:inline-flex;gap:4px;align-items:center;white-space:nowrap"><span class="mut">📅</span><input type="date" value="${escAg(TAR.filtroDesde)}" onchange="TAR.filtroDesde=this.value;tarPintar()" title="Desde (fecha de la tarea)" style="width:auto;margin:0">
       <span class="mut">→</span><input type="date" value="${escAg(TAR.filtroHasta)}" onchange="TAR.filtroHasta=this.value;tarPintar()" title="Hasta (fecha de la tarea)" style="width:auto;margin:0"></span>
       <input type="search" placeholder="🔎 Buscar" value="${escAg(TAR.busca)}" oninput="TAR.busca=this.value;tarRefrescarCuerpo()" style="width:180px;margin:0">
@@ -319,6 +350,7 @@ function tarPlanFormHtml() {
     <div style="display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:8px">
       <label>Tipo <select id="tarPlanTipo" style="width:auto;margin:0" onchange="tarPlantillaCargar('tarPlanTipo','tarPlanDesc','tarPlanActs')">${Object.entries(Tareas.TIPOS).map(([k, v]) => `<option value="${k}"${k === 'inventario' ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
       <label>Sede(s) (opcional) ${tarSedesHtml('tarPlanSede')}</label>
+      <label title="Una sola tarea para toda la marca y un solo correo por persona (no uno por sede)">o Marca completa ${tarMarcaHtml('tarPlanMarca', 'tarPlanSede')}</label>
       <label title="1 = se inicia y se termina el mismo día">⏱️ Días para terminarla <input type="number" id="tarPlanDias" min="1" max="31" value="1" style="width:70px;margin:0"></label>
     </div>
     <div class="mut" style="font-size:12.5px;margin-top:4px">Cada día marcado es el 🟢 inicio; la tarea 🏁 debe terminarse los días que pongas después (1 = el mismo día).</div>
@@ -339,14 +371,15 @@ async function tarCrearVarias() {
   if (!quienes.length) return msg('⚠️ Elige a quién se le asigna.');
   if (!titulo.trim()) return msg('⚠️ Escribe el título.');
   if (fechas.length > 62) return msg('⚠️ Máximo 62 días por asignación.');
-  const sedesIds = tarSedesElegidas('tarPlanSede'), ns = Math.max(1, sedesIds.length);
+  const marcaId = tarMarcaElegida('tarPlanMarca');
+  const sedesIds = marcaId ? [] : tarSedesElegidas('tarPlanSede'), ns = Math.max(1, sedesIds.length);
   const total = fechas.length * quienes.length * ns;
-  if (!confirm(`📦 Se van a crear ${total} tarea(s): ${fechas.length} día(s) × ${quienes.length} persona(s)${ns > 1 ? ' × ' + ns + ' sedes' : ''}.\nA cada persona le llega un correo con sus fechas${ns > 1 ? ' (uno por sede)' : ''}.\n\n¿Continuar?`)) return;
+  if (!confirm(`📦 Se van a crear ${total} tarea(s): ${fechas.length} día(s) × ${quienes.length} persona(s)${ns > 1 ? ' × ' + ns + ' sedes' : ''}${marcaId ? ' para TODA la marca ' + tarMarca(marcaId) : ''}.\nA cada persona le llega ${marcaId ? 'UN solo correo de la marca' : 'un correo'} con sus fechas${ns > 1 ? ' (uno por sede)' : ''}.\n\n¿Continuar?`)) return;
   TAR.ocupado = true; msg('Asignando…');
   try {
-    const r = await tarAsignarPorSedes({ p_asignados: quienes, p_tipo: ($('tarPlanTipo') || {}).value || 'inventario', p_titulo: titulo,
+    const r = await (marcaId ? (a) => tarAsignarMarca(a, marcaId) : (a) => tarAsignarPorSedes(a, sedesIds))({ p_asignados: quienes, p_tipo: ($('tarPlanTipo') || {}).value || 'inventario', p_titulo: titulo,
       p_descripcion: ($('tarPlanDesc') || {}).value || null, p_fechas: fines, p_dias_antes: nd - 1,
-      p_actividades: Tareas.actividadesDeTexto(($('tarPlanActs') || {}).value), p_usuario: tarUsuario() }, sedesIds);
+      p_actividades: Tareas.actividadesDeTexto(($('tarPlanActs') || {}).value), p_usuario: tarUsuario() });
     if (r.error) { if (r.hechas) { await tarCargar(); tarPintar(); } return msg((r.hechas ? '⚠️ Se asignaron ' + r.hechas + ' sede(s), pero falló ' + tarSede(r.falto) + ': ' : '') + (r.error.aviso || 'No se pudo: ' + r.error.message)); }
     TAR.plan = false; TAR.sel = new Set(); TAR.dia = fines[0];
     await tarCargar(); tarPintar();
@@ -365,6 +398,7 @@ function tarFormHtml() {
     <div style="display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:8px">
       <label>Tipo <select id="tarTipo" style="width:auto;margin:0" onchange="tarPlantillaCargar('tarTipo','tarDesc','tarActs')">${Object.entries(Tareas.TIPOS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
       <label>Sede(s) (opcional) ${tarSedesHtml('tarSedeSel')}</label>
+      <label title="Una sola tarea para toda la marca y un solo correo por persona (no uno por sede)">o Marca completa ${tarMarcaHtml('tarMarcaSel', 'tarSedeSel')}</label>
       <label>🟢 Inicia <input type="date" id="tarFechaIni" min="${hoy}" value="${hoy}" style="width:auto;margin:0" onchange="tarFechaIniCambio()"></label>
       <label>🏁 Debe terminarse <input type="date" id="tarFecha" min="${hoy}" value="${hoy}" style="width:auto;margin:0"></label>
     </div>
@@ -396,7 +430,7 @@ function tarTarjetaHtml(t, hoy, adm) {
     return `<div class="card" style="margin-bottom:8px${Tareas.vencida(t, hoy) ? ';border-left:5px solid #b91c1c' : ''}">
       <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
         <div style="flex:1 1 260px"><b>${escAg((Tareas.TIPOS[tarTipoReal(t)] || '📝').split(' ')[0])} ${escAg(t.titulo)}</b>
-          <div class="mut" style="font-size:12.5px">${escAg(Tareas.TIPOS[tarTipoReal(t)] || '')}${adm ? ' · 👤 ' + escAg(tarNombre(t.asignada_a)) : ''}${t.sede_id ? ' · 🏪 ' + escAg(tarSede(t.sede_id)) : ''}${Tareas.inicio(t) ? ' · 🟢 inicia ' + tarFecha(Tareas.inicio(t)) : ''} · 🏁 vence ${tarFecha(t.fecha_limite)}${t.terminada_en ? ' · terminada ' + tarHora(t.terminada_en) : ''}</div></div>
+          <div class="mut" style="font-size:12.5px">${escAg(Tareas.TIPOS[tarTipoReal(t)] || '')}${adm ? ' · 👤 ' + escAg(tarNombre(t.asignada_a)) : ''}${t.sede_id ? ' · 🏪 ' + escAg(tarSede(t.sede_id)) : ''}${t.marca_id ? ' · 🏷️ Marca ' + escAg(tarMarca(t.marca_id)) + ' (toda la marca)' : ''}${Tareas.inicio(t) ? ' · 🟢 inicia ' + tarFecha(Tareas.inicio(t)) : ''} · 🏁 vence ${tarFecha(t.fecha_limite)}${t.terminada_en ? ' · terminada ' + tarHora(t.terminada_en) : ''}</div></div>
         <span class="badge">${Tareas.ESTADOS[t.estado] || t.estado}</span>${vence}${seg && Tareas.abierta(t) && seg.dias.some((d) => d.estado === 'hoy') ? '<span class="badge" style="color:#1e40af;background:#eff6ff;border-color:#93c5fd;font-weight:700">📆 falta validar HOY</span>' : ''}
       </div>
       ${TAR.editando === t.id ? tarEditorHtml(t) : (t.descripcion ? `<div style="margin-top:6px;white-space:pre-wrap;font-size:13.5px">${escAg(t.descripcion)}</div>` : '') + tarActividadesHtml(t, adm)}
@@ -465,16 +499,17 @@ async function tarCrear() {
   if (!fecha) { if (res) res.textContent = '⚠️ Elige la fecha en que debe terminarse.'; return; }
   const ini = ($('tarFechaIni') || {}).value || fecha;
   if (ini > fecha) { if (res) res.textContent = '⚠️ La fecha de inicio no puede ser después de la fecha en que debe terminarse.'; return; }
-  const sedesIds = tarSedesElegidas('tarSedeSel');
+  const marcaId = tarMarcaElegida('tarMarcaSel');
+  const sedesIds = marcaId ? [] : tarSedesElegidas('tarSedeSel');
   if (sedesIds.length > 1 && !confirm(`📝 Se van a crear ${sedesIds.length * quienes.length} tarea(s): ${quienes.length} persona(s) × ${sedesIds.length} sedes.\nA cada persona le llega un correo por sede.\n\n¿Continuar?`)) return;
   TAR.ocupado = true;
   try {
-    const r = await tarAsignarPorSedes({ p_asignados: quienes, p_tipo: ($('tarTipo') || {}).value || 'otra', p_titulo: titulo, p_descripcion: ($('tarDesc') || {}).value || null,
-      p_fechas: [fecha], p_dias_antes: Tareas.diasEntre(ini, fecha), p_actividades: Tareas.actividadesDeTexto(($('tarActs') || {}).value), p_usuario: tarUsuario() }, sedesIds);
+    const r = await (marcaId ? (a) => tarAsignarMarca(a, marcaId) : (a) => tarAsignarPorSedes(a, sedesIds))({ p_asignados: quienes, p_tipo: ($('tarTipo') || {}).value || 'otra', p_titulo: titulo, p_descripcion: ($('tarDesc') || {}).value || null,
+      p_fechas: [fecha], p_dias_antes: Tareas.diasEntre(ini, fecha), p_actividades: Tareas.actividadesDeTexto(($('tarActs') || {}).value), p_usuario: tarUsuario() });
     if (r.error) { if (r.hechas) { TAR.form = false; await tarCargar(); tarPintar(); } if (res) res.textContent = (r.hechas ? '⚠️ Se asignaron ' + r.hechas + ' sede(s), pero falló ' + tarSede(r.falto) + ': ' : '') + (r.error.aviso || 'No se pudo: ' + r.error.message); if (r.hechas) alert('Se asignaron ' + r.hechas + ' sede(s); la de ' + tarSede(r.falto) + ' falló: ' + (r.error.aviso || r.error.message)); return; }
     TAR.form = false; await tarCargar(); tarPintar();
     if (typeof csEnviarCola === 'function') csEnviarCola(true);   // el correo sale ya desde el servidor
-    alert('✅ ' + r.data + ' tarea(s) asignada(s)' + (sedesIds.length > 1 ? ' en ' + sedesIds.length + ' sedes' : '') + '. A cada persona le llega un correo' + (sedesIds.length > 1 ? ' por sede' : '') + '.');
+    alert('✅ ' + r.data + ' tarea(s) asignada(s)' + (marcaId ? ' para toda la marca ' + tarMarca(marcaId) + '. A cada persona le llega UN solo correo.' : (sedesIds.length > 1 ? ' en ' + sedesIds.length + ' sedes' : '') + '. A cada persona le llega un correo' + (sedesIds.length > 1 ? ' por sede' : '') + '.'));
   } finally { TAR.ocupado = false; }
 }
 async function tarEstado(id, estado) {
