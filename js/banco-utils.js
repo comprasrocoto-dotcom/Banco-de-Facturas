@@ -159,6 +159,11 @@
     if (/nota.*credito/.test(s)) return 'nota_credito';
     if (/nota.*debito/.test(s)) return 'nota_debito';
     if (/factura/.test(s) && !/nota/.test(s)) return 'factura';
+    // (07/11/2026, pedido del usuario: «no sube documentos tipo POS, documento equivalente») el documento equivalente
+    // electronico (tiquete de maquina registradora con sistema P.O.S., servicios publicos, etc.) es una COMPRA como la
+    // factura: se maneja como factura. Antes quedaba en «otros documentos ignorados» y nunca se pedia subir.
+    // El documento SOPORTE (lo emitimos nosotros) y los eventos siguen aparte.
+    if (/equivalente|tiquete|p\.?\s?o\.?\s?s\b/.test(s) && !/soporte|nota/.test(s)) return 'factura';
     return 'otro';
   }
   // Estados que NO se suben (no se inventa nada mas: solo se avisa)
