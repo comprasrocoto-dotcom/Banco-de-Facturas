@@ -61,7 +61,8 @@ EXPORTAR.defs.admin_prov = { nombre: 'proveedores', hoja: 'Proveedores', columna
 
 EXPORTAR.defs.admin_art = { nombre: 'articulos', hoja: 'Artículos', columnas: [
   { t: 'Código', v: (x) => x.codigo_barras }, { t: 'Artículo', v: (x) => x.articulo_hiopos || x.articulo_comercial }, { t: 'Nombre comercial', v: (x) => x.articulo_comercial }, { t: 'Unidad de compra', v: (x) => x.unimedida_compra },
-  { t: 'Unidad Hiopos', v: (x) => x.unimedida_hiopos }, { t: 'Subfamilia', v: (x) => x.subfamilia }, { t: 'Catálogo', v: () => EXPORTAR.catalogoArt || '' }, { t: 'Proveedores amarrados', v: (x) => x._prov == null ? null : x._prov }, { t: 'Precio menor', v: (x) => x._pmin }, { t: 'Precio mayor', v: (x) => x._pmax } ] };
+  { t: 'Unidad Hiopos', v: (x) => x.unimedida_hiopos }, { t: 'Subfamilia', v: (x) => x.subfamilia }, { t: 'Catálogo', v: () => EXPORTAR.catalogoArt || '' }, { t: 'Proveedores amarrados', v: (x) => x._prov == null ? null : x._prov },
+  { t: 'Se le compra a', v: (x) => x._provNombres || '' }, { t: 'Antes se le compró a', v: (x) => x._provAntes || '' }, { t: 'Precio menor', v: (x) => x._pmin }, { t: 'Precio mayor', v: (x) => x._pmax } ] };
 
 EXPORTAR.defs.admin_cat = { nombre: 'que_le_compro_a_cada_proveedor', hoja: 'Qué le compro', columnas: [
   { t: 'Proveedor', v: (x) => x._prov }, { t: 'Código', v: (x) => x.codigo }, { t: 'Artículo', v: (x) => x.nombre }, { t: 'Precio negociado', v: (x) => expNum(x.k && x.k.precio_negociado) }, { t: 'Veces comprado', v: (x) => x.veces } ] };
