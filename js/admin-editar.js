@@ -116,6 +116,9 @@
         <label style="display:block;min-width:220px"><span class="mut">Unidad de medida (compra)</span>
           <input id="${id}_unidad" list="${id}_l" value="${esc(a.unimedida_compra || '')}" placeholder="KILO, UNIDADES, UNDX500G…" style="margin:2px 0 0;width:100%;text-transform:uppercase" autocomplete="off"></label>
         <datalist id="${id}_l">${(conocidas || []).slice(0, 300).map((u) => `<option value="${esc(u)}">`).join('')}</datalist>
+        <label style="display:block;min-width:220px" title="Elige una familia que ya existe o escribe una nueva"><span class="mut">Familia</span>
+          <input id="${id}_fam" list="${id}_fl" value="${esc(a.subfamilia || '')}" placeholder="ABARROTES, FRUVER, LACTEOS…" style="margin:2px 0 0;width:100%;text-transform:uppercase" autocomplete="off"></label>
+        <datalist id="${id}_fl">${(opciones.familias || []).slice(0, 200).map((u) => `<option value="${esc(u)}">`).join('')}</datalist>
         <button class="p" onclick="guardarArticuloAdmin(${Number(a.id)})">💾 Guardar</button>
         <button onclick="cancelarEdicionAdmin()">Cancelar</button></div>
       <div class="row" style="margin-top:8px;gap:10px;flex-wrap:wrap;align-items:flex-end">
@@ -131,6 +134,18 @@
       ${opciones.copiarHtml || ''}</div>`;
   }
 
+  // (07/11/2026, pedido del usuario: «editar familia de los articulos») familias que ya existen (sin repetir, en mayuscula) y la
+  // familia escrita: en MAYUSCULA y, si ya existe una igual (sin tildes ni espacios de mas), con esa misma escritura. '' = sin familia.
+  const normFam = (s) => String(s == null ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toUpperCase();
+  function familiasConocidas(listas) {
+    const m = new Map();
+    (listas || []).forEach((l) => (l || []).forEach((a) => { const f = String((a && a.subfamilia) || '').replace(/\s+/g, ' ').trim().toUpperCase(); if (f && !m.has(normFam(f))) m.set(normFam(f), f); }));
+    return [...m.values()].sort((a, b) => a.localeCompare(b));
+  }
+  function familiaElegida(escrita, conocidas) {
+    const n = normFam(escrita); if (!n) return '';
+    return (conocidas || []).find((f) => normFam(f) === n) || String(escrita).replace(/\s+/g, ' ').trim().toUpperCase();
+  }
   function editorProveedor(p, opciones) {
     opciones = opciones || {};
     const id = 'ep_' + Number(p.id);
@@ -149,5 +164,5 @@
       ${opciones.error ? `<div style="color:#b91c1c;margin-top:6px">${esc(opciones.error)}</div>` : ''}</div>`;
   }
 
-  return { esc, normalizarUnidad, normalizarCodigo, unidadesConocidas, validarUnidad, validarCodigo, validarArticulo, validarProveedor, cambiosProveedor, cambiaIdentidad, editorArticulo, editorProveedor, CAMPOS_PROV, DOCUMENTO_PROV, documentoProv };
+  return { esc, normalizarUnidad, normalizarCodigo, unidadesConocidas, validarUnidad, validarCodigo, validarArticulo, validarProveedor, cambiosProveedor, cambiaIdentidad, editorArticulo, editorProveedor, CAMPOS_PROV, DOCUMENTO_PROV, documentoProv, familiasConocidas, familiaElegida };
 });
