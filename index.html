@@ -351,6 +351,7 @@ tr:hover td{background:#f1f5f9}
         <button class="mut" style="padding:4px 10px" onclick="$('fped_desde').value='';$('fped_hasta').value='';pintarPedidos()">limpiar</button>
         <input id="qp" placeholder="🔎 N° de orden, proveedor o factura" style="width:260px;margin:0" oninput="pintarPedidos()">
       </div>
+      <div id="alertaAtrasados" style="display:none;margin-bottom:10px"></div>
       <div id="estadoOrden" style="display:none;margin-bottom:10px"></div>
       <div id="erroresIngreso" style="display:none;margin-bottom:10px"></div>
       <div id="listaped"></div>
@@ -378,6 +379,8 @@ tr:hover td{background:#f1f5f9}
 </div></div>
 
 <script src="js/banco-utils.js"></script>
+<script src="js/pedidos-atrasados.js"></script>
+<script src="js/articulo-nuevo-ui.js"></script>
 <script src="js/pdf-clave.js"></script>
 <script src="js/pdf-desbloqueo-core.js"></script>
 <script src="js/pdf-desbloqueo-web.js"></script>
@@ -1165,10 +1168,17 @@ async function guardarPedidoUnaVez(){
 let adminCargado=false, adminVista="prov", adminProv=[], adminArt=[], adminCat=[];
 let adminMarcaArts=[], adminMarcaCat=[];   // articulos y catalogo propios de una marca (Sin Par...)
 let adminMarcas=[], adminVinc=[], adminMarcaTocada=false, adminArtMarca=[];   // marcas y proveedor_marca (js/marca-proveedores.js)
+let adminHistArt=[];   // (07/11/2026) historial proveedor<->articulo (vista proveedor_articulos): a quien se le ha comprado cada articulo
 let adminCodMarca=[];   // (15/10/2026) codigo del ERP por marca de los articulos compartidos (js/codigo-marca.js)
 let adminLimite=400;   // cuántos artículos se pintan de una vez en Admin > Artículos (hay más de 700: "Ver 400 más")
 let adminEdit=null;   // {tipo:"prov"|"art", id, error} = la tarjeta que se está editando (ver js/admin-editar.js)
-function setAdmin(v){ adminVista=v; adminEdit=null; adminLimite=400;
+// (07/11/2026, pedido del usuario: «que los filtros del modulo admin, por Proveedor, articulos y catalogos sean independientes»)
+// cada pestaña recuerda SU busqueda, SUS fechas y SU catalogo: lo que se escribe en Proveedores ya no filtra Artículos, etc.
+let adminFiltros={};
+function adminGuardarFiltros(v){ adminFiltros[v]={qa:$("qa").value, desde:$("fadm_desde").value, hasta:$("fadm_hasta").value, cat:($("admCatalogo")||{}).value||""}; }
+function adminPonerFiltros(v){ const f=adminFiltros[v]||{}; $("qa").value=f.qa||""; $("fadm_desde").value=f.desde||""; $("fadm_hasta").value=f.hasta||"";
+  const sc=$("admCatalogo"); if(sc&&(v==="art"||v==="catcomp")){ sc.value=f.cat||"general"; if(!sc.value) sc.value="general"; } }
+function setAdmin(v){ if(v!==adminVista){ adminGuardarFiltros(adminVista); adminPonerFiltros(v); } adminVista=v; adminEdit=null; adminLimite=400;
   ["prov","art","cat","catcomp","agente","import","usuarios"].forEach(x=>$("ad-"+x).classList.toggle("on", x==v));
   $("filtroCat").style.display = (v=="cat")?"flex":"none";
   $("filtroMarcaAdm").style.display = (v=="prov")?"flex":"none";
@@ -1192,6 +1202,7 @@ async function cargarAdmin(){
   adminVinc=await traerTodo("proveedor_marca","proveedor_id,marca_id",["proveedor_id"]);
   adminMarcaArts=await traerTodo("marca_articulo","*",["id"]);
   adminMarcaCat=await traerTodo("marca_catalogo","*",["id"]);
+  try{ adminHistArt=await traerTodo("proveedor_articulos","proveedor_id,codigo,veces,ultima",["proveedor_id"]); }catch(e){ adminHistArt=[]; }   // si falla: solo el catalogo
   $("catProv").innerHTML='<option value="">— elegí proveedor —</option>'+adminProv.map(x=>`<option value="${x.id}">${x.razon_social||x.nombre_comercial||""}</option>`).join("");
   adminCargado=true; pintarAdmin();
 }
@@ -1203,6 +1214,20 @@ function filtraFechaAdmin(x){
   if(fd&&fe<fd) return false;
   if(fh&&fe>fh) return false;
   return true;
+}
+// (07/11/2026, pedido del usuario: «en articulos que se pueda ver el proveedor que se le compra ese articulo»)
+// aprobados = catalogo (con precio) · antes = historial de compras que no esta en el catalogo (las 3 con mas compras)
+function proveedoresDelArticulo(codigo, delArt){
+  const nom=id=>{ const p=adminProv.find(x=>x.id===id)||{}; return p.razon_social||p.nombre_comercial||("proveedor "+id); };
+  const aprob=(delArt||[]).map(k=>({id:k.id_proveedor, nombre:nom(k.id_proveedor), precio:k.precio_negociado}));
+  const ya=new Set(aprob.map(x=>x.id));
+  const antes=(adminHistArt||[]).filter(h=>h.codigo===codigo&&!ya.has(h.proveedor_id)).sort((a,b)=>(b.veces||0)-(a.veces||0)).map(h=>({id:h.proveedor_id, nombre:nom(h.proveedor_id), veces:h.veces}));
+  return {aprob, antes};
+}
+function htmlProveedoresArticulo(pa){
+  const a=pa.aprob.map(x=>`<a href="javascript:void 0" onclick="verCatalogo(${x.id})" title="Ver qué se le compra a este proveedor">${escAg(x.nombre)}</a>${x.precio!=null?" ("+money(Number(x.precio))+")":""}`).join(" · ");
+  const b=pa.antes.slice(0,3).map(x=>escAg(x.nombre)+(x.veces?" ("+x.veces+" compras)":"")).join(" · ")+(pa.antes.length>3?" · …":"");
+  return (a?`<div class="mut">🏪 Se le compra a: ${a}</div>`:"")+(b?`<div class="mut" style="font-size:12px">🕓 Antes se le compró a: ${b}</div>`:"");
 }
 function pintarAdmin(){
   const q=($("qa").value||"").trim().toLowerCase();
@@ -1229,11 +1254,17 @@ function pintarAdmin(){
     const mSel=Number(selCat.value)||0;   // 0 = catálogo general (Rocoto y Arrebatao); id = marca con catálogo propio
     const fuenteArt=mSel?MarcaProv.articulosAdmin(adminMarcaArts,mSel):adminArt;
     let l=MarcaProv.buscarArticulos(fuenteArt,$("qa").value).filter(filtraFechaAdmin);   // busca en código, ambos nombres, subfamilia y unidad
+    if(q){   // (07/11/2026) tambien por el NOMBRE del proveedor al que se le compra (catalogo de esta lista)
+      const nomP={}; adminProv.forEach(p=>{ nomP[p.id]=((p.razon_social||"")+" "+(p.nombre_comercial||"")).toLowerCase(); });
+      const provDe={}; (mSel?adminMarcaCat.filter(k=>k.marca_id===mSel):adminCat).forEach(k=>{ provDe[k.codigo_barras]=(provDe[k.codigo_barras]||"")+" "+(nomP[k.id_proveedor]||""); });
+      const ya=new Set(l.map(x=>x.id));
+      l=l.concat(fuenteArt.filter(x=>!ya.has(x.id)&&(provDe[x.codigo_barras]||"").includes(q)).filter(filtraFechaAdmin));
+    }
     const conocidas=AdminEditar.unidadesConocidas(fuenteArt,[]);
     EXPORTAR.catalogoArt = mSel ? ((adminMarcas.find(m=>m.id===mSel)||{}).nombre||"")+" (catálogo propio)" : "Rocoto y Arrebatao (general)";
-    EXPORTAR.actual.admin_art = ()=>l.map(x=>{ const del=mSel?adminMarcaCat.filter(k=>k.marca_id===mSel&&k.codigo_barras===x.codigo_barras):adminCat.filter(k=>k.codigo_barras===x.codigo_barras); const pr=del.filter(k=>k.precio_negociado!=null).map(k=>Number(k.precio_negociado)); return {...x,_prov:del.length,_pmin:pr.length?Math.min(...pr):null,_pmax:pr.length?Math.max(...pr):null}; });
+    EXPORTAR.actual.admin_art = ()=>l.map(x=>{ const del=mSel?adminMarcaCat.filter(k=>k.marca_id===mSel&&k.codigo_barras===x.codigo_barras):adminCat.filter(k=>k.codigo_barras===x.codigo_barras); const pr=del.filter(k=>k.precio_negociado!=null).map(k=>Number(k.precio_negociado)); const pa=proveedoresDelArticulo(x.codigo_barras,del); return {...x,_prov:del.length,_pmin:pr.length?Math.min(...pr):null,_pmax:pr.length?Math.max(...pr):null,_provNombres:pa.aprob.map(p=>p.nombre).join(" | "),_provAntes:pa.antes.map(p=>p.nombre).join(" | ")}; });
     c.innerHTML = (l.slice(0,adminLimite).map(x=>{
-      if(adminEdit&&adminEdit.tipo==="art"&&adminEdit.id===x.id) return AdminEditar.editorArticulo(x,conocidas,{error:adminEdit.error, copiarHtml:htmlCopiarArticulo(x,mSel), marcasHtml:ArticuloMarcas.casillasTodas(ArticuloMarcas.estadoTodas({marcas:adminMarcas,marcaArts:adminMarcaArts,vinc:adminArtMarca,general:adminArt,articulo:x,origen:mSel}),adminMarcas,"ea_"+x.id), codMarcaHtml:(typeof htmlCodigosMarca==="function"?htmlCodigosMarca(x,mSel):"")});
+      if(adminEdit&&adminEdit.tipo==="art"&&adminEdit.id===x.id) return AdminEditar.editorArticulo(x,conocidas,{familias:(AdminEditar.familiasConocidas?AdminEditar.familiasConocidas([adminArt,adminMarcaArts]):[]),error:adminEdit.error, copiarHtml:htmlCopiarArticulo(x,mSel), marcasHtml:ArticuloMarcas.casillasTodas(ArticuloMarcas.estadoTodas({marcas:adminMarcas,marcaArts:adminMarcaArts,vinc:adminArtMarca,general:adminArt,articulo:x,origen:mSel}),adminMarcas,"ea_"+x.id), codMarcaHtml:(typeof htmlCodigosMarca==="function"?htmlCodigosMarca(x,mSel):"")});
       const delArt=mSel?adminMarcaCat.filter(k=>k.marca_id===mSel&&k.codigo_barras===x.codigo_barras):adminCat.filter(k=>k.codigo_barras===x.codigo_barras);
       const precios=delArt.filter(k=>k.precio_negociado!=null).map(k=>Number(k.precio_negociado));
       const info = delArt.length
@@ -1242,9 +1273,9 @@ function pintarAdmin(){
       return `<div class="card" style="margin:6px 0"><div class="row">
         <div><div class="emisor">${x.articulo_hiopos||x.articulo_comercial||"—"}</div>
         <div class="mut">Código ${x.codigo_barras||"—"} · ${x.unimedida_compra||x.unimedida_hiopos||"—"} ${x.subfamilia?"· "+x.subfamilia:""}</div>
-        <div class="mut">${info}</div></div>
+        <div class="mut">${info}</div>${htmlProveedoresArticulo(proveedoresDelArticulo(x.codigo_barras,delArt))}</div>
         <span class="sp"></span>
-        <button onclick="editarArticuloAdmin(${x.id})">✏️ Editar (código / unidad)</button>
+        <button onclick="editarArticuloAdmin(${x.id})">✏️ Editar (código / unidad / familia)</button>
         <button class="s" onclick="${mSel?"amarrarMarca":"amarrarA"}('${(x.codigo_barras||"").replace(/'/g,"")}')">＋ Amarrar / poner precio</button></div></div>`;
       }).join("") || '<div class="vacio">Sin resultados.</div>') +
       (l.length>adminLimite ? `<div class="row" style="justify-content:center;margin:12px 0"><span class="mut">Mostrando ${adminLimite} de ${l.length} artículos</span><button onclick="adminLimite+=400;pintarAdmin()">Ver 400 más</button></div>` : (l.length ? `<div class="mut" style="text-align:center;margin:10px 0">${l.length} artículo(s)</div>` : ''));
@@ -1735,6 +1766,18 @@ async function codigosMarcaWeb(){
   catch(e){ CODIGOS_MARCA_WEB=new Map(); }
   return CODIGOS_MARCA_WEB;
 }
+// (07/11/2026, pedido del usuario: «editar familia de los articulos») guarda la familia (subfamilia) si cambio. tabla: articulos | marca_articulo
+async function guardarFamiliaArticulo(tabla, id, fila){
+  const el=$("ea_"+id+"_fam"); if(!el||!AdminEditar.familiaElegida) return {ok:true};
+  const nueva=AdminEditar.familiaElegida(el.value, AdminEditar.familiasConocidas([adminArt,adminMarcaArts]));
+  if(nueva===String(fila.subfamilia||"").trim()) return {ok:true};
+  const r=await SB.from(tabla).update({subfamilia:nueva||null}).eq("id",id).select("id");
+  if(r.error||!(r.data&&r.data.length)) return {ok:false,error:"No se pudo guardar la familia: "+(r.error?r.error.message:"sin permiso")};
+  fila.subfamilia=nueva||null;
+  if(tabla==="articulos") (artsGlobal||arts||[]).forEach(x=>{ if(x.codigo_barras===fila.codigo_barras) x.subfamilia=fila.subfamilia; });
+  else { marcaArts=[]; }
+  return {ok:true};
+}
 async function guardarArticuloAdmin(id){
   if((Number(($("admCatalogo")||{}).value)||0)>0) return guardarArticuloMarca(id);
   const a=adminArt.find(x=>x.id===id); if(!a) return;
@@ -1757,6 +1800,7 @@ async function guardarArticuloAdmin(id){
     (artsGlobal||arts||[]).forEach(x=>{ if(x.codigo_barras===a.codigo_barras) Object.assign(x,cambios); });   // listas ya cargadas de "Nuevo pedido"
   }
   // (14/10/2026) unidad para el proveedor (orden de compra) y su equivalencia con la del POS (js/unidad-proveedor.js)
+  { const gf=await guardarFamiliaArticulo("articulos",id,a); if(!gf.ok) return fallo(gf.error); }
   const up=UnidadProveedor.leerEditor(a,($("ea_"+id+"_uprov")||{}).value,($("ea_"+id+"_fprov")||{}).value);
   if(!up.ok) return fallo(up.error);
   if(up.cambio){ const ru=await SB.from("articulos").update(up.valores).eq("id",id).select("id"); if(ru.error||!(ru.data&&ru.data.length)) return fallo("No se pudo guardar la unidad del proveedor: "+(ru.error?ru.error.message:"sin permiso")); Object.assign(a,up.valores); }
@@ -1823,6 +1867,7 @@ async function guardarArticuloMarca(id){
     if(rn.error||!(rn.data&&rn.data.length)) return fallo("No se pudo guardar el nombre: "+(rn.error?rn.error.message:"sin permiso"));
     fila.articulo=v.nombre.valor; marcaArts=[]; marcaCat=[]; provs=[];
   }
+  { const gf=await guardarFamiliaArticulo("marca_articulo",id,fila); if(!gf.ok) return fallo(gf.error); a.subfamilia=fila.subfamilia; }
   const up=UnidadProveedor.leerEditor(a,($("ea_"+id+"_uprov")||{}).value,($("ea_"+id+"_fprov")||{}).value);   // (14/10/2026) unidad para el proveedor
   if(!up.ok) return fallo(up.error);
   if(up.cambio){ const ru=await SB.from("marca_articulo").update(up.valores).eq("id",id).select("id"); if(ru.error||!(ru.data&&ru.data.length)) return fallo("No se pudo guardar la unidad del proveedor: "+(ru.error?ru.error.message:"sin permiso")); Object.assign(fila,up.valores); Object.assign(a,up.valores); marcaArts=[]; }
@@ -1937,6 +1982,8 @@ function adminNuevo(){
         else alert("El proveedor quedó SIN marca: no aparecerá al hacer pedidos hasta que le asignes una con ✏️ Editar.");
         adminCargado=false; await cargarAdmin(); });
   } else if(adminVista==="art"){
+    // (07/11/2026) una sola ventana con todos los campos (js/articulo-nuevo-ui.js); si no cargo, las preguntas de antes
+    if(typeof artNuevoAbrir==="function") return artNuevoAbrir();
     const selNow=Number(($("admCatalogo")||{}).value)||0;
     const rm=MarcaProv.marcaDeRespuesta(prompt(MarcaProv.preguntaMarcaArticulo(adminMarcas,selNow),String(selNow)),adminMarcas,selNow);
     if(rm===null){ alert("Marca no válida: el artículo no se creó."); return; }
@@ -2019,7 +2066,22 @@ function toggleFiltros(which){
   btn.textContent=abierto?"Filtros ▾":"Filtros ▴";
   btn.classList.toggle("on",!abierto);
 }
-function setPedVista(v){ pedVista=v;
+// (07/11/2026) «⏰ ver solo los atrasados» (pedidos pendientes sin factura hace mas de 2 dias: js/pedidos-atrasados.js)
+let pedSoloAtrasados=false;
+function verAtrasados(si){ pedSoloAtrasados=!!si; if(si&&pedVista!=="pendiente") return setPedVista("pendiente"); pintarPedidos(); }
+function pintarAlertaAtrasados(){
+  const el=$("alertaAtrasados"); if(!el) return;
+  if(typeof PedidosAtrasados==="undefined"){ el.style.display="none"; return; }
+  const r=PedidosAtrasados.resumen(pedidos);
+  if(!r.total){ el.style.display="none"; pedSoloAtrasados=false; return; }
+  el.style.display="block";
+  el.innerHTML=`<div class="card" style="margin:0;border-left:5px solid #dc2626;background:#fef2f2">
+    <div class="row" style="gap:8px;flex-wrap:wrap"><b style="color:#991b1b">⏰ ${r.total} pedido(s) llevan más de ${PedidosAtrasados.DIAS} días sin factura</b>
+      <span class="mut">el más viejo: ${r.masViejo} días · hazles seguimiento con el proveedor</span><span class="sp"></span>
+      ${pedSoloAtrasados?'<button onclick="verAtrasados(false)">Ver todos los pendientes</button>':'<button class="p" style="background:#dc2626;border-color:#dc2626" onclick="verAtrasados(true)">Ver solo los atrasados</button>'}</div>
+    <div class="mut" style="margin-top:4px;font-size:12.5px">${r.porSede.slice(0,8).map(s=>escAg(s.sede)+": <b>"+s.n+"</b>").join(" · ")}${r.porSede.length>8?" · …":""}</div></div>`;
+}
+function setPedVista(v){ pedVista=v; if(v!=="pendiente") pedSoloAtrasados=false;
   ["pend","fact","todos"].forEach(x=>$("pe-"+x).classList.toggle("on", x==(v=="pendiente"?"pend":v=="facturado"?"fact":"todos")));
   pintarPedidos();
 }
@@ -2041,6 +2103,9 @@ function pintarPedidos(){
   // (15/10/2026) a la SEDE (y al usuario de una sola sede) "Pendientes" le muestra solo lo que AUN NO TIENE FACTURA amarrada: lo ya
   // amarrado esta en manos del agente/analista (se ve en «Todos» hasta que quede facturado). Admin y analistas siguen viendo todo.
   if(pedVista==="pendiente" && ((perfil&&perfil.rol==="sede") || (typeof sedeFijaId!=="undefined"&&sedeFijaId))) l=l.filter(p=>!p.factura_cufe);
+  pintarAlertaAtrasados();
+  const hoyAtr=typeof PedidosAtrasados!=="undefined"?PedidosAtrasados.hoyCo():null;
+  if(pedSoloAtrasados&&hoyAtr) l=PedidosAtrasados.lista(l,hoyAtr);
   // Filtro por fecha
   const fd=$("fped_desde").value, fh=$("fped_hasta").value;
   if(fd||fh){
@@ -2070,13 +2135,15 @@ function pintarPedidos(){
     const numAm = p.factura_cufe ? numFacturaDe(p) : "";
     const am  = p.factura_cufe ? '<span class="badge st-asignada"'+amFecha+' style="font-weight:700">'+(esCC?"📷 Cuenta de cobro ":"🧾 Factura ")+escAg(numAm||"amarrada")+'</span>' : '';
     const erp = p.pedido_erp ? '<span class="badge">ERP '+p.pedido_erp+'</span>' : '';
+    const dAtr = hoyAtr&&PedidosAtrasados.esAtrasado(p,hoyAtr) ? PedidosAtrasados.diasSinFactura(p,hoyAtr) : null;
+    const atr = dAtr!=null ? '<span class="badge" style="background:#fee2e2;color:#991b1b;border-color:#fca5a5;font-weight:700" title="Pedido hace '+dAtr+' días y todavía sin factura: hazle seguimiento">⏰ '+dAtr+' días sin factura</span>' : '';
     return `<div class="card" style="padding:0;overflow:hidden">
       <div class="row ped-cab" style="padding:14px 16px;cursor:pointer" onclick="abrirPedido(${p.id})">
         <div class="ped-ini" style="width:34px;height:34px;border-radius:50%;background:#15803d;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700">${(p.proveedor_texto||"?")[0]}</div>
         <div class="ped-nom"><div class="emisor">${p.proveedor_texto||p.proveedor||"—"}</div>
           <div class="mut">${p.sede_texto||"—"} · ${fch(p.fecha)} · ${(p.lineas_n||"")?p.lineas_n+" art.":""}</div></div>
         <span class="sp"></span>
-        ${est} ${erp} ${am} ${typeof fotoFacturaBadge==="function"?fotoFacturaBadge(p):""}
+        ${est} ${atr} ${erp} ${am} ${typeof fotoFacturaBadge==="function"?fotoFacturaBadge(p):""}
         <span class="mut" style="font-weight:700">#${p.numero||""}</span>
         <span style="width:22px;height:22px;border-radius:50%;background:#15803d;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px">${p.estado==="facturado"?"✓":"●"}</span>
         <span class="mut" id="ch_${p.id}">⌄</span>
@@ -4336,7 +4403,7 @@ async function guardarNov(){
   <h1>⬆ Subir facturas (solo PDF)</h1>
   <p class="mut">Del <b>nombre del archivo</b> saco el número de factura si no lo encuentro en el PDF; del contenido, los demás datos. Si no encuentro el número, te lo pregunto antes de subir.</p>
   <label class="mut">Marca / empresa</label><select id="mar"></select>
-  <label class="mut">Tipo</label><select id="tipo2"><option value="factura">Factura</option><option value="nota_credito">Nota crédito</option></select>
+  <label class="mut">Tipo</label><select id="tipo2"><option value="factura">Factura o documento equivalente (POS)</option><option value="nota_credito">Nota crédito</option></select>
   <label class="mut">Categoría</label><select id="cat2">
     <option value="insumos">Insumos</option><option value="empaque">Material de empaque</option>
     <option value="aseo">Aseo</option><option value="loza_utensilios">Loza y utensilios</option>
@@ -4400,14 +4467,16 @@ async function datosDePdf(f){
   //   "IT08-1898792" (letras + digitos)
   //   "FCRC2579"     (sin separador)
   //   "6525"         (solo folio, sin prefijo)
-  let pf=t.match(/N[uú]mero de Factura:?\s*([A-Za-z0-9]{2,6})\s*-?\s*(\d{3,})/i);
+  // (07/11/2026) tambien el documento equivalente POS: "Número de Documento:" / "Número del documento equivalente:"
+  const ETQ="N[uú]mero (?:de(?:l)? )?(?:Factura|Documento(?: Equivalente)?)(?: Electr[oó]nic[oa])?";
+  let pf=t.match(new RegExp(ETQ+":?\\s*([A-Za-z0-9]{2,6})\\s*-?\\s*(\\d{3,})","i"));
   // Sin prefijo: "Número de Factura: 12345" o "Número Factura  12345"
   if(!pf){
-    const m2=t.match(/N[uú]mero de Factura:?\s*(\d{3,})/i);
+    const m2=t.match(new RegExp(ETQ+":?\\s*(\\d{3,})","i"));
     if(m2) pf=[null,null,m2[1],m2[1]];
   }
   // Si el prefijo es solo digitos, no es prefijo: es el folio completo
-  if(pf && pf[1] && /^\d+$/.test(pf[1])) { pf[2]=pf[1]; pf[1]=null; }
+  if(pf && pf[1] && /^\d+$/.test(pf[1])) { pf[2]=pf[1]+pf[2]; pf[1]=null; }   // (07/11/2026) "445566" partido en 445|566: el folio es todo (antes quedaba 445)
   const fe=g(/Fecha de Emisi[oó]n:?\s*(\d{2}\/\d{2}\/\d{4})/i);
   let iso=null; if(fe){const [d1,m1,a1]=fe.split("/"); iso=a1+"-"+m1+"-"+d1;}
   let prefijo=pf? (pf[1]||"").toUpperCase()||null : null;
@@ -4426,7 +4495,8 @@ async function datosDePdf(f){
     nit:     (g(/Nit del Emisor:?\s*([\d\.\-]+)/i)||"").replace(/[\.\-]/g,"") || null,
     fecha:   iso,
     total:   plata(g(/Total factura \(=\)[^\d]{0,30}([\d\.]+,\d{2})/i)
-                 || g(/Total neto factura \(=\)[^\d]{0,30}([\d\.]+,\d{2})/i))
+                 || g(/Total neto factura \(=\)[^\d]{0,30}([\d\.]+,\d{2})/i)
+                 || g(/Total (?:neto )?(?:del )?documento(?: equivalente)? \(=\)[^\d]{0,30}([\d\.]+,\d{2})/i))   // (07/11/2026) POS
   };
 }
 async function subirPdfs(){
