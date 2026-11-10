@@ -2976,6 +2976,16 @@ setInterval(()=>{
 let ingresoDocs=[];
 let novedadSede="";   // (25/10/2026) filtro por sede de «Documentos con novedad» ('' = todas)
 function filtrarNovedadSede(v){ novedadSede=v||""; cargarErroresIngreso(); }
+// (09/11/2026, pedido del usuario: «crea un buscador aca») buscador de «Documentos con novedad»: filtra lo ya cargado (sin volver a la base)
+let novedadBuscar="", novedadPintar=null, novedadTimer=null;
+const textoNovedadExtra=d=>{ const p=d._ped||{}; return [p.proveedor_texto,p.numero_factura,p.sede_texto,p.fecha].join(" "); };
+function buscarNovedad(v){
+  novedadBuscar=String(v||"");
+  clearTimeout(novedadTimer);
+  novedadTimer=setTimeout(()=>{ if(!novedadPintar) return;
+    novedadPintar();
+    const el=$("novBuscar"); if(el&&v!==""){ el.focus(); const n=el.value.length; try{ el.setSelectionRange(n,n); }catch(e){} } },180);
+}
 async function cargarErroresIngreso(){
   const c=$("erroresIngreso"); if(!c) return;
   try{
@@ -2991,9 +3001,15 @@ async function cargarErroresIngreso(){
     if(ids.length){ const pq=await SB.from("pedidos").select("id,numero,proveedor_texto,sede_id,sede_texto,marca_id,fecha,factura_cufe,numero_factura").in("id",ids); const mp=new Map((pq.data||[]).map(p=>[p.id,p])); ingresoDocs.forEach(d=>{ d._ped=mp.get(d.pedido_id)||null; }); }
   }catch(e){ ingresoDocs=[]; }
   const sedeDeDoc=(d)=>{ const p=d._ped; if(!p||typeof IngresoElegir==="undefined") return ""; const sd=typeof sedes!=="undefined"?sedes:[]; const m=IngresoElegir.marcaDe(p,sd).nombre, s2=IngresoElegir.sedeDe(p,sd).nombre; return (m?m+" · ":"")+s2; };
-  const h=IngresoPanel.bloqueErrores(ingresoDocs,{puede:can("ingresos.iniciar"),admin:!!(perfil&&perfil.rol==="admin"),sedeDe:sedeDeDoc,filtroSede:novedadSede});
   const hAv=await avisosUltimasCorridas();   // (28/10/2026) lo que el agente SALTO (no queda en la cola como error)
-  c.innerHTML=h+hAv; c.style.display=(h||hAv)?"block":"none";
+  novedadPintar=()=>{
+    const h=IngresoPanel.bloqueErrores(ingresoDocs,{puede:can("ingresos.iniciar"),admin:!!(perfil&&perfil.rol==="admin"),sedeDe:sedeDeDoc,filtroSede:novedadSede,buscar:novedadBuscar,textoDe:textoNovedadExtra});
+    // si el usuario esta escribiendo en el buscador, se conserva el cursor al repintar
+    const activo=document.activeElement&&document.activeElement.id==="novBuscar";
+    c.innerHTML=h+hAv; c.style.display=(h||hAv)?"block":"none";
+    if(activo){ const el=$("novBuscar"); if(el){ el.focus(); const n=el.value.length; try{ el.setSelectionRange(n,n); }catch(e){} } }
+  };
+  novedadPintar();
 }
 // (28/10/2026, pedido del usuario: «los analistas no pueden ver los pedidos que tienen error») Hay pedidos que el agente SALTA sin
 // dejarlos en la cola como ERROR (ej. «no sé a qué almacén del ERP corresponde Oviedo (se omite)»): solo quedaban en el informe de la
@@ -3040,6 +3056,7 @@ async function excelNovedadesIngreso(){
     let docs=(ingresoDocs||[]).filter(d=>d.estado==="ERROR"||d.estado==="PENDIENTE_REINTENTO"||reint(d));
     const clave=p=>{ if(!p||typeof IngresoElegir==="undefined") return ""; const m=IngresoElegir.marcaDe(p,sd).nombre, s2=IngresoElegir.sedeDe(p,sd).nombre; return (m?m+" · ":"")+s2; };
     if(novedadSede && docs.some(d=>clave(d._ped)===novedadSede)) docs=docs.filter(d=>clave(d._ped)===novedadSede);
+    if(novedadBuscar.trim()) docs=docs.filter(d=>IngresoPanel.coincide(IngresoPanel.textoDoc(d,clave(d._ped),textoNovedadExtra),novedadBuscar));   // (09/11/2026) lo mismo que muestra el buscador
     const fDe=new Map((typeof facturas!=="undefined"?facturas:[]).map(f=>[f.cufe,f]));
     const fecha=t=>t?String(t).slice(0,10):"";
     const hora=t=>{ const x=t?Date.parse(t):NaN; return isNaN(x)?"":new Date(x-5*3600000).toISOString().slice(0,16).replace("T"," "); };
