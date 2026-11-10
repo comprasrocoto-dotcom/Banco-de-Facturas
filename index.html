@@ -3498,7 +3498,7 @@ function sedesFiltro(){ return sedeFijaId?[Number(sedeFijaId)]:FM_SEL.fmSede.map
 function sedeOk(id){ const sf=sedesFiltro(); return !sf.length||sf.includes(Number(id)); }
 function setTipo(t){ FM_SEL.fmTipo=t?[t]:[]; fmPintar("fmTipo"); fmAlCambiar("fmTipo"); }
 fmPintar("fmTipo"); fmPintar("fmCat");
-function setVista(v){vista=v;if(v!=="listas") listasSede=null;["pool","mias","selladas","hecho","nov","listas","envio","enviadas","servicios"].forEach(x=>{ const b=$("v-"+x); if(b) b.classList.toggle("on",x==v); });pintar();}
+function setVista(v){vista=v;if(v!=="enviadas"&&typeof CONT_LOTE_VER!=="undefined") CONT_LOTE_VER=null;if(v!=="listas") listasSede=null;["pool","mias","selladas","hecho","nov","listas","envio","enviadas","servicios"].forEach(x=>{ const b=$("v-"+x); if(b) b.classList.toggle("on",x==v); });pintar();}
 function novDe(c){return novedades.find(n=>n.cufe===c);}
 // ── Ingresadas sin sellar (19/09/2026): ya tienen Ingreso ERP pero siguen en Sin asignar / Mías sin sellar ──
 // La logica vive en js/sin-sellar.js (probada con node). Las sedes solo ven las suyas; admin y pagos ven todas.
@@ -3573,6 +3573,7 @@ function pintar(){
     const todas=facturas.filter(f=>sedeOk(f.sede_id));
     if(vista=="envio"){ const p=EnvioContabilidad.pendientes(todas,CONT_ENV,contListo); l=p.lista.concat(p.sinPdf).sort((a,b)=>String(a.fecha_ingreso||"").localeCompare(String(b.fecha_ingreso||""))); }
     else l=todas.filter(f=>CONT_ENV.has(f.cufe)).sort((a,b)=>CONT_ENV.get(b.cufe).lote-CONT_ENV.get(a.cufe).lote);
+    if(vista=="enviadas"&&typeof CONT_LOTE_VER!=="undefined"&&CONT_LOTE_VER) l=l.filter(f=>CONT_ENV.get(f.cufe).lote===CONT_LOTE_VER);   // (10/11/2026) clic en «lote N»: solo ese lote
   }
   if(typeof pintarPanelEnvio==="function") pintarPanelEnvio(esEnvio?vista:null);
   // Filtro por fecha (usa fecha_ingreso si tiene, sino fecha_emision)
