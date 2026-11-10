@@ -40,10 +40,16 @@ async function cargarEnvioContabilidad() {
   if (n && CONT_OK) { const p = EnvioContabilidad.pendientes(contBase(), CONT_ENV, contListo); const c = p.lista.length + p.sinPdf.length; n.textContent = c ? '(' + c + ')' : '(0)'; n.style.color = c ? '#b91c1c' : ''; }
 }
 
+// (10/11/2026) ver UN lote: «📦 Enviadas a contabilidad» mostrando solo los documentos de ese lote (null = todos)
+let CONT_LOTE_VER = null;
+function verLote(n) { CONT_LOTE_VER = Number(n) || null; setVista('enviadas'); try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { window.scrollTo(0, 0); } }
+function verTodosLotes() { CONT_LOTE_VER = null; pintar(); }
+
 function envioBadge(f) {
   if (!CONT_OK || !f) return '';
   const e = CONT_ENV.get(f.cufe);
-  if (e) return `<span class="badge" style="color:#1e3a8a;background:#eff6ff;border-color:#93c5fd;font-weight:700">${escAg(EnvioContabilidad.etiqueta(e))}</span>`;
+  // (10/11/2026, pedido del usuario: «que al darle click en lote me muestre ese lote de facturas»)
+  if (e) return `<span class="badge" role="button" tabindex="0" style="color:#1e3a8a;background:#eff6ff;border-color:#93c5fd;font-weight:700;cursor:pointer" title="Ver todos los documentos del lote ${Number(e.lote)}" onclick="verLote(${Number(e.lote)})">${escAg(EnvioContabilidad.etiqueta(e))}</span>`;
   if (vista === 'envio' && contListo(f)) {
     const d = EnvioContabilidad.diasSinEnviar(f, BancoUtils.hoyColombia());
     return `<span class="badge" style="${d >= 2 ? 'color:#991b1b;background:#fee2e2;border-color:#fca5a5' : 'color:#92400e;background:#fffbeb;border-color:#fcd34d'};font-weight:700">⏰ Por enviar${d ? ' · ' + d + ' día(s) desde el ingreso' : ' · ingresada hoy'}${EnvioContabilidad.sinSellar(f, BancoUtils.esTerminada) ? ' · sin sellar' : ''}${(f.archivo_pdf || f.archivo_pdf_sellado) ? '' : ' · SIN PDF'}</span>`;
@@ -75,10 +81,15 @@ function pintarPanelEnvio(v) {
   const grupos = EnvioContabilidad.porLote(todas, CONT_ENV);
   const info = new Map(CONT_LOTES.map((l) => [Number(l.id), l]));
   const esAdmin = perfil && perfil.rol === 'admin';
-  caja.innerHTML = `<div class="card" style="border-left:5px solid #15803d;margin-bottom:12px">
+  const gv = CONT_LOTE_VER ? grupos.find((g) => g.lote === CONT_LOTE_VER) : null, lv = gv ? (info.get(gv.lote) || {}) : {};
+  const feV = lv.creado_en ? new Date(lv.creado_en).toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+  const verUno = CONT_LOTE_VER ? `<div class="card" style="border-left:5px solid #1e3a8a;background:#eff6ff;margin-bottom:12px"><div class="row" style="gap:8px;align-items:center">
+      <div style="flex:1"><b style="color:#1e3a8a">📦 Viendo el lote ${CONT_LOTE_VER}</b> <span class="mut">${gv ? gv.docs.length + ' documento(s)' + (feV ? ' · enviado ' + escAg(feV) : '') + (lv.creado_por ? ' · ' + escAg(lv.creado_por) : '') : 'no hay documentos de este lote en las sedes que estás viendo'}</span></div>
+      ${gv ? `<button onclick="rebajarLote(${CONT_LOTE_VER})">⬇ Volver a bajar</button>` : ''}<button class="p" onclick="verTodosLotes()">✕ Ver todos los lotes</button></div></div>` : '';
+  caja.innerHTML = verUno + `<div class="card" style="border-left:5px solid #15803d;margin-bottom:12px">
     <div class="row" style="gap:8px;align-items:center"><div style="font-weight:700;color:#166534;flex:1">📦 Envíos a contabilidad (${grupos.length} lote(s))</div><button onclick="contExcelTodos()" title="Todos los documentos del banco con su ingreso ERP y si ya se enviaron a contabilidad (lote, fecha, correo)">📊 Excel de TODOS los documentos</button></div>
     ${grupos.length ? grupos.slice(0, 40).map((g) => { const l = info.get(g.lote) || {}; const fe = l.creado_en ? new Date(l.creado_en).toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''; return `<div class="row" style="gap:8px;padding:6px 0;border-bottom:1px solid var(--line)">
-      <b>Lote ${g.lote}</b><span class="mut">${escAg(fe)}${l.creado_por ? ' · ' + escAg(l.creado_por) : ''} · ${g.docs.length} documento(s)${l.nota ? ' · ' + escAg(l.nota) : ''}</span>${typeof contCorreoLoteHtml === 'function' ? contCorreoLoteHtml(l) : ''}<span class="sp"></span>
+      <b>Lote ${g.lote}</b>${CONT_LOTE_VER === g.lote ? '<span class="badge" style="color:#1e3a8a;background:#dbeafe;border-color:#93c5fd">viendo</span>' : `<button onclick="verLote(${g.lote})" title="Muestra abajo solo los documentos de este lote">👁 Ver</button>`}<span class="mut">${escAg(fe)}${l.creado_por ? ' · ' + escAg(l.creado_por) : ''} · ${g.docs.length} documento(s)${l.nota ? ' · ' + escAg(l.nota) : ''}</span>${typeof contCorreoLoteHtml === 'function' ? contCorreoLoteHtml(l) : ''}<span class="sp"></span>
       <button onclick="rebajarLote(${g.lote})">⬇ Volver a bajar</button>
       ${typeof contReenviarLote === 'function' ? `<button onclick="contReenviarLote(${g.lote})" title="Manda otra vez el Excel y el ZIP de este lote al correo de contabilidad (no cambia nada)">📧 Enviar por correo</button>` : ''}
       ${esAdmin ? `<button class="d" title="Se marcó por error: los documentos vuelven a «Por enviar»" onclick="deshacerLote(${g.lote})">↩ Deshacer</button>` : ''}</div>`; }).join('') : '<div class="mut">Todavía no hay envíos.</div>'}
