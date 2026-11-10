@@ -41,6 +41,13 @@
       ${detener ? `<div class="row" style="margin-top:8px">${detener}</div>` : ''}</div>`;
   }
 
+  // (09/11/2026) buscador de «Documentos con novedad»: texto de cada documento y comparacion sin tildes
+  const norm = (s) => String(s == null ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  function textoDoc(d, sede, extra) {
+    return norm([d.numero, d.pedido_id, sede, d.estado, d.etapa, d.error_etapa, d.error, typeof extra === 'function' ? extra(d) : ''].join(' '));
+  }
+  function coincide(texto, busca) { return norm(busca).split(' ').filter(Boolean).every((p) => texto.includes(p)); }
+
   // docs = filas de ingreso_documento en ERROR o PENDIENTE_REINTENTO
   function bloqueErrores(docs, opciones) {
     opciones = opciones || {};
@@ -53,10 +60,14 @@
     const sedeDe = (d) => (typeof opciones.sedeDe === 'function' ? opciones.sedeDe(d) : '') || 'Sin sede';
     const conteo = new Map(); todos.forEach((d) => conteo.set(sedeDe(d), (conteo.get(sedeDe(d)) || 0) + 1));
     const filtro = opciones.filtroSede && conteo.has(opciones.filtroSede) ? opciones.filtroSede : '';
-    const l = filtro ? todos.filter((d) => sedeDe(d) === filtro) : todos;
+    const porSede = filtro ? todos.filter((d) => sedeDe(d) === filtro) : todos;
+    // (09/11/2026, pedido del usuario: «crea un buscador aca») busca en pedido, sede, proveedor, factura, estado y el error.
+    // Todas las palabras escritas deben aparecer (sin importar tildes ni mayusculas).
+    const busca = String(opciones.buscar || '').trim();
+    const l = busca ? porSede.filter((d) => coincide(textoDoc(d, sedeDe(d), opciones.textoDe), busca)) : porSede;
     const selector = conteo.size > 1 || filtro ? `<div class="row" style="margin:6px 0;gap:6px;align-items:center"><span class="mut">Sede:</span>
       <select style="width:auto;margin:0" onchange="filtrarNovedadSede(this.value)"><option value="">Todas (${todos.length})</option>${[...conteo.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([k, n]) => `<option value="${esc(k)}"${k === filtro ? ' selected' : ''}>${esc(k)} (${n})</option>`).join('')}</select></div>` : '';
-    const idsFiltro = filtro ? '[' + l.map((d) => Number(d.pedido_id)).filter(Boolean).join(',') + ']' : 'null';
+    const idsFiltro = filtro || busca ? '[' + l.map((d) => Number(d.pedido_id)).filter(Boolean).join(',') + ']' : 'null';
     const errores = l.filter((d) => d.estado === 'ERROR');
     // (05/10/2026) "Quitar"/"Limpiar" = sacar de la cola (estado DESCARTADO, RPC ingreso_descartar): el agente deja de reintentarlo.
     const quitar = (d) => (opciones.puede && Number(d.pedido_id) && !reintentando(d) ? `<button class="d" style="padding:3px 10px;font-size:12px" title="Sacar de la cola: el agente no lo vuelve a intentar" onclick="descartarIngreso([${Number(d.pedido_id)}])">✕ Quitar</button>` : '');
@@ -67,14 +78,17 @@
     const filas = l.map((d) => `<div style="border-top:1px solid var(--line);padding:5px 0;display:flex;gap:10px;align-items:flex-start"><div style="flex:1"><b>${esc(d.numero || d.pedido_id)}</b>${sedeTxt(d)} · ${etiqueta(d)}
       ${d.error_etapa ? ' · ' + esc(d.error_etapa) : ''}<div class="mut">${esc(d.etapa || '')}${d.error ? ' — ' + esc(d.error) : ''}</div></div><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${lanzar(d)}${quitar(d)}</div></div>`).join('');
     const botones = [
-      filtro && opciones.puede ? `<button class="p" onclick="reintentarErroresIngreso(${idsFiltro})" title="Lanza solo los de esta sede (los que tienen error vuelven a la cola)">🔁 LANZAR ESTA SEDE (${l.length})</button>`
+      busca && opciones.puede && l.length ? `<button class="p" onclick="reintentarErroresIngreso(${idsFiltro})" title="Lanza solo los que muestra la busqueda (los que tienen error vuelven a la cola)">🔁 LANZAR ESTOS (${l.length})</button>`
+        : filtro && opciones.puede ? `<button class="p" onclick="reintentarErroresIngreso(${idsFiltro})" title="Lanza solo los de esta sede (los que tienen error vuelven a la cola)">🔁 LANZAR ESTA SEDE (${l.length})</button>`
         : errores.length && opciones.puede ? `<button class="p" onclick="reintentarErroresIngreso()">🔁 REINTENTAR ERRORES (${errores.length})</button>` : '',
       opciones.puede && opciones.admin ? `<button onclick="descartarIngreso(${idsFiltro})" title="Solo administrador: sacar de la cola TODOS los de esta lista (el agente deja de intentarlos)">🧹 LIMPIAR VENTANA (${l.length})</button>` : '',
     ].filter(Boolean).join(' ');
-    return `<div class="card" style="border-left:5px solid #b45309;margin-top:8px"><div class="row" style="gap:8px;align-items:center"><div style="font-weight:700;color:#b45309;flex:1">Documentos con novedad (${l.length}${filtro ? ' de ' + todos.length : ''})</div><button onclick="excelNovedadesIngreso()" title="Baja en Excel los documentos de esta lista (con el filtro de sede elegido): pedido, factura, sede, marca, fechas y el error">⬇ Excel</button></div>
-      <div class="mut">Cada documento se queda aquí hasta que entre al ERP o alguien lo saque a mano con «✕ Quitar». Corrige lo que indica y lánzalo otra vez, o quítalo si ya lo resolviste a mano. Los COMPLETADOS no se vuelven a procesar.</div>${selector}<div style="max-height:520px;overflow-y:auto">${filas}</div>
+    return `<div class="card" style="border-left:5px solid #b45309;margin-top:8px"><div class="row" style="gap:8px;align-items:center"><div style="font-weight:700;color:#b45309;flex:1">Documentos con novedad (${l.length}${filtro || busca ? ' de ' + todos.length : ''})</div><button onclick="excelNovedadesIngreso()" title="Baja en Excel los documentos de esta lista (con el filtro de sede elegido): pedido, factura, sede, marca, fechas y el error">⬇ Excel</button></div>
+      <div class="mut">Cada documento se queda aquí hasta que entre al ERP o alguien lo saque a mano con «✕ Quitar». Corrige lo que indica y lánzalo otra vez, o quítalo si ya lo resolviste a mano. Los COMPLETADOS no se vuelven a procesar.</div>${selector}
+      <div class="row" style="margin:6px 0;gap:6px;align-items:center"><input id="novBuscar" type="search" value="${esc(busca)}" placeholder="🔎 Buscar: pedido, proveedor, sede, factura, artículo o error (ej. PED-2099, IVA, LIMON, NO CUADRA)…" oninput="buscarNovedad(this.value)" style="flex:1;margin:0" autocomplete="off"></div>
+      <div style="max-height:520px;overflow-y:auto">${filas || '<div class="mut" style="padding:8px 0">Ningún documento coincide con la búsqueda.</div>'}</div>
       ${botones ? `<div class="row" style="margin-top:8px">${botones}</div>` : ''}</div>`;
   }
 
-  return { esc, titulo, porcentaje, bloqueProgreso, bloqueErrores, MIN_SIN_LATIDO };
+  return { esc, titulo, porcentaje, bloqueProgreso, bloqueErrores, textoDoc, coincide, MIN_SIN_LATIDO };
 });
