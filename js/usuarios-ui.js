@@ -40,6 +40,8 @@ async function usrCargar(forzar) {
   USR.cargando = true; USR.error = null;
   try {
     const [u, p, pp, c, sa, av] = await Promise.all([SB.rpc('usuarios_listar'), SB.from('perfil_acceso').select('*').order('id'), SB.from('perfil_permiso').select('perfil_id,permiso'), SB.from('permiso_catalogo').select('*').order('orden'), SB.rpc('analista_sedes_listar'), SB.rpc('analista_avisos_listar')]);
+    // (10/11/2026) usuarios de sede que trabajan en varias sedes (ej. Planta); si la funcion aun no existe, todo sigue como antes
+    try { const st = await SB.rpc('sedes_trabajo_listar'); USR.sedesTrabajo = st && !st.error ? AnalistaSedes.porUsuario(st.data) : {}; USR.trabajoOk = !!(st && !st.error); } catch (e) { USR.sedesTrabajo = {}; USR.trabajoOk = false; }
     USR.avisos = {}; if (av && !av.error) (av.data || []).forEach((x) => { USR.avisos[x.user_id] = x.correo; });
     USR.sedesAnalista = sa && !sa.error ? AnalistaSedes.porUsuario(sa.data) : {};   // si la funcion aun no existe, todo sigue como antes
     const err = u.error || p.error || pp.error || c.error; if (err) throw new Error(err.message);
@@ -54,7 +56,9 @@ async function usrCargar(forzar) {
 // Lo que se muestra bajo el perfil: su sede (usuarios de sede) o, en los analistas, las sedes asignadas
 function usrSedesTexto(u) {
   if (u.rol === 'pagos') { const ids = USR.sedesAnalista[u.user_id] || []; return ids.length ? 'Sedes: ' + escAg(AnalistaSedes.resumen(typeof sedes !== 'undefined' ? sedes : [], ids)) : 'sin sedes asignadas: ve todas'; }
-  return u.sede ? escAg((u.marca ? u.marca + ' · ' : '') + u.sede) : 'todas las sedes';
+  const otras = ((USR.sedesTrabajo || {})[u.user_id] || []).filter((id) => id !== u.sede_id);
+  const extra = otras.length ? ' · <b>también:</b> ' + escAg(AnalistaSedes.resumen(typeof sedes !== 'undefined' ? sedes : [], otras)) : '';
+  return (u.sede ? escAg((u.marca ? u.marca + ' · ' : '') + u.sede) : 'todas las sedes') + extra;
 }
 function pintarUsuarios(c, q) {
   if (!can('admin.usuarios')) { c.innerHTML = '<div class="vacio">No tienes permiso para gestionar usuarios.</div>'; return; }
@@ -105,6 +109,7 @@ function usrPintarSede() {
   const sb = $('usr_sedes_box'); if (sb) sb.style.display = analista ? 'block' : 'none';
   const ab = $('usr_avisos_box'); if (ab) ab.style.display = analista ? 'block' : 'none';
   if (analista) usrSedesAviso();
+  const tb = $('usr_trabajo_box'); if (tb) tb.style.display = pf && pf.nivel === 'sede' && USR.trabajoOk ? 'block' : 'none';   // (10/11/2026) varias sedes
   $('usr_sede_ayuda').textContent = pf && pf.nivel === 'sede' ? 'Obligatoria: este usuario solo verá lo de esta sede.' : 'Opcional: los perfiles de administración y pagos ven todas las sedes.';
 }
 function usrSedesAviso() { const ids = AnalistaSedes.marcadas(typeof sedes !== 'undefined' ? sedes : [], 'usr_sd', (i) => { const e = $(i); return !!(e && e.checked); }); const a = $('usr_sedes_aviso'); if (a) a.textContent = AnalistaSedes.aviso(ids); }
@@ -119,6 +124,7 @@ function usrAbrir(id) {
   $('usr_sede').value = u && u.sede_id ? u.sede_id : '';
   $('usr_avisos').value = u ? (USR.avisos[u.user_id] || '') : '';
   $('usr_sedes_lista').innerHTML = AnalistaSedes.casillas(typeof sedes !== 'undefined' ? sedes : [], u ? (USR.sedesAnalista[u.user_id] || []) : [], 'usr_sd');
+  if ($('usr_trabajo_lista')) $('usr_trabajo_lista').innerHTML = AnalistaSedes.casillas(typeof sedes !== 'undefined' ? sedes : [], u ? ((USR.sedesTrabajo || {})[u.user_id] || []) : [], 'usr_st');
   $('usr_clave_box').style.display = nuevo ? 'block' : 'none'; if (nuevo) $('usr_clave').value = UsuariosLib.generarClave(usrRng());
   $('usr_activo_box').style.display = (!nuevo && u.user_id !== (usuario && usuario.id)) ? 'block' : 'none'; $('usr_activo').checked = u ? !!u.activo : true;
   usrMsg('usr_err', ''); usrPintarSede(); $('modalUsuario').classList.add('on');
@@ -141,6 +147,17 @@ async function usrGuardar() {
     if (uid && AnalistaSedes.cambio(nuevo ? [] : (USR.sedesAnalista[uid] || []), marc)) {
       const g = await SB.rpc('analista_sedes_guardar', { p_user: uid, p_sedes: marc });
       if (g.error) throw new Error('El usuario se guardó, pero no sus sedes: ' + UsuariosLib.mensajeError(g.error.message));
+    }
+    // (10/11/2026) otras sedes donde trabaja un usuario de sede (la suya se agrega sola en la base); si deja de ser de sede, se limpian
+    if (uid && USR.trabajoOk) {
+      const antesT = nuevo ? [] : ((USR.sedesTrabajo || {})[uid] || []);
+      let marcT = pf && pf.nivel === 'sede' ? AnalistaSedes.marcadas(typeof sedes !== 'undefined' ? sedes : [], 'usr_st', (i) => { const e = $(i); return !!(e && e.checked); }) : [];
+      if (marcT.length && sedeId && !marcT.includes(sedeId)) marcT = marcT.concat(sedeId);
+      if (marcT.length < 2) marcT = [];
+      if (AnalistaSedes.cambio(antesT, marcT)) {
+        const g3 = await SB.rpc('sedes_trabajo_guardar', { p_user: uid, p_sedes: marcT });
+        if (g3.error) throw new Error('El usuario se guardó, pero no sus otras sedes: ' + UsuariosLib.mensajeError(g3.error.message));
+      }
     }
     // correo de avisos del agente (siempre con copia a compras)
     if (uid && (av.texto || '') !== (nuevo ? '' : (USR.avisos[uid] || ''))) {
