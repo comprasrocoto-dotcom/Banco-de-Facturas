@@ -520,7 +520,22 @@ async function sesion(u){
   $("mar").innerHTML='<option value="">— elige la marca —</option>'+(ms||[]).filter(m=>!marcaIdsAg||marcaIdsAg.has(m.id)).map(m=>`<option value="${m.id}">${m.nombre}</option>`).join("");
   const sv=s||sedeFija;
   $("sede").textContent=(sv?sv.nombre:"—")+(sv&&sv.marcas?" · "+sv.marcas.nombre:"");
+  if(perfil.rol==="sede") await pintarCambioSede();   // (10/11/2026) usuario de sede que trabaja en varias sedes (ej. Planta)
   await cargar();
+}
+// (10/11/2026, pedido del usuario: «que planta pueda hacer pedido ... tanto de Planta de Rocoto como de 123 wok»)
+// Un usuario de sede con varias sedes asignadas (Admin → Usuarios) elige arriba en cual esta trabajando. La base solo lo deja
+// cambiar a una de SUS sedes (cambiar_mi_sede) y todo lo demas sigue igual que siempre, ahora con la sede elegida.
+async function pintarCambioSede(){
+  let l=[]; try{ const r=await SB.rpc("mis_sedes_trabajo"); l=r.error?[]:(r.data||[]); }catch(e){ l=[]; }   // si la funcion no existe: como antes
+  if(l.length<2) return;
+  $("sede").innerHTML=`<select id="selMiSede" style="width:auto;margin:0;padding:2px 6px;font:inherit" title="Trabajas en varias sedes: elige en cuál vas a trabajar ahora" onchange="cambiarMiSede(this.value)">${l.map(x=>`<option value="${Number(x.id)}"${Number(x.id)===Number(perfil.sede_id)?" selected":""}>${escAg(x.nombre)}${x.marca?" · "+escAg(x.marca):""}</option>`).join("")}</select>`;
+}
+async function cambiarMiSede(v){
+  const el=$("selMiSede"); if(el) el.disabled=true;
+  const r=await SB.rpc("cambiar_mi_sede",{p_sede:Number(v)});
+  if(r.error){ alert("No se pudo cambiar de sede: "+r.error.message); if(el){ el.value=String(perfil.sede_id); el.disabled=false; } return; }
+  location.reload();   // se carga todo de nuevo con la sede elegida
 }
 async function entrar(){
   $("lerr").textContent="";
@@ -4357,6 +4372,8 @@ async function guardarNov(){
   <label class="mut">Correo (con el que ingresa)</label><input id="usr_email" type="email" placeholder="correo@ejemplo.com" autocomplete="off">
   <label class="mut">Perfil</label><select id="usr_perfil" onchange="usrPintarSede()"></select>
   <div id="usr_sede_box" style="display:none"><label class="mut">Sede</label><select id="usr_sede"></select><div class="mut" id="usr_sede_ayuda"></div></div>
+  <div id="usr_trabajo_box" style="display:none;margin-top:6px"><label class="mut">¿Trabaja también en otras sedes? Márcalas (la sede de arriba se incluye sola). Arriba en la web elegirá en cuál está trabajando para hacer pedidos.</label>
+    <div id="usr_trabajo_lista" style="border:1px solid var(--line);border-radius:9px;padding:6px 10px;max-height:200px;overflow:auto"></div></div>
   <div id="usr_sedes_box" style="display:none"><label class="mut">Sedes asignadas (el analista solo trabaja con estas sedes y con las facturas que todavía no tienen sede)</label>
     <div id="usr_sedes_lista" onchange="usrSedesAviso()" style="border:1px solid var(--line);border-radius:9px;padding:6px 10px;max-height:240px;overflow:auto"></div><div class="mut" id="usr_sedes_aviso"></div></div>
   <div id="usr_avisos_box" style="display:none;margin-top:8px"><label class="mut">Correo para los avisos del agente (opcional, hasta 3 separados por coma)</label>
