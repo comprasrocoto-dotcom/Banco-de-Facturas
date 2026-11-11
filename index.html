@@ -2974,19 +2974,30 @@ async function cargarOrdenes(){
   } else { ordEstadoPrev=e; }
 }
 // refresco liviano del estado del bot (cada 8s: el progreso se ve casi en vivo)
-setInterval(()=>{ if(typeof usuario!=="undefined" && usuario) cargarOrdenes().catch(()=>{}); }, 8000);
+// (11/11/2026) la base (servidor NANO) se quedo sin memoria con muchas pestañas abiertas: cada pestaña, aunque nadie la mirara,
+// consultaba cada 8 s y recargaba TODAS las facturas cada 60 s; si la base iba lenta, las consultas se montaban unas sobre otras.
+// Ahora: una pestaña que no se esta viendo NO consulta, nunca se lanza un refresco si el anterior no ha terminado,
+// y al volver a la pestaña se refresca enseguida si ya paso el tiempo.
+let refOrdOcupado=false, refTodoOcupado=false, refTodoUlt=Date.now();
+function refrescoOrdenes(){
+  if(typeof usuario==="undefined" || !usuario || document.hidden || refOrdOcupado) return;
+  refOrdOcupado=true; cargarOrdenes().catch(()=>{}).finally(()=>{ refOrdOcupado=false; });
+}
+function refrescoTodo(){
+  if(typeof usuario==="undefined" || !usuario || document.hidden || refTodoOcupado) return;
+  if(document.querySelector('.modal.on')) return;   // no interrumpir un modal abierto
+  refTodoOcupado=true; refTodoUlt=Date.now();
+  Promise.all([cargar().catch(()=>{}), (typeof pedidosCargados!=="undefined" && pedidosCargados) ? cargarPedidos().catch(()=>{}) : null]).finally(()=>{ refTodoOcupado=false; });
+}
+setInterval(refrescoOrdenes, 8000);
+document.addEventListener("visibilitychange",()=>{ if(document.hidden) return; refrescoOrdenes(); if(Date.now()-refTodoUlt>60000) refrescoTodo(); });
 // (04/10/2026) Facturas/pedidos NO tenian ningun refresco automatico: una pestaña abierta mucho
 // tiempo sin que nadie haga una accion se quedaba mostrando datos viejos hasta F5 (pedido del
 // usuario: dos PCs podian "ver cosas distintas" solo por esto, no por un problema de permisos).
 // Cada 60s, solo si no hay un modal de edicion abierto (para no interrumpir a alguien a mitad de
 // escribir), se vuelve a consultar fresco - mismo patron que cargarOrdenes(), mas espaciado porque
 // facturas/pedidos son listas mas pesadas.
-setInterval(()=>{
-  if(typeof usuario==="undefined" || !usuario) return;
-  if(document.querySelector('.modal.on')) return;   // no interrumpir un modal abierto
-  cargar().catch(()=>{});
-  if(typeof pedidosCargados!=="undefined" && pedidosCargados) cargarPedidos().catch(()=>{});
-}, 60000);
+setInterval(refrescoTodo, 60000);   // (11/11/2026) ver refrescoTodo(): sin pestañas ocultas ni consultas encimadas
 // (26/09/2026) COLA DE INGRESOS: documentos en ERROR / pendientes de reintento (tabla ingreso_documento), con su etapa y el motivo. Los COMPLETADOS no se vuelven a procesar.
 let ingresoDocs=[];
 let novedadSede="";   // (25/10/2026) filtro por sede de «Documentos con novedad» ('' = todas)
