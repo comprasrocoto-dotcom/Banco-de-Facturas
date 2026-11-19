@@ -126,7 +126,9 @@
     const docs = []; const vistos = new Set(); let repetidos = 0, descartadas = 0;
     for (let r = hi + 1; r < rows.length; r++) {
       const c = rows[r] || [];
-      const sn = v(c, col.serie).match(/^\*?\s*([A-Za-z]+)\s*\/\s*(\d+)\s*$/);
+      // (19/11/2026) el reporte de 123 wok trae series con punto: «FC.COCINA / 6503», «FC.BAR / 2215», «A.COCINA / 12»; antes solo
+      // se aceptaban letras («FCRC / 3423») y ese reporte salia «No encontre ningún documento». La causacion queda sin el punto (FCCOCINA6503).
+      const sn = v(c, col.serie).match(/^\*?\s*([A-Za-z][A-Za-z0-9._-]*?)\s*\/\s*(\d+)\s*$/);
       if (!sn) { descartadas++; continue; }          // fila de totales u otra cosa
       const causacion = causacionDe(sn[1], sn[2]);
       if (vistos.has(causacion)) { repetidos++; continue; }
