@@ -59,18 +59,28 @@
     // (25/10/2026) pedido del usuario: filtrar por sede (opciones.filtroSede = texto «marca · sede» elegido; '' = todas)
     const sedeDe = (d) => (typeof opciones.sedeDe === 'function' ? opciones.sedeDe(d) : '') || 'Sin sede';
     const conteo = new Map(); todos.forEach((d) => conteo.set(sedeDe(d), (conteo.get(sedeDe(d)) || 0) + 1));
-    const filtro = opciones.filtroSede && conteo.has(opciones.filtroSede) ? opciones.filtroSede : '';
-    const porSede = filtro ? todos.filter((d) => sedeDe(d) === filtro) : todos;
+    // (24/11/2026, pedido del usuario: «dame la opcion de seleccionar varias sedes») filtroSede puede ser una LISTA de sedes
+    const elegidas = (Array.isArray(opciones.filtroSede) ? opciones.filtroSede : opciones.filtroSede ? [opciones.filtroSede] : []).filter((k) => conteo.has(k));
+    const filtro = elegidas.length ? elegidas.join(' + ') : '';
+    const porSede = elegidas.length ? todos.filter((d) => elegidas.includes(sedeDe(d))) : todos;
     // (09/11/2026, pedido del usuario: «crea un buscador aca») busca en pedido, sede, proveedor, factura, estado y el error.
     // Todas las palabras escritas deben aparecer (sin importar tildes ni mayusculas).
     const busca = String(opciones.buscar || '').trim();
     const l = busca ? porSede.filter((d) => coincide(textoDoc(d, sedeDe(d), opciones.textoDe), busca)) : porSede;
+    const resumenSedes = !elegidas.length ? `Todas (${todos.length})` : elegidas.length === 1 ? `${elegidas[0]} (${porSede.length})` : `${elegidas.length} sedes (${porSede.length})`;
     const selector = conteo.size > 1 || filtro ? `<div class="row" style="margin:6px 0;gap:6px;align-items:center"><span class="mut">Sede:</span>
-      <select style="width:auto;margin:0" onchange="filtrarNovedadSede(this.value)"><option value="">Todas (${todos.length})</option>${[...conteo.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([k, n]) => `<option value="${esc(k)}"${k === filtro ? ' selected' : ''}>${esc(k)} (${n})</option>`).join('')}</select></div>` : '';
+      <details id="novSedesBox" style="position:relative"${opciones.sedesAbierto ? ' open' : ''}><summary style="cursor:pointer;border:1px solid var(--line);border-radius:9px;padding:6px 12px;list-style:none;user-select:none">${esc(resumenSedes)} ▾</summary>
+      <div style="position:absolute;z-index:20;background:var(--card,#fff);border:1px solid var(--line);border-radius:9px;padding:6px 10px;margin-top:4px;min-width:280px;max-height:320px;overflow:auto;box-shadow:0 6px 18px rgba(0,0,0,.12)">
+        <label style="display:flex;gap:8px;align-items:center;padding:3px 0;font-weight:700"><input type="checkbox"${elegidas.length ? '' : ' checked'} onchange="filtrarNovedadSede('')"> Todas (${todos.length})</label>
+        ${[...conteo.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([k, n]) => `<label style="display:flex;gap:8px;align-items:center;padding:3px 0"><input type="checkbox" data-sede="${esc(k)}"${elegidas.includes(k) ? ' checked' : ''} onchange="marcarNovedadSede(this.dataset.sede,this.checked)"> ${esc(k)} (${n})</label>`).join('')}
+      </div></details></div>` : '';
     const idsFiltro = filtro || busca ? '[' + l.map((d) => Number(d.pedido_id)).filter(Boolean).join(',') + ']' : 'null';
     const errores = l.filter((d) => d.estado === 'ERROR');
     // (05/10/2026) "Quitar"/"Limpiar" = sacar de la cola (estado DESCARTADO, RPC ingreso_descartar): el agente deja de reintentarlo.
-    const quitar = (d) => (opciones.puede && Number(d.pedido_id) && !reintentando(d) ? `<button class="d" style="padding:3px 10px;font-size:12px" title="Sacar de la cola: el agente no lo vuelve a intentar" onclick="descartarIngreso([${Number(d.pedido_id)}])">✕ Quitar</button>` : '');
+    // (24/11/2026, pedido del usuario: «no me deja borrar ... lo ingrese manual») tambien se puede quitar uno que el agente tiene TOMADO
+    // («REINTENTANDO»), salvo el que esta trabajando en este momento (opciones.actual = numero del pedido actual de la corrida)
+    const enCurso = (d) => reintentando(d) && opciones.actual && String(d.numero || '') === String(opciones.actual);
+    const quitar = (d) => (opciones.puede && Number(d.pedido_id) && !enCurso(d) ? `<button class="d" style="padding:3px 10px;font-size:12px" title="Sacar de la cola: el agente no lo vuelve a intentar${reintentando(d) ? ' (el agente lo tenía tomado en la corrida actual)' : ''}" onclick="descartarIngreso([${Number(d.pedido_id)}])">✕ Quitar</button>` : (enCurso(d) ? '<span class="mut" style="font-size:12px">el agente lo está trabajando ahora</span>' : ''));
     // (25/10/2026) pedido del usuario: cada uno se puede lanzar SOLO (🤖 Lanzar este) y se ve de que sede es (opciones.sedeDe(d) -> texto)
     const lanzar = (d) => (opciones.puede && Number(d.pedido_id) && !reintentando(d) ? `<button class="s" style="padding:3px 10px;font-size:12px;background:#1e3a8a;border-color:#1e3a8a;color:#fff" title="Pide una orden de ingreso al ERP solo para este pedido" onclick="ingresarSoloPedido(${Number(d.pedido_id)})">🤖 Lanzar este</button>` : '');
     const sedeTxt = (d) => { const t = typeof opciones.sedeDe === 'function' ? opciones.sedeDe(d) : ''; return t ? ` · <span class="badge" style="background:#e0e7ff;color:#1e3a8a">${esc(t)}</span>` : ''; };
@@ -79,7 +89,7 @@
       ${d.error_etapa ? ' · ' + esc(d.error_etapa) : ''}<div class="mut">${esc(d.etapa || '')}${d.error ? ' — ' + esc(d.error) : ''}</div></div><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${lanzar(d)}${quitar(d)}</div></div>`).join('');
     const botones = [
       busca && opciones.puede && l.length ? `<button class="p" onclick="reintentarErroresIngreso(${idsFiltro})" title="Lanza solo los que muestra la busqueda (los que tienen error vuelven a la cola)">🔁 LANZAR ESTOS (${l.length})</button>`
-        : filtro && opciones.puede ? `<button class="p" onclick="reintentarErroresIngreso(${idsFiltro})" title="Lanza solo los de esta sede (los que tienen error vuelven a la cola)">🔁 LANZAR ESTA SEDE (${l.length})</button>`
+        : filtro && opciones.puede ? `<button class="p" onclick="reintentarErroresIngreso(${idsFiltro})" title="Lanza solo los de esta sede (los que tienen error vuelven a la cola)">🔁 ${elegidas.length > 1 ? 'LANZAR ESTAS SEDES' : 'LANZAR ESTA SEDE'} (${l.length})</button>`
         : errores.length && opciones.puede ? `<button class="p" onclick="reintentarErroresIngreso()">🔁 REINTENTAR ERRORES (${errores.length})</button>` : '',
       opciones.puede && opciones.admin ? `<button onclick="descartarIngreso(${idsFiltro})" title="Solo administrador: sacar de la cola TODOS los de esta lista (el agente deja de intentarlos)">🧹 LIMPIAR VENTANA (${l.length})</button>` : '',
     ].filter(Boolean).join(' ');
